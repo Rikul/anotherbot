@@ -1,18 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
-from .. import config
-from .tool_calls import run_tool, all_tool_specs
+from .tool_calls import all_tool_specs
 from ..infra.app_logging import log
 from ..channels.channel import Channel
 from ..channels.message import OutgoingMessage
 from ..channels.message_queue import MessageQueue
 from .agent import Agent, MAX_CONTEXT_MESSAGES
 from ..infra.startup import load_system_context
-
 from ..infra.message_history import MessageHistory
+
+_MAX_EMPTY_RETRIES = 5
+
 
 class BackgroundAgent(Agent):
 
@@ -26,6 +26,35 @@ class BackgroundAgent(Agent):
 
         self.history = MessageHistory(channel_type=channel.channel_type.value)
         self.messages.extend(self.history.get_history(limit=MAX_CONTEXT_MESSAGES))
+        self._reply_metadata: dict = {}
+        self._empty_retries: int = 0
+
+    async def _on_thinking(self, content: str | None) -> None:
+        if self.mq and content:
+            text = content.strip().rstrip(":").strip()
+            if text:
+                await self.mq.outgoing_msg(OutgoingMessage(content=text, channel=self.channel, metadata=self._reply_metadata))
+
+    async def _on_tool_start(self, tool_name: str, tool_args: dict) -> None:
+        if self.mq:
+            first_arg = str(next(iter(tool_args.values()), ""))[:50] if tool_args else ""
+            status = f"running {tool_name} [{first_arg}]..."
+            await self.mq.outgoing_msg(OutgoingMessage(content=status, channel=self.channel, metadata=self._reply_metadata))
+
+    async def _on_response(self, content: str | None) -> None:
+        if self.mq and content and content.strip():
+            await self.mq.outgoing_msg(OutgoingMessage(content=content.strip(), channel=self.channel, metadata=self._reply_metadata))
+
+    async def _on_no_choices(self) -> None:
+        self._empty_retries += 1
+        if self._empty_retries > _MAX_EMPTY_RETRIES:
+            raise RuntimeError(f"No choices in API response after {_MAX_EMPTY_RETRIES} retries")
+        wait = min(2 ** self._empty_retries, 60)
+        log.warning(f"No choices in API response, retrying in {wait}s (attempt {self._empty_retries}/{_MAX_EMPTY_RETRIES})")
+        await asyncio.sleep(wait)
+
+    def _should_stop(self) -> bool:
+        return self.channel.has_stopped
 
     async def process_incoming(self) -> None:
         log.info("BackgroundAgent started processing incoming messages...")
@@ -36,95 +65,23 @@ class BackgroundAgent(Agent):
             except Exception as e:
                 log.error(f"Agent loop error: {e}")
 
-    async def agent_loop(self, message: str, metadata: dict = None) -> None:
+    async def agent_loop(self, message: str, metadata: dict = None) -> str:
         self._trim_messages()
-
+        self._empty_retries = 0
+        self._reply_metadata = metadata or {}
         self.history.add_message("user", message)
 
         system_context = load_system_context()
         system = [{"role": "system", "content": system_context}] if system_context else []
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
-        self._reply_metadata = metadata or {}
-        iteration = 0
-        empty_retries = 0
-        assistant_message = None
-        MAX_RETRIES = 5
 
-        while iteration < self.max_iterations:
-            iteration += 1
+        final_content = await self._loop(session_messages, all_tool_specs)
 
-            log.info("chat.completions.create...")
-            chat = await self.client.chat.completions.create(
-                model=config.get("model", "deepseek/deepseek-v3.2"),
-                messages=session_messages,
-                tools=all_tool_specs
-            )
-
-            if not chat.choices or len(chat.choices) == 0:
-                empty_retries += 1
-                if empty_retries > MAX_RETRIES:
-                    raise RuntimeError(f"No choices in API response after {MAX_RETRIES} retries")
-                wait = min(2 ** empty_retries, 60)
-                log.warning(f"No choices in API response, retrying in {wait}s (attempt {empty_retries}/{MAX_RETRIES})")
-                await asyncio.sleep(wait)
-                continue
-
-            empty_retries = 0
-
-            choice = chat.choices[0]
-            assistant_message = choice.message
-            finish_reason = getattr(choice, "finish_reason", None)
-            if not isinstance(finish_reason, str):
-                finish_reason = None
-
-            if assistant_message.tool_calls is not None:
-                session_messages.append(self._serialize_assistant_msg(assistant_message))
-
-                llm_text = assistant_message.content.strip().rstrip(":").strip() if assistant_message.content else ""
-
-                for tool_call in assistant_message.tool_calls:
-                    try:
-                        tool_name = tool_call.function.name
-                        tool_args = json.loads(tool_call.function.arguments)
-                        first_arg = str(next(iter(tool_args.values()), ""))[:50] if tool_args else ""
-                        tool_status = f"running {tool_name} [{first_arg}]..."
-                        status_msg = f"{llm_text}: {tool_status}" if llm_text else tool_status
-                        llm_text = ""  # only prepend on first tool call
-                        if self.mq:
-                            await self.mq.outgoing_msg(OutgoingMessage(content=status_msg, channel=self.channel, metadata=self._reply_metadata))
-                        result = run_tool(tool_name=tool_name, tool_args=tool_args)
-
-                    except Exception as e:
-                        result = f"Error running tool {tool_name}: {str(e)}"
-                        log.error(result)
-
-                    
-                    session_messages.append({
-                            "role": "tool", 
-                            "tool_call_id": tool_call.id, 
-                            "name": tool_name, 
-                            "content": result
-                    })
-
-                    log.info(f"{result[:250]}...")
-
-            else:
-                if assistant_message.content is not None and assistant_message.content.strip() != "":
-                    if self.mq:
-                        await self.mq.outgoing_msg(OutgoingMessage(content=assistant_message.content.strip(), channel=self.channel, metadata=self._reply_metadata))
-                
-                if finish_reason == "stop":
-                    session_messages.append(self._serialize_assistant_msg(assistant_message))
-                    break
-            
-            if self.channel.has_stopped:
-                log.info("Channel has been stopped, breaking out of agent loop.")
-                break
-        
         self.channel.clear_stopped()
 
-        if len(session_messages) >= 2 and assistant_message is not None:
+        if len(session_messages) >= 2 and final_content is not None:
             self.messages.append({"role": "user", "content": message})
             self.messages.append(session_messages[-1])
-            assistant_content = assistant_message.content.strip() if assistant_message.content else ""
-            self.history.add_message("assistant", assistant_content)
+            self.history.add_message("assistant", final_content)
+
+        return final_content

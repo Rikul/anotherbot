@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -137,7 +138,7 @@ async def test_agent_loop_respects_max_iterations():
     mock_response.choices = [mock_choice]
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    with patch("app.core.background_agent.run_tool", return_value="hi\n"):
+    with patch("app.core.tool_calls.run_tool", return_value="hi\n"):
         await agent.agent_loop("run forever")
 
     assert mock_client.chat.completions.create.call_count == 3
@@ -172,7 +173,7 @@ async def test_agent_loop_runs_tool_and_sends_final_reply():
 
     mock_client.chat.completions.create = AsyncMock(side_effect=[response_with_tool, response_plain])
 
-    with patch("app.core.background_agent.run_tool", return_value="hi\n") as mock_run_tool:
+    with patch("app.core.tool_calls.run_tool", return_value="hi\n") as mock_run_tool:
         await agent.agent_loop("say hi", metadata={"chat_id": 42})
 
     mock_run_tool.assert_called_once_with(tool_name="bash", tool_args={"command": "echo hi"})
@@ -212,7 +213,7 @@ async def test_agent_loop_sends_inline_content_with_tool_calls():
 
     mock_client.chat.completions.create = AsyncMock(side_effect=[response_with_tool, response_plain])
 
-    with patch("app.core.background_agent.run_tool", return_value="hi\n"):
+    with patch("app.core.tool_calls.run_tool", return_value="hi\n"):
         await agent.agent_loop("run something")
 
     messages = []
@@ -263,3 +264,44 @@ async def test_process_incoming_dispatches_to_agent_loop():
         pass
 
     assert any(m.get("role") == "user" and m.get("content") == "hello from telegram" for m in agent.messages)
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
+    agent, mock_client, mq = make_agent()
+
+    tc1, tc2 = MagicMock(), MagicMock()
+    tc1.function.name = "bash"
+    tc1.function.arguments = '{"command": "echo 1"}'
+    tc1.id = "tc1"
+    tc2.function.name = "bash"
+    tc2.function.arguments = '{"command": "echo 2"}'
+    tc2.id = "tc2"
+
+    msg_with_tools = MagicMock()
+    msg_with_tools.tool_calls = [tc1, tc2]
+    msg_with_tools.content = None
+    choice_with_tools = MagicMock()
+    choice_with_tools.message = msg_with_tools
+    choice_with_tools.finish_reason = "tool_calls"
+    response_with_tools = MagicMock()
+    response_with_tools.choices = [choice_with_tools]
+
+    msg_final = MagicMock()
+    msg_final.tool_calls = None
+    msg_final.content = "done"
+    msg_final.model_dump.return_value = {"role": "assistant", "content": "done"}
+    choice_final = MagicMock()
+    choice_final.message = msg_final
+    choice_final.finish_reason = "stop"
+    response_final = MagicMock()
+    response_final.choices = [choice_final]
+
+    mock_client.chat.completions.create = AsyncMock(side_effect=[response_with_tools, response_final])
+
+    with patch("app.core.tool_calls.run_tool", return_value="result"):
+        with patch("app.core.agent.asyncio.gather", wraps=asyncio.gather) as mock_gather:
+            await agent.agent_loop("run two tools")
+
+    mock_gather.assert_called_once()
+    assert len(mock_gather.call_args[0]) == 2
