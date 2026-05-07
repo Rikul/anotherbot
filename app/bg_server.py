@@ -30,6 +30,7 @@ async def start_server() -> None:
         from .channels.telegram import TelegramChannel
         telegram_channel = TelegramChannel(mq, bot_token=bot_token, allow_from=config.telegram.get("ALLOW_FROM", []))
 
+
     if not telegram_channel:
         log.error("No channels configured, exiting...")
         return

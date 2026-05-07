@@ -6,7 +6,8 @@ from .. import config
 from .client import Client
 from ..infra.app_logging import log
 
-MAX_CONTEXT_MESSAGES = 100
+MAX_CONTEXT_MESSAGES = 250
+TOOL_RESULT_HISTORY_LIMIT = 200
 
 
 class Agent(ABC):
@@ -15,6 +16,20 @@ class Agent(ABC):
         self.client = Client().get_client()
         self.messages: list[dict] = []
         self.max_iterations = max_iterations
+
+    @staticmethod
+    def _compress_turn(session_messages: list, turn_start: int) -> list:
+        """Return turn messages with tool results truncated for history storage."""
+        result = []
+        for msg in session_messages[turn_start:]:
+            if msg.get("role") == "tool":
+                content = msg.get("content", "")
+                if len(content) > TOOL_RESULT_HISTORY_LIMIT:
+                    content = content[:TOOL_RESULT_HISTORY_LIMIT] + "...[truncated]"
+                result.append({**msg, "content": content})
+            else:
+                result.append(msg)
+        return result
 
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
