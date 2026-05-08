@@ -6,8 +6,8 @@ from .. import config
 from .client import Client
 from ..infra.app_logging import log
 
-MAX_CONTEXT_MESSAGES = 250
-TOOL_RESULT_HISTORY_LIMIT = 200
+MAX_CONTEXT_MESSAGES = 1000
+TOOL_RESULT_HISTORY_LIMIT = 100
 
 
 class Agent(ABC):
