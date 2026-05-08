@@ -20,6 +20,9 @@ from ..tools.web_search import WebSearchBooks
 from ..tools.sched_tasks_tool import ListScheduledTasks, AddScheduledTask, UpdateScheduledTask, \
                         RemoveScheduledTask, GetScheduledTaskOutput
 
+from ..tools.get_city_state import GetCityState
+from ..tools.get_datetime import GetDateTime
+
 import json
 
 tool_registry = {
@@ -47,13 +50,17 @@ tool_registry = {
     "add_scheduled_task": AddScheduledTask,
     "update_scheduled_task": UpdateScheduledTask,
     "remove_scheduled_task": RemoveScheduledTask,
-    "get_scheduled_task_output": GetScheduledTaskOutput
+    "get_scheduled_task_output": GetScheduledTaskOutput,
+
+    "get_city_state": GetCityState,
+    "get_datetime": GetDateTime
 }
 
 all_tool_specs = [tool.spec() for tool in tool_registry.values()]
-
 _HELPER_AGENT_TOOLS = {"read_file", "write_file", "bash", "web_fetch", "get_skills_dir", "calculator", "hackernews",
-                        "websearch_text", "websearch_images", "websearch_videos", "websearch_news", "websearch_books"}
+                        "websearch_text", "websearch_images", "websearch_videos", "websearch_news", "websearch_books",
+                        "get_city_state", "get_datetime", "list_scheduled_tasks", "get_scheduled_task_output"}
+
 helper_tool_specs = [tool.spec() for k, tool in tool_registry.items() if k in _HELPER_AGENT_TOOLS]
 
 MAX_TOOL_RESULT_LENGTH = 16000
