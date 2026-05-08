@@ -108,6 +108,30 @@ remove the HN task
 
 Tasks persist in `~/.crafterscode/app.db` (shared with message history) and survive restarts.
 
+## Docker
+
+```bash
+docker build -t anotherbot .
+
+docker run -d \
+  -e LLM_API_KEY=sk-... \
+  -e TELEGRAM_BOT_TOKEN=123:abc... \
+  -e TELEGRAM_ALLOW_FROM=123456789 \
+  -v anotherbot-data:/data \
+  anotherbot
+```
+
+| Env var | Required | Description |
+|---|---|---|
+| `LLM_API_KEY` | yes | OpenRouter / OpenAI-compatible API key |
+| `TELEGRAM_BOT_TOKEN` | yes | Telegram bot token from @BotFather |
+| `TELEGRAM_ALLOW_FROM` | yes | Comma-separated Telegram user IDs allowed to message the bot |
+| `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
+| `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
+| `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
+
+The `/data` volume persists the SQLite database and workspace across restarts. To supply a `config.toml` instead of env vars, mount it at `/data/config.toml` — env vars always take precedence over the file.
+
 ## Roadmap
 
 - **Email Support**: IMAP/SMTP integration for reading and sending emails, attachment handling, and mailbox management

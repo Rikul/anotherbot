@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+tests/
+*.md
+run.bat
+.claude/

@@ -40,19 +40,32 @@ Config lives at `~/.crafterscode/config.toml` (created automatically on first ru
 - `max_iterations` — max agentic loop iterations (default: `100`)
 - `base_url` — API base URL (default: `"https://openrouter.ai/api/v1"`)
 
-Environment variables: `LLM_API_KEY` (required), `LLM_BASE_URL` (optional override).
+Environment variables (all override config file values):
+- `LLM_API_KEY` — required
+- `LLM_BASE_URL` — optional API base URL override
+- `MODEL` — optional model override
+- `TELEGRAM_BOT_TOKEN` — Telegram bot token (alternative to config file)
+- `TELEGRAM_ALLOW_FROM` — comma-separated Telegram user IDs (e.g. `"123,456"`)
+- `ANOTHERBOT_HOME` — overrides the data directory (default: `~/.crafterscode`)
+
+For Docker, no config file is needed — pass everything as env vars. See `Dockerfile` and the Docker section in README.
 
 ## Architecture
 
 ### Agent Loop
 
-Both `CliAgent` (`app/cli_agent.py`) and `BackgroundAgent` (`app/background_agent.py`) share the same agentic loop pattern:
-1. Append user message to `self.messages`
-2. Call `chat.completions.create` with tool specs
-3. If response has `tool_calls`: optionally ask permission, run each tool via `run_tool()`, append tool results, loop again
-4. If response has no tool calls: print/send content, break if `finish_reason == "stop"`
+The shared loop lives in `Agent._loop()` (`app/core/agent.py`). Subclasses override hooks to specialise behaviour:
 
-The difference: `CliAgent` prints to stdout and prompts stdin for permission; `BackgroundAgent` routes messages through `MessageQueue` + `Channel` for multi-channel delivery (Telegram, Discord, Web, etc.).
+| Hook | CliAgent | BackgroundAgent | HelperAgent |
+|---|---|---|---|
+| `_on_thinking` | print if not silent | send via mq | — |
+| `_check_permission` | ask stdin | — (always allow) | — |
+| `_on_tool_start` | — | send status via mq | — |
+| `_on_response` | print | send via mq | — |
+| `_on_no_choices` | raise | exponential backoff | raise |
+| `_should_stop` | — | `channel.has_stopped` | — |
+
+Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gather`. After each turn, the full message chain (assistant tool-call message + tool results + final response) is saved to `self.messages` with tool results truncated to `TOOL_RESULT_HISTORY_LIMIT` chars to keep context lean. `MessageHistory` (SQLite) stores only user + final assistant text for cross-session persistence.
 
 ### Tool System
 
@@ -64,18 +77,18 @@ Current tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`,
 
 ### System Context
 
-On startup, `load_system_context()` (`app/helpers.py`) loads `app/sys_instructions.md` and prepends it as the system message to `self.messages`.
+On startup, `load_system_context()` (`app/infra/startup.py`) loads `app/core/sys_instructions.md` and prepends it as the system message to `self.messages`.
 
 ### Message Queue / Channel Architecture
 
-`MessageQueue` (`app/message_queue.py`) holds two `asyncio.Queue`s (incoming/outgoing). Delivery functions are registered per `Channel` enum value. `BackgroundAgent.process_incoming()` consumes the incoming queue and drives `agent_loop()`; `process_outgoing()` dispatches outbound messages to registered delivery functions. This is the intended extension point for adding new channels.
+`MessageQueue` (`app/channels/message_queue.py`) holds two `asyncio.Queue`s (incoming/outgoing). `BackgroundAgent.process_incoming()` consumes the incoming queue and drives `agent_loop()`; `process_outgoing()` dispatches outbound messages to registered delivery functions. This is the intended extension point for adding new channels.
 
 Each channel should have its own `MessageQueue` instance to avoid cross-channel message routing bugs (e.g., a Telegram message being handled by the Discord agent).
 
 ### Scheduled Tasks
 
-`ScheduledTasks` (`app/scheduled_tasks.py`) is a SQLite-backed task runner using the shared `APP_DB` (`~/.crafterscode/app.db`). It polls every 60 seconds, checks `next_run`, and executes due tasks via `HelperAgent`. Results are delivered to the configured channel via `MessageQueue`. Schema: `tasks` (id, name, prompt, enabled, repeat, interval_mins, next_run, last_run, delivery_channel, run_count, created_at) and `task_outputs` (id, name, prompt, output, status, duration_secs, timestamp). The `run()` coroutine is added to the `asyncio.gather` in `bg_server.py`.
+`ScheduledTasks` (`app/core/scheduled_tasks.py`) is a SQLite-backed task runner using the shared `APP_DB` (`~/.crafterscode/app.db`, or `$ANOTHERBOT_HOME/app.db`). It polls every 60 seconds, checks `next_run`, and executes due tasks via `HelperAgent`. Results are delivered to the configured channel via `MessageQueue`. Schema: `tasks` (id, name, prompt, enabled, repeat, interval_mins, next_run, last_run, delivery_channel, run_count, created_at) and `task_outputs` (id, name, prompt, output, status, duration_secs, timestamp). The `run()` coroutine is added to the `asyncio.gather` in `bg_server.py`.
 
 ## Testing Approach
 
-Unit tests mock `app.cli_agent.Client` and `app.cli_agent.load_system_context` to isolate the agent loop logic. Integration tests in `tests/integration/` mock only the OpenAI HTTP client and run the full pipeline including `main()`, argparse, and agent construction. Tests use `pytest-asyncio` for async test functions.
+Unit tests mock `app.core.agent.Client` and `load_system_context` to isolate the agent loop logic. `run_tool` is patched at `app.core.tool_calls.run_tool` (where the function lives) since `handle_tool_call` uses a lazy import. Integration tests in `tests/integration/` mock only the OpenAI HTTP client and run the full pipeline including `main()`, argparse, and agent construction. Tests use `pytest-asyncio` for async test functions.

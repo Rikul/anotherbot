@@ -5,9 +5,10 @@ set -e # Exit early if any commands fail
 # Copied from .codecrafters/run.sh
 
 SCRIPT_DIR="$(dirname "$0")"
-PID_FILE="$HOME/.crafterscode/background.pid"
+PID_FILE="${ANOTHERBOT_HOME:-$HOME/.crafterscode}/background.pid"
 
 if [ "$1" = "background" ]; then
+    mkdir -p "$(dirname "$PID_FILE")"
     echo $$ > "$PID_FILE"
 fi
 
