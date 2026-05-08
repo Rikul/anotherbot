@@ -4,7 +4,6 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import app.config as config
 from app.cli.cli_agent import CliAgent as Agent
-from app.infra.message_history import MessageHistory
 
 
 def make_mock_client(tool_calls=None, content="Hello!", finish_reason="stop"):
@@ -31,7 +30,8 @@ def make_agent(auto_approve=True, silent=True, max_iterations=10):
         mock_openai = make_mock_client()
         MockClient.return_value.get_client.return_value = mock_openai
         with patch("app.cli.cli_agent.load_system_context", return_value="You are a helpful assistant."):
-            with patch.object(MessageHistory, "get_history", return_value=[]):
+            with patch("app.cli.cli_agent.MessageHistory") as MockHistory:
+                MockHistory.return_value.get_history.return_value = []
                 agent = Agent(
                     auto_approve=auto_approve, silent=silent, max_iterations=max_iterations
                 )
@@ -90,7 +90,8 @@ async def test_agent_loop_respects_max_iterations():
         mock_client = MagicMock()
         MockClient.return_value.get_client.return_value = mock_client
         with patch("app.cli.cli_agent.load_system_context", return_value="You are a helpful assistant."):
-            with patch.object(MessageHistory, "get_history", return_value=[]):
+            with patch("app.cli.cli_agent.MessageHistory") as MockHistory:
+                MockHistory.return_value.get_history.return_value = []
                 agent = Agent(auto_approve=True, silent=True, max_iterations=3)
     agent.client = mock_client
 
@@ -125,7 +126,8 @@ async def test_agent_loop_runs_tool_when_auto_approve():
         mock_client = MagicMock()
         MockClient.return_value.get_client.return_value = mock_client
         with patch("app.cli.cli_agent.load_system_context", return_value="You are a helpful assistant."):
-            with patch.object(MessageHistory, "get_history", return_value=[]):
+            with patch("app.cli.cli_agent.MessageHistory") as MockHistory:
+                MockHistory.return_value.get_history.return_value = []
                 agent = Agent(auto_approve=True, silent=True, max_iterations=10)
     agent.client = mock_client
 
@@ -174,7 +176,8 @@ async def test_agent_loop_continues_when_finish_reason_not_stop():
         mock_client = MagicMock()
         MockClient.return_value.get_client.return_value = mock_client
         with patch("app.cli.cli_agent.load_system_context", return_value="You are a helpful assistant."):
-            with patch.object(MessageHistory, "get_history", return_value=[]):
+            with patch("app.cli.cli_agent.MessageHistory") as MockHistory:
+                MockHistory.return_value.get_history.return_value = []
                 agent = Agent(auto_approve=True, silent=True, max_iterations=10)
     agent.client = mock_client
 
