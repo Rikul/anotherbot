@@ -23,9 +23,8 @@ def load_system_context() -> str:
     system_context += f"""
 
 ## System Context
-- datetime:   {now.strftime("%Y-%m-%d %H:%M:%S")}
+- datetime:   {now.strftime("%Y-%m-%d %H:%M:%S")} {now.astimezone().tzname()}
 - day of week: {now.strftime("%A")}
-- timezone:   {now.astimezone().tzname()}
 - os:         {platform.system()} {platform.release()}
 - shell:      {os.environ.get("SHELL", "unknown")}
 - cwd:        {Path.cwd()}
