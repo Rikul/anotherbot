@@ -8,10 +8,10 @@ from app.channels.message import OutgoingMessage
 from app.channels.message_queue import MessageQueue
 
 
-def make_discord_channel():
+def make_discord_channel(allow_from=None):
     mq = MessageQueue()
     with patch.object(discord.Client, "__init__", return_value=None):
-        dc = DiscordChannel(mq=mq, token="test-token")
+        dc = DiscordChannel(mq=mq, token="test-token", allow_from=allow_from)
     # discord.Client.user is a read-only property returning self._connection.user
     dc._connection = MagicMock()
     dc._connection.user.id = 999
@@ -89,6 +89,47 @@ async def test_on_message_ignores_whitespace_only():
     await dc.on_message(message)
 
     assert mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_on_message_rejects_unauthorized_user():
+    dc, mq = make_discord_channel(allow_from=[111, 222])
+    message = MagicMock()
+    message.author.id = 456  # not in allow_from, not the bot itself
+    message.content = "hello"
+    message.reply = AsyncMock()
+
+    await dc.on_message(message)
+
+    assert mq.incoming.empty()
+    message.reply.assert_called_once()
+    assert "not authorized" in message.reply.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_on_message_allows_when_allow_from_empty():
+    dc, mq = make_discord_channel(allow_from=[])
+    message = MagicMock()
+    message.author.id = 456  # any user allowed when allow_from is empty
+    message.channel.id = 1
+    message.content = "hello"
+
+    await dc.on_message(message)
+
+    assert not mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_on_message_allows_authorized_user():
+    dc, mq = make_discord_channel(allow_from=[123])
+    message = MagicMock()
+    message.author.id = 123
+    message.channel.id = 1
+    message.content = "hello"
+
+    await dc.on_message(message)
+
+    assert not mq.incoming.empty()
 
 
 @pytest.mark.asyncio

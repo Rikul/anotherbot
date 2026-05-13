@@ -40,7 +40,7 @@ async def start_server() -> None:
         else:
             from .channels.discord import DiscordChannel
             discord_mq = MessageQueue()
-            discord_channel = DiscordChannel(discord_mq, token=discord_token)
+            discord_channel = DiscordChannel(discord_mq, token=discord_token, allow_from=config.discord.get("ALLOW_FROM", []))
             discord_channel.start()
             discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel)
 
