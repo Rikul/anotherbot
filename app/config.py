@@ -33,6 +33,8 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
         _config.setdefault("telegram", {})["BOT_TOKEN"] = v
     if v := os.environ.get("TELEGRAM_ALLOW_FROM"):
         _config.setdefault("telegram", {})["ALLOW_FROM"] = [int(x.strip()) for x in v.split(",") if x.strip()]
+    if v := os.environ.get("DISCORD_BOT_TOKEN"):
+        _config.setdefault("discord", {})["TOKEN"] = v
 
 
 def get(key: str, default=None):
@@ -54,4 +56,7 @@ base_url = "https://openrouter.ai/api/v1"
 [telegram]
 BOT_TOKEN = ""
 ALLOW_FROM = []  # List of allowed Telegram user IDs (integers). Must be non-empty.
+
+[discord]
+TOKEN = ""
 """

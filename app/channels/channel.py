@@ -35,3 +35,6 @@ class Channel(ABC):
     def clear_stopped(self) -> None:
         pass
 
+    @property
+    def default_metadata(self) -> dict:
+        return {}
