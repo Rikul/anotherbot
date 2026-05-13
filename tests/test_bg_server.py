@@ -46,7 +46,7 @@ async def test_start_server_discord_only_starts_discord_agent():
 
         await start_server()
 
-    MockDC.assert_called_once_with(mock_mq, token="discord-token")
+    MockDC.assert_called_once_with(mock_mq, token="discord-token", allow_from=[])
     MockAgent.assert_called_once_with(mq=mock_mq, channel=mock_dc)
     assert mock_gather.called
 

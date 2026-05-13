@@ -13,12 +13,13 @@ MAX_DISCORD_LENGTH = 2000
 class DiscordChannel(discord.Client, Channel):
     user: discord.ClientUser  # filled after login
 
-    def __init__(self, mq: MessageQueue, token: str) -> None:
+    def __init__(self, mq: MessageQueue, token: str, allow_from: list[int] = None) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
         self.mq = mq
         self.token = token
+        self.allow_from = allow_from or []
         self.stopped = False
         self._last_channel_id: int | None = None
         mq.register(self, self.send_message)
@@ -43,6 +44,11 @@ class DiscordChannel(discord.Client, Channel):
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.id == self.user.id:
+            return
+        user_id = message.author.id
+        if self.allow_from and user_id not in self.allow_from:
+            log.warning(f"Discord: ignoring message from unauthorized user id={user_id}")
+            await message.reply("Sorry, you are not authorized to use this bot.")
             return
         if message.content and message.content.strip():
             self._last_channel_id = message.channel.id

@@ -20,6 +20,7 @@ VOLUME /data
 ENV LLM_BASE_URL=""
 ENV MODEL=""
 ENV TELEGRAM_ALLOW_FROM=""
+ENV DISCORD_ALLOW_FROM=""
 
 # Secrets — pass at runtime only, never bake into the image:
 #   docker run -e LLM_API_KEY=... -e TELEGRAM_BOT_TOKEN=...
