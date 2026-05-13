@@ -50,10 +50,12 @@ async def test_cli_with_simple_prompt(capsys):
         with patch("sys.argv", ["prog", "cli", "-p", "say hello", "--silent"]), \
              patch("app.core.agent.Client") as MockClient, \
              patch("app.cli.cli_agent.load_system_context", return_value=""), \
+             patch("app.cli.cli_agent.MessageHistory") as MockHistory, \
              patch("app.main.config.load"), \
              patch.object(config_module, "_config", {"model": "test-model"}):
 
             MockClient.return_value.get_client.return_value = mock_openai
+            MockHistory.return_value.get_history.return_value = []
             await main()
     finally:
         app_log.setLevel(original_log_level)
