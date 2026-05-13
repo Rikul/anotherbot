@@ -23,6 +23,7 @@ ENV TELEGRAM_ALLOW_FROM=""
 
 # Secrets — pass at runtime only, never bake into the image:
 #   docker run -e LLM_API_KEY=... -e TELEGRAM_BOT_TOKEN=...
+#   docker run -e LLM_API_KEY=... -e DISCORD_BOT_TOKEN=...
 #   or: docker run --env-file .env
 
 CMD ["bash", "run.sh", "background"]

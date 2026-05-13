@@ -7,17 +7,15 @@ import sqlite3
 import asyncio
 from .helper_agent import HelperAgent
 
-
 TASKS_SYSTEM_PROMPT = """
 You are a background agent running periodic tasks. The user is not present.
 Read your instructions and execute them. Be concise.
 """
 
 class ScheduledTasks:
-    def __init__(self, mq=None, channels: dict = None, default_metadata: dict = None):
-        self._mq = mq
+    def __init__(self, mqs: dict = None, channels: dict = None):
+        self._mqs = mqs or {}
         self._channels = channels or {}
-        self._default_metadata = default_metadata or {}
         self._init_tasks_db()
 
     def _migrate(self, conn, table: str, columns: list[tuple[str, str]]):
@@ -112,8 +110,6 @@ class ScheduledTasks:
             conn.execute(f"UPDATE tasks SET {set_clause} WHERE name = ?", values)
             conn.commit()
 
-
-
     def save_output(self, name: str, prompt: str, output: str,
                     status: str = "success", duration_secs: float = None):
         with sqlite3.connect(APP_DB) as conn:
@@ -166,21 +162,28 @@ class ScheduledTasks:
                              status=status, duration_secs=duration)
             self._after_run(task=task, now=datetime.now())
 
-        if self._mq:
-            channel = self._channels.get(task["delivery_channel"])
-            if channel:
+        channel_name = task["delivery_channel"]
+        mq = self._mqs.get(channel_name)
+        channel = self._channels.get(channel_name)
+        if mq and channel:
+            try:
                 from ..channels.message import OutgoingMessage
-                await self._mq.outgoing_msg(OutgoingMessage(content=output, channel=channel, metadata=self._default_metadata))
-            else:
-                log.warning(f"Delivery channel '{task['delivery_channel']}' not found for task '{name}'")
+                await mq.outgoing_msg(OutgoingMessage(content=output, channel=channel, metadata=channel.default_metadata))
+            except Exception as e:
+                log.error(f"Scheduled task '{name}': failed to deliver to '{channel_name}': {e}")
+        else:
+            log.warning(f"Delivery channel '{channel_name}' not found for task '{name}'")
 
         return output
 
     async def run(self):
         while True:
-            now = datetime.now()
-            tasks = self.load_tasks()
-            due = [t for t in tasks if t["enabled"] and self._is_due(t, now)]
-            if due:
-                await asyncio.gather(*[self.run_task(t) for t in due])
+            try:
+                now = datetime.now()
+                tasks = self.load_tasks()
+                due = [t for t in tasks if t["enabled"] and self._is_due(t, now)]
+                if due:
+                    await asyncio.gather(*[self.run_task(t) for t in due], return_exceptions=True)
+            except Exception as e:
+                log.error(f"ScheduledTasks.run error: {e}", exc_info=True)
             await asyncio.sleep(60)

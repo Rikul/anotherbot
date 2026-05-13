@@ -40,6 +40,10 @@ class TelegramChannel(Channel):
     def channel_type(self) -> ChannelType:
         return ChannelType.TELEGRAM
 
+    @property
+    def default_metadata(self) -> dict:
+        return {"chat_id": self.allow_from[0]} if self.allow_from else {}
+
     async def error_handler(
         self, update: object, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
