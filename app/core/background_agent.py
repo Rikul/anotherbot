@@ -73,14 +73,14 @@ class BackgroundAgent(Agent):
 
         system_context = load_system_context()
         system = [{"role": "system", "content": system_context}] if system_context else []
-        turn_start = len(system) + len(self.messages)
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
 
         final_content = await self._loop(session_messages, all_tool_specs)
 
         self.channel.clear_stopped()
 
-        self.messages.extend(self._compress_turn(session_messages, turn_start))
+        self.messages.append({"role": "user", "content": message})
+        self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content)
 
         return final_content
