@@ -22,8 +22,8 @@ def load_system_context() -> str:
 
     system_context += f"""
 
-## System Context
-- datetime:   {now.strftime("%Y-%m-%d %H:%M:%S")} {now.astimezone().tzname()}
+## Current System Context
+- Conversation started:   {now.strftime("%Y-%m-%d %H:%M:%S")} {now.astimezone().tzname()}
 - day of week: {now.strftime("%A")}
 - os:         {platform.system()} {platform.release()}
 - shell:      {os.environ.get("SHELL", "unknown")}
