@@ -23,7 +23,6 @@ class MessageQueue:
         await self.incoming.put(message)
 
     async def outgoing_msg(self, message: OutgoingMessage):
-        log.info(f"Queueing outgoing message for channel {message.channel}: {message.content}")
         await self.outgoing.put(message)
 
     async def process_outgoing(self):
