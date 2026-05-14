@@ -5,6 +5,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 - **Interactive CLI**: Multi-turn REPL sessions with tool use
 - **Background Agent**: Runs as a persistent bot, receiving and sending messages via channels
 - **Telegram Integration**: Built-in Telegram bot — receive messages, respond, run tools, deliver results
+- **Discord Integration**: Discord bot — same agent loop, per-channel message isolation, owner DM fallback for scheduled tasks
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
 - **Tool Calling**: File I/O, shell commands, web fetch, web search (text/images/video/news/books), calculator, Hacker News, todo list
 - **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing)
@@ -47,6 +48,10 @@ api_key = ""  # fallback if LLM_API_KEY env var is not set
 [telegram]
 BOT_TOKEN = ""
 ALLOW_FROM = []  # List of allowed Telegram user IDs (integers).
+
+[discord]
+TOKEN = ""
+ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
 ```
 
 Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
@@ -77,23 +82,27 @@ Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel
 ./run.sh cli -p "Summarize this repo" -s
 ```
 
-### Background Agent (Telegram bot)
+### Background Agent (Telegram / Discord)
 
-Set your `BOT_TOKEN` in `~/.crafterscode/config.toml` and optionally restrict access by Telegram user ID:
+Configure one or both channels in `~/.crafterscode/config.toml`:
 
 ```toml
 [telegram]
 BOT_TOKEN = "123456:ABC-your-bot-token"
-ALLOW_FROM = [123456789]
+ALLOW_FROM = [123456789]  # restrict by user ID; empty = allow all
+
+[discord]
+TOKEN = "your-discord-bot-token"
+ALLOW_FROM = []  # restrict by user ID; empty = allow all
 ```
 
 ```bash
 ./run.sh background
 ```
 
-The agent listens for Telegram messages, runs the agentic loop (including tool calls), and replies in the same chat.
+Each channel gets its own message queue and agent. Scheduled task results are delivered to the channel the task was created from; if no context is available, the Discord bot owner is DM'd.
 
-**Built-in commands:** `/help` — list commands; `/whoami` — show your Telegram user ID.
+**Telegram commands:** `/help` — list commands; `/whoami` — show your Telegram user ID.
 
 ### Scheduled Tasks
 
@@ -113,10 +122,19 @@ Tasks persist in `~/.crafterscode/app.db` (shared with message history) and surv
 ```bash
 docker build -t anotherbot .
 
+# Telegram
 docker run -d \
   -e LLM_API_KEY=sk-... \
   -e TELEGRAM_BOT_TOKEN=123:abc... \
   -e TELEGRAM_ALLOW_FROM=123456789 \
+  -v anotherbot-data:/data \
+  anotherbot
+
+# Discord
+docker run -d \
+  -e LLM_API_KEY=sk-... \
+  -e DISCORD_BOT_TOKEN=your-discord-token \
+  -e DISCORD_ALLOW_FROM=123456789 \
   -v anotherbot-data:/data \
   anotherbot
 ```
@@ -124,11 +142,15 @@ docker run -d \
 | Env var | Required | Description |
 |---|---|---|
 | `LLM_API_KEY` | yes | OpenRouter / OpenAI-compatible API key |
-| `TELEGRAM_BOT_TOKEN` | yes | Telegram bot token from @BotFather |
-| `TELEGRAM_ALLOW_FROM` | yes | Comma-separated Telegram user IDs allowed to message the bot |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token from @BotFather |
+| `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = allow all) |
+| `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
+| `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
 | `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
 | `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
+
+At least one channel (`TELEGRAM_BOT_TOKEN` or `DISCORD_BOT_TOKEN`) must be set.
 
 The `/data` volume persists the SQLite database and workspace across restarts. To supply a `config.toml` instead of env vars, mount it at `/data/config.toml` — env vars always take precedence over the file.
 
@@ -136,7 +158,6 @@ The `/data` volume persists the SQLite database and workspace across restarts. T
 
 - **Email Support**: IMAP/SMTP integration for reading and sending emails, attachment handling, and mailbox management
 - **MCP Support**: Integration with Model Context Protocol for external data sources, tools, and state management
-- **Discord Integration**: Discord bot with slash commands, rich embeds, and channel permissions
 - **Slack Integration**: Slack app with interactive messages, modals, and workspace management
 - **WhatsApp Support**: WhatsApp Business API integration via providers like Twilio or MessageBird
 - **Anthropic OAuth**: Direct integration with Claude API using OAuth 2.0
