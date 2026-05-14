@@ -1,19 +1,20 @@
-FROM debian:current
+FROM debian:bookworm
 
 # apt dependencies for Python, SQLite, and common tools
-RUN apt update && apt install -y --no-install-recommends \
+RUN DEBIAN_FRONTEND=noninteractive apt update && apt install -y --no-install-recommends \
     python3 python3-pip python3-venv \
     sqlite3 \
     curl ca-certificates \
     git \
     nodejs npm \
     chromium \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-RUN pip install uv --no-cache-dir
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
 
@@ -32,6 +33,7 @@ ENV LLM_BASE_URL=""
 ENV MODEL=""
 ENV TELEGRAM_ALLOW_FROM=""
 ENV DISCORD_ALLOW_FROM=""
+ENV TZ=UTC
 
 # Secrets — pass at runtime only, never bake into the image:
 # docker run -d \
