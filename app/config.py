@@ -42,7 +42,9 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
 def get(key: str, default=None):
     return _config.get(key, default)
 
-
+def set(key: str, value) -> None:
+    _config[key] = value
+    
 def __getattr__(name: str):
     if name in _config:
         return _config[name]

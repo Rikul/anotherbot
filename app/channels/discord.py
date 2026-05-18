@@ -1,7 +1,7 @@
 import discord
 import logging
 
-from .commands import CommandRegistry, BotCommand, _status, help_cmd_handler
+from .commands import CommandRegistry, BotCommand, status_cmd, help_cmd, model_cmd
 from .message_queue import MessageQueue
 from .channel import Channel, ChannelType
 from .message import OutgoingMessage, IncomingMessage
@@ -25,8 +25,9 @@ class DiscordChannel(discord.Client, Channel):
         self._last_channel_id: int | None = None
         mq.register(self, self.send_message)
         self.registry = CommandRegistry()
-        self.registry.register(BotCommand("status", "Show bot status.", _status))
-        self.registry.register(BotCommand("help",   "Show this help message.", help_cmd_handler(self.registry)))
+        self.registry.register(BotCommand("model", "Get or set the current model. Usage: /model [model_name]", model_cmd))
+        self.registry.register(BotCommand("status", "Show bot status.", status_cmd))
+        self.registry.register(BotCommand("help",   "Show this help message.", help_cmd(self.registry)))
 
     @property
     def has_stopped(self) -> bool:
@@ -59,7 +60,11 @@ class DiscordChannel(discord.Client, Channel):
             return
 
         if content.startswith("/"):
-            cmd_name = content[1:].split()[0].lower()
+            
+            parts = content[1:].split(maxsplit=1)
+            cmd_name = parts[0].lower()
+            args = parts[1] if len(parts) > 1 else ""
+
             metadata = {"channel_id": message.channel.id}
             if cmd_name == "whoami":
                 await self.send_message(OutgoingMessage(
@@ -68,7 +73,7 @@ class DiscordChannel(discord.Client, Channel):
                     metadata=metadata,
                 ))
                 return
-            reply = await self.registry.execute(cmd_name)
+            reply = await self.registry.execute(cmd_name, args)
             if reply is not None:
                 await self.send_message(OutgoingMessage(content=reply, channel=ChannelType.DISCORD, metadata=metadata))
                 return

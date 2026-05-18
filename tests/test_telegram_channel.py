@@ -154,7 +154,7 @@ async def test_error_handler_notifies_user_on_chat_update():
     assert "error" in update.effective_message.reply_text.call_args[0][0].lower()
 
 
-# --- stop ---
+# --- command_handler ---
 
 @pytest.mark.asyncio
 async def test_stop_sets_has_stopped():
@@ -162,8 +162,7 @@ async def test_stop_sets_has_stopped():
     tc.send_message = AsyncMock()
     assert tc.has_stopped is False
 
-    update = make_update()
-    await tc.stop(update, MagicMock())
+    await tc.command_handler(make_update(text="/stop"), MagicMock())
 
     assert tc.has_stopped is True
 
@@ -172,8 +171,8 @@ async def test_stop_sets_has_stopped():
 async def test_stop_replies_to_user():
     tc, _ = make_telegram_channel()
     tc.send_message = AsyncMock()
-    update = make_update()
-    await tc.stop(update, MagicMock())
+
+    await tc.command_handler(make_update(text="/stop"), MagicMock())
 
     tc.send_message.assert_called_once()
     assert "Stopped" in tc.send_message.call_args[0][0].content
@@ -183,12 +182,36 @@ async def test_stop_replies_to_user():
 async def test_clear_stopped_resets_state():
     tc, _ = make_telegram_channel()
     tc.send_message = AsyncMock()
-    update = make_update()
-    await tc.stop(update, MagicMock())
+
+    await tc.command_handler(make_update(text="/stop"), MagicMock())
     assert tc.has_stopped is True
 
     tc.clear_stopped()
     assert tc.has_stopped is False
+
+
+@pytest.mark.asyncio
+async def test_command_handler_whoami_replies_with_user_info():
+    tc, _ = make_telegram_channel()
+    tc.send_message = AsyncMock()
+
+    await tc.command_handler(make_update(text="/whoami", user_id=42), MagicMock())
+
+    tc.send_message.assert_called_once()
+    text = tc.send_message.call_args[0][0].content
+    assert "42" in text
+
+
+@pytest.mark.asyncio
+async def test_command_handler_dispatches_with_args():
+    tc, _ = make_telegram_channel()
+    tc.registry.execute = AsyncMock(return_value="Model set to: gpt-4")
+    tc.send_message = AsyncMock()
+
+    await tc.command_handler(make_update(text="/model gpt-4"), MagicMock())
+
+    tc.registry.execute.assert_called_once_with("model", "gpt-4")
+    tc.send_message.assert_called_once()
 
 
 # --- error_handler ---

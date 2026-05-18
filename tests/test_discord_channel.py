@@ -295,7 +295,25 @@ async def test_on_message_known_command_replies_and_skips_mq():
 
     await dc.on_message(message)
 
-    dc.registry.execute.assert_called_once_with("status")
+    dc.registry.execute.assert_called_once_with("status", "")
+    dc.send_message.assert_called_once()
+    assert mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_on_message_command_with_args():
+    dc, mq = make_discord_channel()
+    dc.registry.execute = AsyncMock(return_value="Model set to: gpt-4")
+    dc.send_message = AsyncMock()
+    message = MagicMock()
+    message.author.id = 123
+    message.author.display_name = "Alice"
+    message.channel.id = 456
+    message.content = "/model gpt-4"
+
+    await dc.on_message(message)
+
+    dc.registry.execute.assert_called_once_with("model", "gpt-4")
     dc.send_message.assert_called_once()
     assert mq.incoming.empty()
 

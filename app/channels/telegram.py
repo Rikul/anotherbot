@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from .commands import CommandRegistry, BotCommand, _status, help_cmd_handler
+from .commands import CommandRegistry, BotCommand, status_cmd, help_cmd, model_cmd
 from .message_queue import MessageQueue
 from .channel import Channel, ChannelType
 from .message import OutgoingMessage, IncomingMessage
@@ -30,9 +30,10 @@ class TelegramChannel(Channel):
         self.stopped = False
         mq.register(self, self.send_message)
         self.registry = CommandRegistry()
-        self.registry.register(BotCommand("status", "Show bot status.", _status))
+        self.registry.register(BotCommand("model",  "Get or set the LLM model. Usage: /model [name]", model_cmd))
+        self.registry.register(BotCommand("status", "Show bot status.", status_cmd))
         self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
-        self.registry.register(BotCommand("help",   "Show this help message.", help_cmd_handler(self.registry)))
+        self.registry.register(BotCommand("help",   "Show this help message.", help_cmd(self.registry)))
 
     @property
     def has_stopped(self) -> bool:
@@ -60,32 +61,26 @@ class TelegramChannel(Channel):
                 "⚠ An error occurred, please try again."
             )
 
-    async def _stop_cmd(self) -> str:
+    async def _stop_cmd(self, args: str = "") -> str:
         self.stopped = True
         log.info("Received /stop in Telegram channel, setting stopped=True.")
         return "Stopped."
 
-    async def _cmd_reply(self, text: str, chat_id: int) -> None:
-        await self.send_message(OutgoingMessage(content=text, channel=ChannelType.TELEGRAM, metadata={"chat_id": chat_id}))
-
-    async def whoami(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        text = f"Your user ID is {update.effective_user.id} and your name is {update.effective_user.first_name}."
-        await self._cmd_reply(text, update.effective_chat.id)
-
-    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        reply = await self.registry.execute("help")
-        if reply:
-            await self._cmd_reply(reply, update.effective_chat.id)
-
-    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        reply = await self.registry.execute("status")
-        if reply:
-            await self._cmd_reply(reply, update.effective_chat.id)
-
-    async def stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        self.stopped = True
-        await self._cmd_reply("Stopped.", update.effective_chat.id)
-        log.info("Received /stop in Telegram channel, setting stopped=True.")
+    async def command_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update.message and update.message.text:
+            content = update.message.text.strip()
+            if content.startswith("/"):
+                parts = content[1:].split(maxsplit=1)
+                cmd_name = parts[0].lower()
+                args = parts[1] if len(parts) > 1 else ""
+                metadata = {"chat_id": update.effective_chat.id}
+                if cmd_name == "whoami":
+                    text = f"Your user ID is {update.effective_user.id} and your name is {update.effective_user.first_name}."
+                    await self.send_message(OutgoingMessage(content=text, channel=ChannelType.TELEGRAM, metadata=metadata))
+                    return
+                reply = await self.registry.execute(cmd_name, args)
+                if reply:
+                    await self.send_message(OutgoingMessage(content=reply, channel=ChannelType.TELEGRAM, metadata=metadata))
 
     async def send_message(self, message: OutgoingMessage) -> None:
         # This function is called by the MessageQueue when there is an outgoing message for this channel
@@ -143,15 +138,8 @@ class TelegramChannel(Channel):
             .write_timeout(30)
             .build()
         )
-        self.app.add_handler(CommandHandler("whoami", self.whoami))
-        self.app.add_handler(CommandHandler("status", self.status))
-        self.app.add_handler(CommandHandler("stop", self.stop))
-        self.app.add_handler(CommandHandler("help", self.help))
 
-        # Add handler for unrecognized commands
-        self.app.add_handler(MessageHandler(filters.COMMAND, self.help))
-        
-        # Add handler for text messages that are not commands
+        self.app.add_handler(MessageHandler(filters.COMMAND, self.command_handler))
         self.app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self.process_message)
         )

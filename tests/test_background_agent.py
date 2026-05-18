@@ -267,6 +267,28 @@ async def test_process_incoming_dispatches_to_agent_loop():
 
 
 @pytest.mark.asyncio
+async def test_process_incoming_sends_error_to_user_on_agent_loop_failure():
+    agent, _, mq = make_agent()
+
+    with patch.object(agent, "agent_loop", side_effect=RuntimeError("model not found")):
+        incoming = IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={"chat_id": 99})
+        await mq.incoming.put(incoming)
+
+        task = asyncio.create_task(agent.process_incoming())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert not mq.outgoing.empty()
+    error_msg = await mq.outgoing.get()
+    assert "model not found" in error_msg.content
+    assert error_msg.metadata == {"chat_id": 99}
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
     agent, mock_client, mq = make_agent()
 

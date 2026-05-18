@@ -7,7 +7,7 @@ from typing import Callable, Awaitable
 
 log = logging.getLogger(__name__)
 
-CommandHandler = Callable[[], Awaitable[str]]
+CommandHandler = Callable[[str], Awaitable[str]]
 
 _STARTUP_TIME: datetime = datetime.now()
 
@@ -26,12 +26,12 @@ class CommandRegistry:
     def register(self, cmd: BotCommand) -> None:
         self._commands[cmd.name] = cmd
 
-    async def execute(self, name: str) -> str | None:
+    async def execute(self, name: str, args : str = "") -> str | None:
         cmd = self._commands.get(name)
         if cmd is None:
             return None
         try:
-            return await cmd.handler()
+            return await cmd.handler(args)
         except Exception:
             log.exception(f"Command /{name} raised an exception")
             return "An error occurred running that command."
@@ -40,16 +40,23 @@ class CommandRegistry:
         return list(self._commands.values())
 
 
-def help_cmd_handler(registry: CommandRegistry) -> CommandHandler:
-    async def _help() -> str:
+def help_cmd(registry: CommandRegistry) -> CommandHandler:
+    async def _help(args : str = "") -> str:
         lines = ["Available commands:"]
         for cmd in registry.list():
             lines.append(f"/{cmd.name} — {cmd.description}")
         return "\n".join(lines)
     return _help
 
-
-async def _status() -> str:
+async def model_cmd(args: str = "") -> str:
+    from .. import config
+    if not args.strip():
+        return f"Current model: {config.get('model', 'unknown')}"
+    
+    config.set("model", args.strip())
+    return f"Model set to: {args.strip()}"
+    
+async def status_cmd(args: str = "") -> str:
     from .. import config
     uptime = datetime.now() - _STARTUP_TIME
     hours, remainder = divmod(int(uptime.total_seconds()), 3600)
