@@ -265,19 +265,20 @@ def test_clear_stopped_resets_state():
 @pytest.mark.asyncio
 async def test_on_message_whoami_replies_with_user_info():
     dc, mq = make_discord_channel()
+    dc.send_message = AsyncMock()
     message = MagicMock()
     message.author.id = 123
     message.author.display_name = "Alice"
     message.channel.id = 456
     message.content = "/whoami"
-    message.reply = AsyncMock()
 
     await dc.on_message(message)
 
-    message.reply.assert_called_once()
-    text = message.reply.call_args[0][0]
-    assert "123" in text
-    assert "Alice" in text
+    dc.send_message.assert_called_once()
+    sent = dc.send_message.call_args[0][0]
+    assert "123" in sent.content
+    assert "Alice" in sent.content
+    assert sent.metadata == {"channel_id": 456}
     assert mq.incoming.empty()
 
 
@@ -285,17 +286,17 @@ async def test_on_message_whoami_replies_with_user_info():
 async def test_on_message_known_command_replies_and_skips_mq():
     dc, mq = make_discord_channel()
     dc.registry.execute = AsyncMock(return_value="Bot status: running")
+    dc.send_message = AsyncMock()
     message = MagicMock()
     message.author.id = 123
     message.author.display_name = "Alice"
     message.channel.id = 456
     message.content = "/status"
-    message.reply = AsyncMock()
 
     await dc.on_message(message)
 
     dc.registry.execute.assert_called_once_with("status")
-    message.reply.assert_called_once()
+    dc.send_message.assert_called_once()
     assert mq.incoming.empty()
 
 
@@ -308,7 +309,6 @@ async def test_on_message_unknown_command_falls_through_to_mq():
     message.author.display_name = "Alice"
     message.channel.id = 456
     message.content = "/notacommand"
-    message.reply = AsyncMock()
 
     await dc.on_message(message)
 

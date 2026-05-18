@@ -65,23 +65,26 @@ class TelegramChannel(Channel):
         log.info("Received /stop in Telegram channel, setting stopped=True.")
         return "Stopped."
 
+    async def _cmd_reply(self, text: str, chat_id: int) -> None:
+        await self.send_message(OutgoingMessage(content=text, channel=ChannelType.TELEGRAM, metadata={"chat_id": chat_id}))
+
     async def whoami(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        reply_text = f"Your user ID is {update.effective_user.id} and your name is {update.effective_user.first_name}."
-        await update.message.reply_text(reply_text)
+        text = f"Your user ID is {update.effective_user.id} and your name is {update.effective_user.first_name}."
+        await self._cmd_reply(text, update.effective_chat.id)
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply = await self.registry.execute("help")
         if reply:
-            await update.message.reply_text(reply)
+            await self._cmd_reply(reply, update.effective_chat.id)
 
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply = await self.registry.execute("status")
         if reply:
-            await update.message.reply_text(reply)
+            await self._cmd_reply(reply, update.effective_chat.id)
 
     async def stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         self.stopped = True
-        await update.message.reply_text("Stopped.")
+        await self._cmd_reply("Stopped.", update.effective_chat.id)
         log.info("Received /stop in Telegram channel, setting stopped=True.")
 
     async def send_message(self, message: OutgoingMessage) -> None:

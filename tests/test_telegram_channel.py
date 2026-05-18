@@ -159,6 +159,7 @@ async def test_error_handler_notifies_user_on_chat_update():
 @pytest.mark.asyncio
 async def test_stop_sets_has_stopped():
     tc, _ = make_telegram_channel()
+    tc.send_message = AsyncMock()
     assert tc.has_stopped is False
 
     update = make_update()
@@ -170,15 +171,18 @@ async def test_stop_sets_has_stopped():
 @pytest.mark.asyncio
 async def test_stop_replies_to_user():
     tc, _ = make_telegram_channel()
+    tc.send_message = AsyncMock()
     update = make_update()
     await tc.stop(update, MagicMock())
 
-    update.message.reply_text.assert_called_once_with("Stopped.")
+    tc.send_message.assert_called_once()
+    assert "Stopped" in tc.send_message.call_args[0][0].content
 
 
 @pytest.mark.asyncio
 async def test_clear_stopped_resets_state():
     tc, _ = make_telegram_channel()
+    tc.send_message = AsyncMock()
     update = make_update()
     await tc.stop(update, MagicMock())
     assert tc.has_stopped is True
