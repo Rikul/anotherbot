@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from .commands import CommandRegistry, BotCommand, _status, help_cmd_handler
 from .message_queue import MessageQueue
 from .channel import Channel, ChannelType
 from .message import OutgoingMessage, IncomingMessage
@@ -28,6 +29,10 @@ class TelegramChannel(Channel):
         self.mq = mq
         self.stopped = False
         mq.register(self, self.send_message)
+        self.registry = CommandRegistry()
+        self.registry.register(BotCommand("status", "Show bot status.", _status))
+        self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
+        self.registry.register(BotCommand("help",   "Show this help message.", help_cmd_handler(self.registry)))
 
     @property
     def has_stopped(self) -> bool:
@@ -55,25 +60,26 @@ class TelegramChannel(Channel):
                 "⚠ An error occurred, please try again."
             )
 
-    async def whoami(self,update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def _stop_cmd(self) -> str:
+        self.stopped = True
+        log.info("Received /stop in Telegram channel, setting stopped=True.")
+        return "Stopped."
+
+    async def whoami(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_text = f"Your user ID is {update.effective_user.id} and your name is {update.effective_user.first_name}."
         await update.message.reply_text(reply_text)
-        
-    async def help(self,update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        List available commands and their descriptions.
-        """
-        reply_text = ("Available commands:\n"
-                    "/whoami - Display your user ID and name.\n"
-                    "/help - Show this help message.\n"
-                    "Just send any text message to interact with the bot.")
-        await update.message.reply_text(reply_text)
 
+    async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        reply = await self.registry.execute("help")
+        if reply:
+            await update.message.reply_text(reply)
 
-    async def stop(self,update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """
-        Stop the bot gracefully.
-        """
+    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        reply = await self.registry.execute("status")
+        if reply:
+            await update.message.reply_text(reply)
+
+    async def stop(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         self.stopped = True
         await update.message.reply_text("Stopped.")
         log.info("Received /stop in Telegram channel, setting stopped=True.")
@@ -135,6 +141,7 @@ class TelegramChannel(Channel):
             .build()
         )
         self.app.add_handler(CommandHandler("whoami", self.whoami))
+        self.app.add_handler(CommandHandler("status", self.status))
         self.app.add_handler(CommandHandler("stop", self.stop))
         self.app.add_handler(CommandHandler("help", self.help))
 

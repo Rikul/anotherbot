@@ -258,3 +258,60 @@ def test_clear_stopped_resets_state():
     dc.stopped = True
     dc.clear_stopped()
     assert dc.has_stopped is False
+
+
+# --- command handling ---
+
+@pytest.mark.asyncio
+async def test_on_message_whoami_replies_with_user_info():
+    dc, mq = make_discord_channel()
+    message = MagicMock()
+    message.author.id = 123
+    message.author.display_name = "Alice"
+    message.channel.id = 456
+    message.content = "/whoami"
+    message.reply = AsyncMock()
+
+    await dc.on_message(message)
+
+    message.reply.assert_called_once()
+    text = message.reply.call_args[0][0]
+    assert "123" in text
+    assert "Alice" in text
+    assert mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_on_message_known_command_replies_and_skips_mq():
+    dc, mq = make_discord_channel()
+    dc.registry.execute = AsyncMock(return_value="Bot status: running")
+    message = MagicMock()
+    message.author.id = 123
+    message.author.display_name = "Alice"
+    message.channel.id = 456
+    message.content = "/status"
+    message.reply = AsyncMock()
+
+    await dc.on_message(message)
+
+    dc.registry.execute.assert_called_once_with("status")
+    message.reply.assert_called_once()
+    assert mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_on_message_unknown_command_falls_through_to_mq():
+    dc, mq = make_discord_channel()
+    dc.registry.execute = AsyncMock(return_value=None)
+    message = MagicMock()
+    message.author.id = 123
+    message.author.display_name = "Alice"
+    message.channel.id = 456
+    message.content = "/notacommand"
+    message.reply = AsyncMock()
+
+    await dc.on_message(message)
+
+    assert not mq.incoming.empty()
+    msg = await mq.incoming.get()
+    assert msg.content == "/notacommand"
