@@ -20,7 +20,7 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
             _config = tomllib.load(f)
     else:
         _config = {
-            "model": "deepseek/deepseek-v3.2",
+            "model": "deepseek/deepseek-v4-flash",
             "base_url": "https://openrouter.ai/api/v1",
             "max_iterations": 100,
             "telegram": {},
@@ -51,7 +51,7 @@ def __getattr__(name: str):
 
 def get_default_config() -> str:
     return """\
-model = "deepseek/deepseek-v3.2"
+model = "deepseek/deepseek-v4-flash"
 max_iterations = 100
 base_url = "https://openrouter.ai/api/v1"
 

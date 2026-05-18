@@ -16,11 +16,12 @@ class Agent(ABC):
         self.client = Client().get_client()
         self.messages: list[dict] = []
         self.max_iterations = max_iterations
+        self.model = config.get("model", "deepseek/deepseek-v4-flash")
 
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
             self.messages = self.messages[-MAX_CONTEXT_MESSAGES:]
-
+    
     @staticmethod
     def _serialize_assistant_msg(msg) -> dict:
         d = {"role": msg.role, "content": msg.content}
@@ -81,7 +82,7 @@ class Agent(ABC):
             iteration += 1
             log.info("chat.completions.create...")
             chat = await self.client.chat.completions.create(
-                model=config.get("model", "deepseek/deepseek-v3.2"),
+                model=self.model,
                 messages=messages,
                 tools=tool_specs,
             )

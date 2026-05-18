@@ -6,7 +6,7 @@ import app.config as config
 
 def test_load_uses_defaults_when_file_not_found(tmp_path):
     config.load(tmp_path / "missing.toml")
-    assert config.get("model") == "deepseek/deepseek-v3.2"
+    assert config.get("model") == "deepseek/deepseek-v4-flash"
     assert config.get("telegram") == {}
 
 
@@ -57,7 +57,7 @@ def test_getattr_raises_for_missing_key(tmp_path):
 
 def test_model_env_overrides_file(tmp_path):
     toml_file = tmp_path / "config.toml"
-    toml_file.write_bytes(b'model = "deepseek/deepseek-v3.2"\n')
+    toml_file.write_bytes(b'model = "deepseek/deepseek-v4-flash"\n')
     with patch.dict(os.environ, {"MODEL": "gpt-4o"}, clear=False):
         config.load(toml_file)
     assert config.get("model") == "gpt-4o"
@@ -93,13 +93,13 @@ def test_env_vars_override_file_values(tmp_path):
 def test_docker_scenario_no_file_all_env_vars(tmp_path):
     """No config file + env vars only — the expected Docker startup path."""
     env = {
-        "MODEL": "deepseek/deepseek-v3.2",
+        "MODEL": "deepseek/deepseek-v4-flash",
         "TELEGRAM_BOT_TOKEN": "bot:token",
         "TELEGRAM_ALLOW_FROM": "99,100",
     }
     with patch.dict(os.environ, env, clear=False):
         config.load(tmp_path / "missing.toml")
-    assert config.get("model") == "deepseek/deepseek-v3.2"
+    assert config.get("model") == "deepseek/deepseek-v4-flash"
     assert config.get("telegram")["BOT_TOKEN"] == "bot:token"
     assert config.get("telegram")["ALLOW_FROM"] == [99, 100]
 
