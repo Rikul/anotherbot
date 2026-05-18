@@ -60,15 +60,17 @@ class DiscordChannel(discord.Client, Channel):
 
         if content.startswith("/"):
             cmd_name = content[1:].split()[0].lower()
+            metadata = {"channel_id": message.channel.id}
             if cmd_name == "whoami":
-                await message.reply(
-                    f"Your user ID is {user_id} and your name is {message.author.display_name}.",
-                    mention_author=False,
-                )
+                await self.send_message(OutgoingMessage(
+                    content=f"Your user ID is {user_id} and your name is {message.author.display_name}.",
+                    channel=ChannelType.DISCORD,
+                    metadata=metadata,
+                ))
                 return
             reply = await self.registry.execute(cmd_name)
             if reply is not None:
-                await message.reply(reply, mention_author=False)
+                await self.send_message(OutgoingMessage(content=reply, channel=ChannelType.DISCORD, metadata=metadata))
                 return
 
         self._last_channel_id = message.channel.id
