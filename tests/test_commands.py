@@ -1,13 +1,13 @@
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from app.channels.commands import BotCommand, CommandRegistry, _status, help_cmd_handler
+from app.channels.commands import BotCommand, CommandRegistry, status_cmd, help_cmd, model_cmd
 
 
 def make_registry(*extra: BotCommand) -> CommandRegistry:
     r = CommandRegistry()
-    r.register(BotCommand("status", "Show bot status.", _status))
-    r.register(BotCommand("help", "Show this help message.", help_cmd_handler(r)))
+    r.register(BotCommand("status", "Show bot status.", status_cmd))
+    r.register(BotCommand("help", "Show this help message.", help_cmd(r)))
     for cmd in extra:
         r.register(cmd)
     return r
@@ -62,7 +62,7 @@ async def test_execute_calls_handler_and_returns_result():
 
 @pytest.mark.asyncio
 async def test_execute_returns_error_string_on_exception():
-    async def boom():
+    async def boom(args=""):
         raise RuntimeError("oops")
     r = CommandRegistry()
     r.register(BotCommand("bad", "Broken.", boom))
@@ -71,30 +71,39 @@ async def test_execute_returns_error_string_on_exception():
     assert result  # non-empty
 
 
-# --- _status ---
+@pytest.mark.asyncio
+async def test_execute_passes_args_to_handler():
+    handler = AsyncMock(return_value="ok")
+    r = CommandRegistry()
+    r.register(BotCommand("cmd", "Test.", handler))
+    await r.execute("cmd", "some args")
+    handler.assert_called_once_with("some args")
+
+
+# --- status_cmd ---
 
 @pytest.mark.asyncio
 async def test_status_includes_model_name():
     with patch("app.config._config", {"model": "my-test-model"}):
-        result = await _status()
+        result = await status_cmd()
     assert "my-test-model" in result
 
 
 @pytest.mark.asyncio
 async def test_status_includes_uptime():
     with patch("app.config._config", {"model": "m"}):
-        result = await _status()
+        result = await status_cmd()
     assert "Uptime" in result
 
 
-# --- help_cmd_handler ---
+# --- help_cmd ---
 
 @pytest.mark.asyncio
 async def test_help_handler_lists_all_registered_commands():
     r = CommandRegistry()
     r.register(BotCommand("foo", "Foo command.", AsyncMock(return_value="")))
     r.register(BotCommand("bar", "Bar command.", AsyncMock(return_value="")))
-    r.register(BotCommand("help", "Help.", help_cmd_handler(r)))
+    r.register(BotCommand("help", "Help.", help_cmd(r)))
     result = await r.execute("help")
     assert "/foo" in result
     assert "/bar" in result
@@ -104,7 +113,25 @@ async def test_help_handler_lists_all_registered_commands():
 @pytest.mark.asyncio
 async def test_help_handler_reflects_commands_registered_after_creation():
     r = CommandRegistry()
-    r.register(BotCommand("help", "Help.", help_cmd_handler(r)))
+    r.register(BotCommand("help", "Help.", help_cmd(r)))
     r.register(BotCommand("late", "Registered after help.", AsyncMock(return_value="")))
     result = await r.execute("help")
     assert "/late" in result
+
+
+# --- model_cmd ---
+
+@pytest.mark.asyncio
+async def test_model_cmd_returns_current_model_when_no_args():
+    with patch("app.config._config", {"model": "deepseek/v3"}):
+        result = await model_cmd("")
+    assert "deepseek/v3" in result
+
+
+@pytest.mark.asyncio
+async def test_model_cmd_sets_model():
+    mock_cfg = {"model": "old-model"}
+    with patch("app.config._config", mock_cfg):
+        result = await model_cmd("new-model")
+    assert "new-model" in result
+    assert mock_cfg["model"] == "new-model"
