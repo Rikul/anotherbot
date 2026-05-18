@@ -64,8 +64,7 @@ class BackgroundAgent(Agent):
                 await self.agent_loop(msg.content, msg.metadata)
             except Exception as e:
                 log.error(f"Agent loop error: {e}")
-                await self.mq.outgoing_msg(OutgoingMessage(content="{str(e)}", 
-                                        channel=self.channel, metadata=msg.metadata))
+                await self.mq.outgoing_msg(OutgoingMessage(content=str(e), channel=self.channel, metadata=msg.metadata))
 
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         self._trim_messages()
