@@ -1,6 +1,7 @@
 import discord
 import logging
 
+from .commands import CommandRegistry, BotCommand, _status, help_cmd_handler
 from .message_queue import MessageQueue
 from .channel import Channel, ChannelType
 from .message import OutgoingMessage, IncomingMessage
@@ -23,6 +24,9 @@ class DiscordChannel(discord.Client, Channel):
         self.stopped = False
         self._last_channel_id: int | None = None
         mq.register(self, self.send_message)
+        self.registry = CommandRegistry()
+        self.registry.register(BotCommand("status", "Show bot status.", _status))
+        self.registry.register(BotCommand("help",   "Show this help message.", help_cmd_handler(self.registry)))
 
     @property
     def has_stopped(self) -> bool:
@@ -50,15 +54,31 @@ class DiscordChannel(discord.Client, Channel):
             log.warning(f"Discord: ignoring message from unauthorized user id={user_id}")
             await message.reply("Sorry, you are not authorized to use this bot.")
             return
-        if message.content and message.content.strip():
-            self._last_channel_id = message.channel.id
-            await self.mq.incoming.put(
-                IncomingMessage(
-                    content=message.content.strip(),
-                    channel=ChannelType.DISCORD,
-                    metadata={"channel_id": message.channel.id},
+        content = message.content.strip() if message.content else ""
+        if not content:
+            return
+
+        if content.startswith("/"):
+            cmd_name = content[1:].split()[0].lower()
+            if cmd_name == "whoami":
+                await message.reply(
+                    f"Your user ID is {user_id} and your name is {message.author.display_name}.",
+                    mention_author=False,
                 )
+                return
+            reply = await self.registry.execute(cmd_name)
+            if reply is not None:
+                await message.reply(reply, mention_author=False)
+                return
+
+        self._last_channel_id = message.channel.id
+        await self.mq.incoming.put(
+            IncomingMessage(
+                content=content,
+                channel=ChannelType.DISCORD,
+                metadata={"channel_id": message.channel.id},
             )
+        )
 
     async def _resolve_destination(self, channel_id: int | None) -> discord.abc.Messageable | None:
         if channel_id:
