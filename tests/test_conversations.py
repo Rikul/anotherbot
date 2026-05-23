@@ -1,7 +1,6 @@
 """Tests for ConversationStore."""
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 import pytest
 from pathlib import Path
@@ -75,11 +74,15 @@ def test_get_last_returns_none_when_empty(store):
     assert store.get_last("cli") is None
 
 
-def test_get_last_returns_most_recently_updated(store):
+def test_get_last_returns_most_recently_updated(store, db):
     cid1 = store.create("cli", "First")
-    import time; time.sleep(0.01)
     cid2 = store.create("cli", "Second")
-    store.touch(cid2)
+    # Pin cid2 to a future timestamp so ordering is deterministic
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE conversations SET updated_at='2099-01-01T00:00:00' WHERE id=?", (cid2,)
+        )
+        conn.commit()
     last = store.get_last("cli")
     assert last["id"] == cid2
 
@@ -312,7 +315,6 @@ async def test_auto_name_does_not_overwrite_manual_rename(store):
     with patch("app.core.helper_agent.HelperAgent", return_value=mock_helper_instance):
         from app.core.agent import Agent
         agent_stub = MagicMock(spec=[])  # _auto_name doesn't use self
-        from app.core import runtime
         await Agent._auto_name(agent_stub, store, cid, [], "conversation_name")
 
     # Name should still be the manually set name

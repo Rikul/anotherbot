@@ -29,6 +29,10 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
     except Exception as e:
         log.error(f"Error loading system prompt: {e}")
 
+    conv_id   = ctx.get("conversation_id", "")
+    conv_name = ctx.get("conversation_name", "")
+    conv_line = f"\n- Conversation: [{conv_id}] {conv_name}" if conv_id else ""
+
     sys_prompt += f"""
 
 ## Current System Context
@@ -41,7 +45,7 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 - workspace:  {config.PROJECT_HOME / "workspace"}
 - Python:     {platform.python_version()}
 - Starting LLM Model:      {runtime.get("model", "unknown")}
-- Current Channel: {channel}
+- Current Channel: {channel}{conv_line}
 """
 
     log.info(f"Loaded system prompt: {len(sys_prompt)} characters")

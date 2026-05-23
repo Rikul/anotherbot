@@ -3,11 +3,20 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Awaitable, TYPE_CHECKING
+from typing import Any, Callable, Awaitable, Protocol, TYPE_CHECKING
 from ..core import runtime
 
 if TYPE_CHECKING:
     from ..infra.conversations import ConversationStore
+
+
+class ConversationAgent(Protocol):
+    """Structural type for agents that support conversation management."""
+    _store: Any          # ConversationStore
+    _channel_str: str
+    conversation_id: int
+
+    def _switch_conversation(self, conv: dict) -> None: ...
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +108,7 @@ def list_conversations_cmd(store: ConversationStore, channel: str) -> CommandHan
     return _list
 
 
-def new_conversation_cmd(agent) -> CommandHandler:
+def new_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
     async def _new(args: str = "") -> str:
         cid = agent._store.create(agent._channel_str)
         conv = agent._store.get(cid)
@@ -108,7 +117,7 @@ def new_conversation_cmd(agent) -> CommandHandler:
     return _new
 
 
-def load_conversation_cmd(agent) -> CommandHandler:
+def load_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
     async def _load(args: str = "") -> str:
         if not args.strip():
             return "Usage: /load-conversation <id>"
@@ -120,11 +129,13 @@ def load_conversation_cmd(agent) -> CommandHandler:
         if conv is None or conv["channel"] != agent._channel_str:
             return "Conversation not found or access denied."
         agent._switch_conversation(conv)
-        return f"Loaded conversation [{conv['id']}] {conv['name']} ({agent._store.count_user_messages(conv_id)} messages)"
+        convs = agent._store.list(agent._channel_str)
+        msg_count = next((c["message_count"] for c in convs if c["id"] == conv_id), 0)
+        return f"Loaded conversation [{conv['id']}] {conv['name']} ({msg_count} messages)"
     return _load
 
 
-def fork_conversation_cmd(agent) -> CommandHandler:
+def fork_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
     async def _fork(args: str = "") -> str:
         source_id = agent.conversation_id
         if args.strip():

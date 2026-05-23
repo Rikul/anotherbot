@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -19,6 +20,14 @@ def _slug(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-"))[:40]
 
 
+@contextlib.contextmanager
+def _fk_conn(db_path: Path):
+    """sqlite3 connection with FK constraints enforced."""
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("PRAGMA foreign_keys = ON")
+        yield conn
+
+
 class ConversationStore:
     def __init__(self, db_path: Path = APP_DB):
         self.db_path = db_path
@@ -28,7 +37,9 @@ class ConversationStore:
         now = datetime.now().isoformat()
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+
+            # Phase 1: DDL — idempotent CREATE TABLE/INDEX and optional ALTER TABLE
+            with _fk_conn(self.db_path) as conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS conversations (
                         id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,59 +51,72 @@ class ConversationStore:
                     )
                 """)
                 conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_conversations_channel ON conversations(channel)
+                    CREATE INDEX IF NOT EXISTS idx_conversations_channel
+                    ON conversations(channel)
                 """)
-
                 # Ensure messages table exists (MessageHistory may not have run yet)
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS messages (
-                        id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                        channel        TEXT    NOT NULL,
-                        role           TEXT    NOT NULL,
-                        content        TEXT    NOT NULL,
-                        timestamp      TEXT    NOT NULL,
-                        est_tokens     INTEGER,
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        channel         TEXT    NOT NULL,
+                        role            TEXT    NOT NULL,
+                        content         TEXT    NOT NULL,
+                        timestamp       TEXT    NOT NULL,
+                        est_tokens      INTEGER,
                         conversation_id INTEGER REFERENCES conversations(id)
                     )
                 """)
                 conn.execute("""
-                    CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel)
+                    CREATE INDEX IF NOT EXISTS idx_messages_channel
+                    ON messages(channel)
+                """)
+                # Guard: ALTER TABLE is not idempotent in SQLite; add index after column exists
+                cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                if "conversation_id" not in cols:
+                    conn.execute(
+                        "ALTER TABLE messages ADD COLUMN "
+                        "conversation_id INTEGER REFERENCES conversations(id)"
+                    )
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
+                    ON messages(conversation_id)
                 """)
 
-                # Add conversation_id to messages only if that table exists
-                tables = {row[0] for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )}
-                if "messages" in tables:
-                    cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-                    if "conversation_id" not in cols:
-                        conn.execute(
-                            "ALTER TABLE messages ADD COLUMN "
-                            "conversation_id INTEGER REFERENCES conversations(id)"
-                        )
+            # Phase 2: Migration — BEGIN IMMEDIATE for concurrency safety.
+            # The WHERE conversation_id IS NULL guard makes this re-entrant.
+            mconn = sqlite3.connect(self.db_path, isolation_level=None)
+            try:
+                mconn.execute("PRAGMA foreign_keys = ON")
+                mconn.execute("BEGIN IMMEDIATE")
+                rows = mconn.execute(
+                    "SELECT DISTINCT channel FROM messages WHERE conversation_id IS NULL"
+                ).fetchall()
+                for (channel,) in rows:
+                    oldest = mconn.execute(
+                        "SELECT MIN(timestamp) FROM messages "
+                        "WHERE channel=? AND conversation_id IS NULL",
+                        (channel,),
+                    ).fetchone()[0] or now
+                    cid = mconn.execute(
+                        "INSERT INTO conversations (name, channel, created_at, updated_at) "
+                        "VALUES (?,?,?,?)",
+                        ("History", channel, oldest, oldest),
+                    ).lastrowid
+                    mconn.execute(
+                        "UPDATE messages SET conversation_id=? "
+                        "WHERE channel=? AND conversation_id IS NULL",
+                        (cid, channel),
+                    )
+                mconn.execute("COMMIT")
+            except Exception:
+                try:
+                    mconn.execute("ROLLBACK")
+                except Exception:
+                    pass
+                raise
+            finally:
+                mconn.close()
 
-                    # Migration: re-entrant (WHERE conversation_id IS NULL is the guard)
-                    rows = conn.execute(
-                        "SELECT DISTINCT channel FROM messages WHERE conversation_id IS NULL"
-                    ).fetchall()
-                    for (channel,) in rows:
-                        oldest = conn.execute(
-                            "SELECT MIN(timestamp) FROM messages "
-                            "WHERE channel=? AND conversation_id IS NULL",
-                            (channel,),
-                        ).fetchone()[0] or now
-                        cid = conn.execute(
-                            "INSERT INTO conversations (name, channel, created_at, updated_at) "
-                            "VALUES (?,?,?,?)",
-                            ("History", channel, oldest, oldest),
-                        ).lastrowid
-                        conn.execute(
-                            "UPDATE messages SET conversation_id=? "
-                            "WHERE channel=? AND conversation_id IS NULL",
-                            (cid, channel),
-                        )
-
-                conn.commit()
         except sqlite3.Error as e:
             log.error(f"ConversationStore schema error: {e}")
             raise
@@ -100,17 +124,16 @@ class ConversationStore:
     def create(self, channel: str, name: str = "New Conversation", parent_id: int = None) -> int:
         clean = _clean_name(name)
         now = datetime.now().isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             cid = conn.execute(
                 "INSERT INTO conversations (name, channel, parent_id, created_at, updated_at) "
                 "VALUES (?,?,?,?,?)",
                 (clean, channel, parent_id, now, now),
             ).lastrowid
-            conn.commit()
         return cid
 
     def get(self, conversation_id: int) -> dict | None:
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             row = conn.execute(
                 "SELECT id, name, channel, parent_id, created_at, updated_at "
                 "FROM conversations WHERE id=?",
@@ -124,7 +147,7 @@ class ConversationStore:
         }
 
     def get_last(self, channel: str) -> dict | None:
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             row = conn.execute(
                 "SELECT id, name, channel, parent_id, created_at, updated_at "
                 "FROM conversations WHERE channel=? ORDER BY updated_at DESC, id DESC LIMIT 1",
@@ -138,7 +161,7 @@ class ConversationStore:
         }
 
     def list(self, channel: str) -> list[dict]:
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             rows = conn.execute(
                 """SELECT c.id, c.name, c.parent_id, c.created_at, c.updated_at,
                           COUNT(m.id) as message_count
@@ -165,21 +188,19 @@ class ConversationStore:
             )
         clean = _clean_name(name)
         now = datetime.now().isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             conn.execute(
                 "UPDATE conversations SET name=?, updated_at=? WHERE id=?",
                 (clean, now, conversation_id),
             )
-            conn.commit()
 
     def touch(self, conversation_id: int) -> None:
         now = datetime.now().isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             conn.execute(
                 "UPDATE conversations SET updated_at=? WHERE id=?",
                 (now, conversation_id),
             )
-            conn.commit()
 
     def fork(self, conversation_id: int, channel: str) -> int:
         conv = self.get(conversation_id)
@@ -190,7 +211,7 @@ class ConversationStore:
                 f"Conversation {conversation_id} does not belong to channel {channel!r}"
             )
         now = datetime.now().isoformat()
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             new_id = conn.execute(
                 "INSERT INTO conversations (name, channel, parent_id, created_at, updated_at) "
                 "VALUES (?,?,?,?,?)",
@@ -204,11 +225,10 @@ class ConversationStore:
                    ORDER BY timestamp ASC, id ASC""",
                 (channel, new_id, conversation_id),
             )
-            conn.commit()
         return new_id
 
     def load_messages(self, conversation_id: int, limit: int = 1000) -> list[dict]:
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             rows = conn.execute(
                 "SELECT role, content FROM messages WHERE conversation_id=? "
                 "ORDER BY timestamp ASC, id ASC LIMIT ?",
@@ -217,7 +237,7 @@ class ConversationStore:
         return [{"role": row[0], "content": row[1]} for row in rows]
 
     def count_user_messages(self, conversation_id: int) -> int:
-        with sqlite3.connect(self.db_path) as conn:
+        with _fk_conn(self.db_path) as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='user'",
                 (conversation_id,),
