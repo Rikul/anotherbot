@@ -39,6 +39,10 @@ class MessageHistory:
                     conn.execute(
                         "ALTER TABLE messages ADD COLUMN conversation_id INTEGER"
                     )
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
+                    ON messages(conversation_id)
+                """)
                 conn.commit()
 
         except sqlite3.Error as e:
