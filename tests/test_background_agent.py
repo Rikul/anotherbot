@@ -31,6 +31,10 @@ def make_mock_client(tool_calls=None, content="Hello!", finish_reason="stop"):
     return mock_client
 
 
+_MOCK_CONV = {"id": 1, "name": "Test Conv", "channel": "telegram",
+              "parent_id": None, "created_at": "2024-01-01", "updated_at": "2024-01-01"}
+
+
 def make_agent(max_iterations=10):
     mq = MessageQueue()
     with patch("app.core.agent.Client") as MockClient:
@@ -39,7 +43,12 @@ def make_agent(max_iterations=10):
         with patch("app.core.background_agent.get_default_sys_prompt", return_value="You are a helpful assistant."):
             with patch("app.core.background_agent.MessageHistory") as MockHistory:
                 MockHistory.return_value.get_history.return_value = []
-                agent = BackgroundAgent(mq=mq, channel=_mock_channel, max_iterations=max_iterations)
+                with patch("app.core.background_agent.ConversationStore") as MockStore:
+                    MockStore.return_value.get_last.return_value = _MOCK_CONV
+                    MockStore.return_value.get.return_value = _MOCK_CONV
+                    MockStore.return_value.load_messages.return_value = []
+                    MockStore.return_value.count_user_messages.return_value = 0
+                    agent = BackgroundAgent(mq=mq, channel=_mock_channel, max_iterations=max_iterations)
     agent.client = mock_openai
     return agent, mock_openai, mq
 
@@ -48,6 +57,16 @@ def make_agent(max_iterations=10):
 def patch_config():
     with patch.object(config, "_config", {"agent": {"model": "test-model"}}):
         yield
+
+
+@pytest.fixture(autouse=True)
+def patch_store():
+    with patch("app.core.background_agent.ConversationStore") as MockStore:
+        MockStore.return_value.get_last.return_value = _MOCK_CONV
+        MockStore.return_value.get.return_value = _MOCK_CONV
+        MockStore.return_value.load_messages.return_value = []
+        MockStore.return_value.count_user_messages.return_value = 0
+        yield MockStore
 
 
 def test_agent_initializes_with_empty_messages():
@@ -88,7 +107,7 @@ async def test_agent_loop_adds_user_message():
 async def test_agent_loop_appends_assistant_message():
     agent, _, _ = make_agent()
     await agent.agent_loop("Hello")
-    agent.history.add_message.assert_called_with("assistant", "Hello!")
+    agent.history.add_message.assert_called_with("assistant", "Hello!", agent.conversation_id)
     assert agent.messages[-1]["content"] == "Hello!"
 
 

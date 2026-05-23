@@ -93,6 +93,26 @@ class Agent(ABC):
         """Return True to break out of the loop early."""
         return False
 
+    async def _auto_name(self, store, conv_id: int, messages: list[dict], name_runtime_key: str) -> None:
+        from .helper_agent import HelperAgent  # lazy — helper_agent imports Agent
+        transcript = "\n".join(
+            f"{m['role']}: {m['content'][:200]}" for m in messages[:4]
+        )
+        prompt = (
+            "Summarize this conversation in 4-6 words as a title. "
+            "Reply with just the title, nothing else.\n\n" + transcript
+        )
+        try:
+            name = await HelperAgent().run(prompt)
+            conv = store.get(conv_id)
+            if conv and conv["name"] == "New Conversation":
+                clean = name.strip()[:80] or "New Conversation"
+                store.rename(conv_id, clean, conv["channel"])
+                runtime.set(name_runtime_key, clean)
+                log.info(f"Auto-named conversation {conv_id}: {clean!r}")
+        except Exception as e:
+            log.warning(f"Auto-naming conversation {conv_id} failed: {e}")
+
     # --- shared tool dispatch ---
 
     async def handle_tool_call(self, tool_call) -> str:

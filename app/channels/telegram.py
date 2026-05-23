@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from .commands import CommandRegistry, BotCommand, status_cmd, help_cmd, model_cmd
+from .commands import CommandRegistry, BotCommand, make_status_cmd, help_cmd, model_cmd
 from .message_queue import MessageQueue
 from .channel import Channel, ChannelType
 from .message import OutgoingMessage, IncomingMessage
@@ -31,7 +31,7 @@ class TelegramChannel(Channel):
         mq.register(self, self.send_message)
         self.registry = CommandRegistry()
         self.registry.register(BotCommand("model",  "Get or set the LLM model. Usage: /model [name]", model_cmd))
-        self.registry.register(BotCommand("status", "Show bot status.", status_cmd))
+        self.registry.register(BotCommand("status", "Show bot status.", make_status_cmd(ChannelType.TELEGRAM.value)))
         self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
         self.registry.register(BotCommand("help",   "Show this help message.", help_cmd(self.registry)))
 
@@ -79,8 +79,12 @@ class TelegramChannel(Channel):
                     await self.send_message(OutgoingMessage(content=text, channel=ChannelType.TELEGRAM, metadata=metadata))
                     return
                 reply = await self.registry.execute(cmd_name, args)
-                if reply:
+                if reply is not None:
                     await self.send_message(OutgoingMessage(content=reply, channel=ChannelType.TELEGRAM, metadata=metadata))
+                else:
+                    await self.mq.incoming.put(IncomingMessage(
+                        content=content, channel=ChannelType.TELEGRAM, metadata=metadata
+                    ))
 
     async def send_message(self, message: OutgoingMessage) -> None:
         # This function is called by the MessageQueue when there is an outgoing message for this channel

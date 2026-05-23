@@ -39,13 +39,14 @@ class MessageHistory:
             log.error(f"Error creating message history database: {str(e)}")
             raise
 
-    def add_message(self, role: str, content: str):
+    def add_message(self, role: str, content: str, conversation_id: int = None):
         timestamp = datetime.now().isoformat()
         est = _est_tokens(content)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "INSERT INTO messages (channel, role, content, timestamp, est_tokens) VALUES (?, ?, ?, ?, ?)",
-                (self.channel, role, content, timestamp, est)
+                "INSERT INTO messages (channel, role, content, timestamp, est_tokens, conversation_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (self.channel, role, content, timestamp, est, conversation_id),
             )
             conn.commit()
         log.info(f"Added message to history: role={role}, est_tokens={est}, content={content[:30]}...")
