@@ -1,7 +1,7 @@
 import discord
 import logging
 
-from .commands import CommandRegistry, BotCommand, status_cmd, help_cmd, model_cmd
+from .commands import CommandRegistry, BotCommand, make_status_cmd, help_cmd, model_cmd
 from .message_queue import MessageQueue
 from .channel import Channel, ChannelType
 from .message import OutgoingMessage, IncomingMessage
@@ -26,7 +26,7 @@ class DiscordChannel(discord.Client, Channel):
         mq.register(self, self.send_message)
         self.registry = CommandRegistry()
         self.registry.register(BotCommand("model", "Get or set the current model. Usage: /model [model_name]", model_cmd))
-        self.registry.register(BotCommand("status", "Show bot status.", status_cmd))
+        self.registry.register(BotCommand("status", "Show bot status.", make_status_cmd(ChannelType.DISCORD.value)))
         self.registry.register(BotCommand("help",   "Show this help message.", help_cmd(self.registry)))
 
     @property

@@ -29,6 +29,10 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
     except Exception as e:
         log.error(f"Error loading system prompt: {e}")
 
+    conv_id   = ctx.get("conversation_id", "")
+    conv_name = ctx.get("conversation_name", "")
+    conv_line = f"\n- Conversation: [{conv_id}] {conv_name}" if conv_id else ""
+
     sys_prompt += f"""
 
 ## Current System Context
@@ -41,7 +45,7 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 - workspace:  {config.PROJECT_HOME / "workspace"}
 - Python:     {platform.python_version()}
 - Starting LLM Model:      {runtime.get("model", "unknown")}
-- Current Channel: {channel}
+- Current Channel: {channel}{conv_line}
 """
 
     log.info(f"Loaded system prompt: {len(sys_prompt)} characters")
@@ -92,6 +96,26 @@ class Agent(ABC):
     def _should_stop(self) -> bool:
         """Return True to break out of the loop early."""
         return False
+
+    async def _auto_name(self, store, conv_id: int, messages: list[dict], name_runtime_key: str) -> None:
+        from .helper_agent import HelperAgent  # lazy — helper_agent imports Agent
+        transcript = "\n".join(
+            f"{m['role']}: {m['content'][:200]}" for m in messages[:4]
+        )
+        prompt = (
+            "Summarize this conversation in 4-6 words as a title. "
+            "Reply with just the title, nothing else.\n\n" + transcript
+        )
+        try:
+            name = await HelperAgent().run(prompt)
+            conv = store.get(conv_id)
+            if conv and conv["name"] == "New Conversation":
+                clean = name.strip()[:80] or "New Conversation"
+                store.rename(conv_id, clean, conv["channel"])
+                runtime.set(name_runtime_key, clean)
+                log.info(f"Auto-named conversation {conv_id}: {clean!r}")
+        except Exception as e:
+            log.warning(f"Auto-naming conversation {conv_id} failed: {e}")
 
     # --- shared tool dispatch ---
 
