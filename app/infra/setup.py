@@ -28,10 +28,3 @@ def ensure_home_dir() -> None:
         with open(config_path, "w", encoding="utf-8") as f:
             f.write(default_config)
         log.info(f"Created default config.toml in home directory: {config_path}")
-
-
-def migrate_db_path():
-    old = Path.home() / f".{APP_NAME}" / "history.db"
-    if old.exists() and not APP_DB.exists():
-        old.rename(APP_DB)
-        log.info("Migrated database: history.db → app.db")

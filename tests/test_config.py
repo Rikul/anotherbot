@@ -5,7 +5,8 @@ import app.config as config
 
 
 def test_load_uses_defaults_when_file_not_found(tmp_path):
-    config.load(tmp_path / "missing.toml")
+    with patch.dict(os.environ, {}, clear=True):
+        config.load(tmp_path / "missing.toml")
     assert config.get("model") == "deepseek/deepseek-v4-flash"
     assert config.get("telegram") == {}
 

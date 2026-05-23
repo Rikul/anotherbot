@@ -23,8 +23,6 @@ class MessageHistory:
                     CREATE TABLE IF NOT EXISTS messages (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         channel text NOT NULL,
-                        dir text,
-                        project text,
                         role TEXT NOT NULL,
                         content TEXT NOT NULL,
                         timestamp TEXT NOT NULL,
@@ -35,25 +33,19 @@ class MessageHistory:
                     CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel)
                 """)
 
-                # migrate existing DBs that don't have est_tokens yet
-                try:
-                    conn.execute("ALTER TABLE messages ADD COLUMN est_tokens INTEGER")
-                except sqlite3.OperationalError:
-                    pass  # column already exists
-                
                 conn.commit()
 
         except sqlite3.Error as e:
             log.error(f"Error creating message history database: {str(e)}")
             raise
 
-    def add_message(self, role: str, content: str, dir: str | None = None, project: str | None = None):
+    def add_message(self, role: str, content: str):
         timestamp = datetime.now().isoformat()
         est = _est_tokens(content)
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(
-                "INSERT INTO messages (channel, role, content, timestamp, dir, project, est_tokens) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (self.channel, role, content, timestamp, dir, project, est)
+                "INSERT INTO messages (channel, role, content, timestamp, est_tokens) VALUES (?, ?, ?, ?, ?)",
+                (self.channel, role, content, timestamp, est)
             )
             conn.commit()
         log.info(f"Added message to history: role={role}, est_tokens={est}, content={content[:30]}...")
