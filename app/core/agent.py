@@ -1,6 +1,10 @@
 import asyncio
 import json
+import os
+import platform
 from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
 
 from .. import config
 from .client import Client
@@ -9,6 +13,39 @@ from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
 TOOL_RESULT_HISTORY_LIMIT = 100
+
+
+def get_default_sys_prompt(context: dict | None = None) -> str:
+    ctx = context or {}
+    channel = ctx.get("channel", "cli")
+
+    now = datetime.now()
+    sys_instructions_path = Path(__file__).parent / "sys_instructions.md"
+    sys_prompt = ""
+
+    try:
+        with open(sys_instructions_path, "r", encoding="utf-8") as f:
+            sys_prompt = f.read().strip()
+    except Exception as e:
+        log.error(f"Error loading system prompt: {e}")
+
+    sys_prompt += f"""
+
+## Current System Context
+- Conversation started on   {now.strftime("%Y-%m-%d %H:%M:%S")} {now.astimezone().tzname()}
+- Day of Week: {now.strftime("%A")}
+- OS:         {platform.system()} {platform.release()}
+- Shell:      {os.environ.get("SHELL", "unknown")}
+- CWD:        {Path.cwd()}
+- Home:       {Path.home()}
+- workspace:  {config.PROJECT_HOME / "workspace"}
+- Python:     {platform.python_version()}
+- Starting LLM Model:      {runtime.get("model", "unknown")}
+- Current Channel: {channel}
+"""
+
+    log.info(f"Loaded system prompt: {len(sys_prompt)} characters")
+    return sys_prompt
 
 
 class Agent(ABC):

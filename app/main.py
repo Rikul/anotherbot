@@ -47,12 +47,16 @@ def parse_args():
 
     args = parser.parse_args()
 
-    if not hasattr(args, "max_iterations") or args.max_iterations is None or args.max_iterations <= 0:
+    if not hasattr(args, "max_iterations") or args.max_iterations is None:
         args.max_iterations = config.get("max_iterations", 100)
         
     return args
     
 async def run_cli(args):
+
+    if args.max_iterations <= 0:
+        log.warning(f"max_iterations must be positive (got {args.max_iterations}), exiting")
+        return
 
     if args.silent:
         log.setLevel(logging.WARNING)
