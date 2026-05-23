@@ -231,10 +231,10 @@ class ConversationStore:
         with _fk_conn(self.db_path) as conn:
             rows = conn.execute(
                 "SELECT role, content FROM messages WHERE conversation_id=? "
-                "ORDER BY timestamp ASC, id ASC LIMIT ?",
+                "ORDER BY timestamp DESC, id DESC LIMIT ?",
                 (conversation_id, limit),
             ).fetchall()
-        return [{"role": row[0], "content": row[1]} for row in rows]
+        return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
 
     def count_user_messages(self, conversation_id: int) -> int:
         with _fk_conn(self.db_path) as conn:

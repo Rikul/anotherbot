@@ -202,13 +202,6 @@ def test_fork_rejects_missing_conversation(store):
 def test_load_messages_ordered_by_timestamp_then_id(store, db):
     cid = store.create("cli")
     with sqlite3.connect(db) as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                channel TEXT, role TEXT, content TEXT,
-                timestamp TEXT, est_tokens INTEGER, conversation_id INTEGER
-            )
-        """)
         conn.execute(
             "INSERT INTO messages (channel, role, content, timestamp, conversation_id) VALUES (?,?,?,?,?)",
             ("cli", "user", "second", "2024-01-01T00:00:02", cid),
@@ -221,6 +214,23 @@ def test_load_messages_ordered_by_timestamp_then_id(store, db):
     msgs = store.load_messages(cid)
     assert msgs[0]["content"] == "first"
     assert msgs[1]["content"] == "second"
+
+
+def test_load_messages_returns_most_recent_when_truncated(store, db):
+    """With limit=2, load_messages must return the 2 newest messages, not the 2 oldest."""
+    cid = store.create("cli")
+    with sqlite3.connect(db) as conn:
+        for i in range(5):
+            conn.execute(
+                "INSERT INTO messages (channel, role, content, timestamp, conversation_id) VALUES (?,?,?,?,?)",
+                ("cli", "user", f"msg{i}", f"2024-01-01T00:00:0{i}", cid),
+            )
+        conn.commit()
+    msgs = store.load_messages(cid, limit=2)
+    assert len(msgs) == 2
+    # Should be the two most recent, in chronological order
+    assert msgs[0]["content"] == "msg3"
+    assert msgs[1]["content"] == "msg4"
 
 
 # --- count_user_messages ---
