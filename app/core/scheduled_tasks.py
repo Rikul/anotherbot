@@ -18,12 +18,6 @@ class ScheduledTasks:
         self._channels = channels or {}
         self._init_tasks_db()
 
-    def _migrate(self, conn, table: str, columns: list[tuple[str, str]]):
-        existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-        for col_name, col_def in columns:
-            if col_name not in existing:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_def}")
-
     def _init_tasks_db(self):
         with sqlite3.connect(APP_DB) as conn:
 
@@ -55,16 +49,6 @@ class ScheduledTasks:
                 )
             """)
 
-            self._migrate(conn, "tasks", [
-                ("repeat",           "INTEGER NOT NULL DEFAULT 0"),
-                ("next_run",         "TEXT NOT NULL DEFAULT '1970-01-01T00:00:00'"),
-                ("delivery_channel", "TEXT NOT NULL DEFAULT 'telegram'"),
-                ("run_count",        "INTEGER NOT NULL DEFAULT 0"),
-            ])
-            self._migrate(conn, "task_outputs", [
-                ("status",        "TEXT NOT NULL DEFAULT 'success'"),
-                ("duration_secs", "REAL"),
-            ])
             conn.commit()
 
 

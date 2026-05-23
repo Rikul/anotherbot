@@ -7,7 +7,7 @@ import os
 
 from . import config
 from .infra.app_logging import setup_logging, log
-from .infra.setup import ensure_home_dir, migrate_db_path
+from .infra.setup import ensure_home_dir
 from .cli.cli import input_loop
 from .cli.cli_agent import CliAgent
 from .bg_server import start_server
@@ -93,8 +93,6 @@ async def main():
     
     await load_config()
     setup_logging(level=logging.INFO)
-
-    migrate_db_path()
 
     args = parse_args()
 
