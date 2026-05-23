@@ -19,8 +19,8 @@ class CliAgent(Agent):
         self.silent = silent
         self._channel_str = ChannelType.CLI.value
 
-        self.history = MessageHistory(channel_type=self._channel_str)
         self._store = ConversationStore()
+        self.history = MessageHistory(channel_type=self._channel_str)
 
         conv = self._store.get_last(self._channel_str)
         if conv is None:
