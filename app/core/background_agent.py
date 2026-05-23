@@ -10,6 +10,7 @@ from ..channels.message_queue import MessageQueue
 from .agent import Agent, MAX_CONTEXT_MESSAGES
 from ..infra.startup import load_system_context
 from ..infra.message_history import MessageHistory
+from . import runtime
 
 _MAX_EMPTY_RETRIES = 5
 
