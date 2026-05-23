@@ -26,8 +26,8 @@ class BackgroundAgent(Agent):
             raise ValueError("channel must be specified for BackgroundAgent")
 
         self._channel_str = channel.channel_type.value
-        self.history = MessageHistory(channel_type=self._channel_str)
         self._store = ConversationStore()
+        self.history = MessageHistory(channel_type=self._channel_str)
 
         conv = self._store.get_last(self._channel_str)
         if conv is None:
