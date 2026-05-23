@@ -7,8 +7,7 @@ from ..infra.app_logging import log
 from ..channels.channel import Channel
 from ..channels.message import OutgoingMessage
 from ..channels.message_queue import MessageQueue
-from .agent import Agent, MAX_CONTEXT_MESSAGES
-from ..infra.startup import load_system_context
+from .agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
 from ..infra.message_history import MessageHistory
 from . import runtime
 
@@ -73,7 +72,7 @@ class BackgroundAgent(Agent):
         self._reply_metadata = metadata or {}
         self.history.add_message("user", message)
 
-        system_context = load_system_context()
+        system_context = get_default_sys_prompt({"channel" : self.channel.channel_type.value})
         system = [{"role": "system", "content": system_context}] if system_context else []
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
 

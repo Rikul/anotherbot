@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from ..core.tool_calls import all_tool_specs
 from .cli import ask_permission
-from ..core.agent import Agent, MAX_CONTEXT_MESSAGES
+from ..core.agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
 from ..infra.message_history import MessageHistory
 from ..channels.channel import ChannelType
-from ..infra.startup import load_system_context
 
 
 class CliAgent(Agent):
@@ -34,7 +33,7 @@ class CliAgent(Agent):
         self._trim_messages()
         self.history.add_message("user", message)
 
-        system_context = load_system_context()
+        system_context = get_default_sys_prompt({"channel": ChannelType.CLI.value})
         system = [{"role": "system", "content": system_context}] if system_context else []
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
 

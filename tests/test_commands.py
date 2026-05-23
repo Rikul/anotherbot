@@ -84,7 +84,7 @@ async def test_execute_passes_args_to_handler():
 
 @pytest.mark.asyncio
 async def test_status_includes_model_name():
-    with patch("app.config._config", {"model": "my-test-model"}):
+    with patch("app.core.runtime._store", {"model": "my-test-model"}):
         result = await status_cmd()
     assert "my-test-model" in result
 
@@ -123,15 +123,15 @@ async def test_help_handler_reflects_commands_registered_after_creation():
 
 @pytest.mark.asyncio
 async def test_model_cmd_returns_current_model_when_no_args():
-    with patch("app.config._config", {"model": "deepseek/v3"}):
+    with patch("app.core.runtime._store", {"model": "deepseek/v3"}):
         result = await model_cmd("")
     assert "deepseek/v3" in result
 
 
 @pytest.mark.asyncio
 async def test_model_cmd_sets_model():
-    mock_cfg = {"model": "old-model"}
-    with patch("app.config._config", mock_cfg):
+    mock_store = {"model": "old-model"}
+    with patch("app.core.runtime._store", mock_store):
         result = await model_cmd("new-model")
     assert "new-model" in result
-    assert mock_cfg["model"] == "new-model"
+    assert mock_store["model"] == "new-model"

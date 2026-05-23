@@ -36,7 +36,7 @@ def make_agent(max_iterations=10):
     with patch("app.core.agent.Client") as MockClient:
         mock_openai = make_mock_client()
         MockClient.return_value.get_client.return_value = mock_openai
-        with patch("app.core.background_agent.load_system_context", return_value="You are a helpful assistant."):
+        with patch("app.core.background_agent.get_default_sys_prompt", return_value="You are a helpful assistant."):
             with patch("app.core.background_agent.MessageHistory") as MockHistory:
                 MockHistory.return_value.get_history.return_value = []
                 agent = BackgroundAgent(mq=mq, channel=_mock_channel, max_iterations=max_iterations)
@@ -58,7 +58,7 @@ def test_agent_initializes_with_empty_messages():
 @pytest.mark.asyncio
 async def test_agent_loop_sends_system_context_to_llm():
     agent, mock_client, _ = make_agent()
-    with patch("app.core.background_agent.load_system_context", return_value="system prompt"):
+    with patch("app.core.background_agent.get_default_sys_prompt", return_value="system prompt"):
         await agent.agent_loop("hello")
     call_messages = mock_client.chat.completions.create.call_args[1]["messages"]
     assert call_messages[0]["role"] == "system"
@@ -69,7 +69,7 @@ def test_agent_stores_channel_and_mq():
     mq = MessageQueue()
     with patch("app.core.agent.Client") as MockClient:
         MockClient.return_value.get_client.return_value = MagicMock()
-        with patch("app.core.background_agent.load_system_context", return_value=""):
+        with patch("app.core.background_agent.get_default_sys_prompt", return_value=""):
             with patch("app.core.background_agent.MessageHistory") as MockHistory:
                 MockHistory.return_value.get_history.return_value = []
                 agent = BackgroundAgent(mq=mq, channel=_mock_channel)
@@ -235,7 +235,7 @@ async def test_agent_loop_clears_stopped_after_completion():
 
     with patch("app.core.agent.Client") as MockClient:
         MockClient.return_value.get_client.return_value = make_mock_client()
-        with patch("app.core.background_agent.load_system_context", return_value=""):
+        with patch("app.core.background_agent.get_default_sys_prompt", return_value=""):
             with patch("app.core.background_agent.MessageHistory") as MockHistory:
                 MockHistory.return_value.get_history.return_value = []
                 agent = BackgroundAgent(mq=mq, channel=local_channel, max_iterations=10)
