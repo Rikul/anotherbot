@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from .. import config
 from .client import Client
 from ..infra.app_logging import log
+from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
 TOOL_RESULT_HISTORY_LIMIT = 100
@@ -81,7 +82,7 @@ class Agent(ABC):
             iteration += 1
             log.info("chat.completions.create...")
             chat = await self.client.chat.completions.create(
-                model = config.get("model", "deepseek/deepseek-v4-flash"),
+                model = runtime.get("model", "deepseek/deepseek-v4-flash"),
                 messages = messages,
                 tools = tool_specs,
             )

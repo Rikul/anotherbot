@@ -11,6 +11,7 @@ from .infra.setup import ensure_home_dir, migrate_db_path
 from .cli.cli import input_loop
 from .cli.cli_agent import CliAgent
 from .bg_server import start_server
+from .core import runtime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -44,23 +45,21 @@ def parse_args():
 
     subparsers.add_parser("background", help="Run in background")
 
-    return parser.parse_args()
-    
-async def run_cli(args):
+    args = parser.parse_args()
 
-    # validate max_iterations
-    if args.max_iterations is None:
+    if not hasattr(args, "max_iterations") or args.max_iterations is None or args.max_iterations <= 0:
         args.max_iterations = config.get("max_iterations", 100)
         
-    if args.max_iterations <= 0:
-        log.error("max_iterations must be a positive integer")
-        return
+    return args
+    
+async def run_cli(args):
 
     if args.silent:
         log.setLevel(logging.WARNING)
 
     log.info("Starting agent...")
-    agent = CliAgent(auto_approve=args.auto_approve or args.silent, max_iterations=args.max_iterations, silent=args.silent)
+    agent = CliAgent(auto_approve=args.auto_approve or args.silent, 
+                        max_iterations=runtime.get("max_iterations", 250), silent=args.silent)
 
     if args.prompt:
         await agent.agent_loop(args.prompt)
@@ -94,6 +93,9 @@ async def main():
     migrate_db_path()
 
     args = parse_args()
+
+    runtime.set("model",  config.get("model", "deepseek/deepseek-v4-flash"))
+    runtime.set("max_iterations", args.max_iterations)
 
     if args.command == "cli":
         await run_cli(args)

@@ -4,13 +4,13 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Awaitable
+from ..core import runtime
 
 log = logging.getLogger(__name__)
 
 CommandHandler = Callable[[str], Awaitable[str]]
 
 _STARTUP_TIME: datetime = datetime.now()
-
 
 @dataclass
 class BotCommand:
@@ -49,17 +49,15 @@ def help_cmd(registry: CommandRegistry) -> CommandHandler:
     return _help
 
 async def model_cmd(args: str = "") -> str:
-    from .. import config
     if not args.strip():
-        return f"Current model: {config.get('model', 'unknown')}"
+        return f"Current model: {runtime.get('model', 'unknown')}"
     
-    config.set("model", args.strip())
+    runtime.set("model", args.strip())
     return f"Model set to: {args.strip()}"
     
 async def status_cmd(args: str = "") -> str:
-    from .. import config
     uptime = datetime.now() - _STARTUP_TIME
     hours, remainder = divmod(int(uptime.total_seconds()), 3600)
     minutes, seconds = divmod(remainder, 60)
-    model = config.get("model", "unknown")
+    model = runtime.get("model", "unknown")
     return f"Bot status:\n  Model:  {model}\n  Uptime: {hours}h {minutes}m {seconds}s"

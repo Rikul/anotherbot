@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a **CodeCrafters challenge** project implementing a Python-based AI agent CLI ("crafterscode") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. The agent supports interactive REPL mode, silent/non-interactive mode, and a background agent architecture for multi-channel messaging.
+This is a Python-based AI agent ("crafterscode") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, silent/non-interactive mode, and a background server architecture with Telegram and Discord channels.
 
 ## Running & Development
 
@@ -36,9 +36,11 @@ The project uses `uv` for dependency management. No compile step is needed.
 ## Configuration
 
 Config lives at `~/.crafterscode/config.toml` (created automatically on first run with defaults). Key fields:
-- `model` — LLM model string (default: `"deepseek/deepseek-v3.2"`)
+- `model` — LLM model string (default: `"deepseek/deepseek-v4-flash"`)
 - `max_iterations` — max agentic loop iterations (default: `100`)
 - `base_url` — API base URL (default: `"https://openrouter.ai/api/v1"`)
+- `[telegram]` — `BOT_TOKEN`, `ALLOW_FROM` (list of integer user IDs)
+- `[discord]` — `TOKEN`, `ALLOW_FROM` (list of integer user IDs; empty = allow all)
 
 Environment variables (all override config file values):
 - `LLM_API_KEY` — required
@@ -46,6 +48,8 @@ Environment variables (all override config file values):
 - `MODEL` — optional model override
 - `TELEGRAM_BOT_TOKEN` — Telegram bot token (alternative to config file)
 - `TELEGRAM_ALLOW_FROM` — comma-separated Telegram user IDs (e.g. `"123,456"`)
+- `DISCORD_BOT_TOKEN` — Discord bot token (alternative to config file)
+- `DISCORD_ALLOW_FROM` — comma-separated Discord user IDs
 - `ANOTHERBOT_HOME` — overrides the data directory (default: `~/.crafterscode`)
 
 For Docker, no config file is needed — pass everything as env vars. See `Dockerfile` and the Docker section in README.
@@ -69,21 +73,31 @@ Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gath
 
 ### Tool System
 
-Tools are registered in `app/tool_calls.py` in `tool_registry` — a dict mapping tool name → `{spec, func}`. Each tool in `app/tools/` exports a function and an OpenAI-format tool spec dict. `run_tool()` dispatches by name and restores `os.getcwd()` after each call.
+Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` method. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` dispatches by name and restores `os.getcwd()` after each call. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars).
 
-Current tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`.
+Current tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`.
 
-`_HELPER_AGENT_TOOLS` in `tool_calls.py` is an explicit allowlist of tools available to `HelperAgent` (used internally by scheduled tasks). Scheduled task management tools are excluded to prevent recursion.
+`_HELPER_AGENT_TOOLS` in `tool_calls.py` is an explicit allowlist of tools available to `HelperAgent` (used internally by scheduled tasks). Scheduled task mutation tools (`add/update/remove_scheduled_task`) are excluded to prevent recursion.
 
 ### System Context
 
 On startup, `load_system_context()` (`app/infra/startup.py`) loads `app/core/sys_instructions.md` and prepends it as the system message to `self.messages`.
 
-### Message Queue / Channel Architecture
+### Runtime Settings
 
-`MessageQueue` (`app/channels/message_queue.py`) holds two `asyncio.Queue`s (incoming/outgoing). `BackgroundAgent.process_incoming()` consumes the incoming queue and drives `agent_loop()`; `process_outgoing()` dispatches outbound messages to registered delivery functions. This is the intended extension point for adding new channels.
+`app/core/runtime.py` is an in-memory key-value singleton (`set()` / `get()`) for mutable settings like `model`, `base_url`, and `max_iterations`. Values are populated from config during startup in `main.py` and can be changed at runtime via the `/model` slash command.
 
-Each channel should have its own `MessageQueue` instance to avoid cross-channel message routing bugs (e.g., a Telegram message being handled by the Discord agent).
+### Channels & Command Registry
+
+**Channel types** are defined in `ChannelType` enum (`app/channels/channel.py`): `CLI`, `TELEGRAM`, `DISCORD`, `WEB`. Each channel implements the `Channel` ABC and owns a `MessageQueue` instance. `bg_server.py` wires up enabled channels — each gets its own `MessageQueue`, `BackgroundAgent`, and set of coroutines (`run_polling`, `process_incoming`, `process_outgoing`) gathered into the event loop.
+
+**Slash commands** are handled by a `CommandRegistry` (`app/channels/commands.py`) shared across Telegram and Discord. Built-in commands: `/help`, `/status`, `/model [name]`, `/whoami`. Each channel constructs its own registry instance and registers the same `BotCommand`s. Commands are dispatched before the message reaches the agent loop.
+
+### Message Queue
+
+`MessageQueue` (`app/channels/message_queue.py`) holds two `asyncio.Queue`s (incoming/outgoing). `BackgroundAgent.process_incoming()` consumes the incoming queue and drives `agent_loop()`; `process_outgoing()` dispatches outbound messages to registered delivery functions.
+
+Each channel **must** have its own `MessageQueue` instance to avoid cross-channel message routing bugs.
 
 ### Scheduled Tasks
 

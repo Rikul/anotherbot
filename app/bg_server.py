@@ -6,7 +6,7 @@ from .infra.app_logging import log
 from .core.background_agent import BackgroundAgent
 from .channels.message_queue import MessageQueue
 from .core.scheduled_tasks import ScheduledTasks
-
+from .core import runtime
 
 async def start_server() -> None:
     log.info("Starting server...")
@@ -31,7 +31,7 @@ async def start_server() -> None:
             telegram_mq = MessageQueue()
             telegram_channel = TelegramChannel(telegram_mq, bot_token=bot_token, allow_from=config.telegram.get("ALLOW_FROM", []))
             telegram_channel.start()
-            telegram_agent = BackgroundAgent(mq=telegram_mq, channel=telegram_channel)
+            telegram_agent = BackgroundAgent(mq=telegram_mq, channel=telegram_channel, max_iterations=runtime.get("max_iterations", 250))
 
     if config.get("discord"):
         discord_token = config.discord.get("TOKEN")
@@ -42,7 +42,7 @@ async def start_server() -> None:
             discord_mq = MessageQueue()
             discord_channel = DiscordChannel(discord_mq, token=discord_token, allow_from=config.discord.get("ALLOW_FROM", []))
             discord_channel.start()
-            discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel)
+            discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel, max_iterations=runtime.get("max_iterations", 250))
 
     if not telegram_channel and not discord_channel:
         log.error("No channels configured, exiting...")
