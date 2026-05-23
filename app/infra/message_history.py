@@ -32,7 +32,13 @@ class MessageHistory:
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel)
                 """)
-
+                # Add conversation_id if missing (ConversationStore adds it too,
+                # but MessageHistory must be self-consistent for standalone use)
+                cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                if "conversation_id" not in cols:
+                    conn.execute(
+                        "ALTER TABLE messages ADD COLUMN conversation_id INTEGER"
+                    )
                 conn.commit()
 
         except sqlite3.Error as e:
