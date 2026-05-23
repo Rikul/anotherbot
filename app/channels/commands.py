@@ -169,6 +169,12 @@ def rename_conversation_cmd(store: ConversationStore, channel: str) -> CommandHa
             store.rename(conv_id, new_name, channel)
         except ValueError as e:
             return str(e)
+
+        if runtime.get("conversation_id") == conv_id:
+            runtime.set("conversation_name", new_name)
+        if channel and runtime.get(f"conversation_id:{channel}") == conv_id:
+            runtime.set(f"conversation_name:{channel}", new_name)
+
         return f"Conversation [{conv_id}] renamed to \"{new_name[:80]}\""
     return _rename
 
