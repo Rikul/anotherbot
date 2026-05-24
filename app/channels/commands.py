@@ -120,7 +120,7 @@ def new_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
 def load_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
     async def _load(args: str = "") -> str:
         if not args.strip():
-            return "Usage: /load-conversation <id>"
+            return "Usage: /load <id>"
         try:
             conv_id = int(args.strip())
         except ValueError:
@@ -157,7 +157,7 @@ def rename_conversation_cmd(store: ConversationStore, channel: str) -> CommandHa
     async def _rename(args: str = "") -> str:
         parts = args.strip().split(maxsplit=1)
         if len(parts) < 2:
-            return "Usage: /rename-conversation <id> <new name>"
+            return "Usage: /rename <id> <new name>"
         try:
             conv_id = int(parts[0])
         except ValueError:
