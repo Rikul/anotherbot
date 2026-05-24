@@ -158,32 +158,20 @@ async def test_error_handler_notifies_user_on_chat_update():
 
 @pytest.mark.asyncio
 async def test_stop_sets_has_stopped():
-    tc, _ = make_telegram_channel()
+    tc, mq = make_telegram_channel()
     tc.send_message = AsyncMock()
-    assert tc.has_stopped is False
 
     await tc.command_handler(make_update(text="/stop"), MagicMock())
 
     assert tc.has_stopped is True
-
-
-@pytest.mark.asyncio
-async def test_stop_replies_to_user():
-    tc, _ = make_telegram_channel()
-    tc.send_message = AsyncMock()
-
-    await tc.command_handler(make_update(text="/stop"), MagicMock())
-
+    assert mq.incoming.empty()
     tc.send_message.assert_called_once()
-    assert "Stopped" in tc.send_message.call_args[0][0].content
 
 
 @pytest.mark.asyncio
 async def test_clear_stopped_resets_state():
     tc, _ = make_telegram_channel()
-    tc.send_message = AsyncMock()
-
-    await tc.command_handler(make_update(text="/stop"), MagicMock())
+    tc.stopped = True
     assert tc.has_stopped is True
 
     tc.clear_stopped()
@@ -204,14 +192,14 @@ async def test_command_handler_whoami_replies_with_user_info():
 
 @pytest.mark.asyncio
 async def test_command_handler_dispatches_with_args():
-    tc, _ = make_telegram_channel()
-    tc.registry.execute = AsyncMock(return_value="Model set to: gpt-4")
+    tc, mq = make_telegram_channel()
     tc.send_message = AsyncMock()
 
     await tc.command_handler(make_update(text="/model gpt-4"), MagicMock())
 
-    tc.registry.execute.assert_called_once_with("model", "gpt-4")
-    tc.send_message.assert_called_once()
+    assert not mq.incoming.empty()
+    msg = await mq.incoming.get()
+    assert msg.content == "/model gpt-4"
 
 
 # --- error_handler ---

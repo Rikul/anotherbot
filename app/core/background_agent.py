@@ -45,12 +45,15 @@ class BackgroundAgent(Agent):
         # Lazy import to avoid circular: commands imports runtime which is fine,
         # but conversation commands need self reference so we build registry here.
         from ..channels.commands import (
-            CommandRegistry, BotCommand, help_cmd,
+            CommandRegistry, BotCommand, help_cmd, make_status_cmd, model_cmd,
             list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
             fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
         )
         self.registry = CommandRegistry()
         ch = self._channel_str
+        self.registry.register(BotCommand("model",  "Get or set model. Usage: /model [name]", model_cmd))
+        self.registry.register(BotCommand("status", "Show bot status.", make_status_cmd(ch)))
+        self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
         self.registry.register(BotCommand("list-conversations",  "List conversations.", list_conversations_cmd(self._store, ch)))
         self.registry.register(BotCommand("new-conversation",    "Start a new conversation.", new_conversation_cmd(self)))
         self.registry.register(BotCommand("load-conversation",   "Load a conversation. Usage: /load-conversation <id>", load_conversation_cmd(self)))
@@ -58,6 +61,10 @@ class BackgroundAgent(Agent):
         self.registry.register(BotCommand("rename-conversation", "Rename a conversation. Usage: /rename-conversation <id> <name>", rename_conversation_cmd(self._store, ch)))
         self.registry.register(BotCommand("export-conversation", "Export a conversation to JSON. Usage: /export-conversation [id]", export_conversation_cmd(self._store, ch)))
         self.registry.register(BotCommand("help", "Show available commands.", help_cmd(self.registry)))
+
+    async def _stop_cmd(self, args: str = "") -> str:
+        self.channel.stopped = True
+        return "Stopped."
 
     def _switch_conversation(self, conv: dict) -> None:
         self.conversation_id = conv["id"]

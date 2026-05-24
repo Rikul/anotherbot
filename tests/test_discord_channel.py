@@ -283,9 +283,8 @@ async def test_on_message_whoami_replies_with_user_info():
 
 
 @pytest.mark.asyncio
-async def test_on_message_known_command_replies_and_skips_mq():
+async def test_on_message_command_enqueued():
     dc, mq = make_discord_channel()
-    dc.registry.execute = AsyncMock(return_value="Bot status: running")
     dc.send_message = AsyncMock()
     message = MagicMock()
     message.author.id = 123
@@ -295,15 +294,15 @@ async def test_on_message_known_command_replies_and_skips_mq():
 
     await dc.on_message(message)
 
-    dc.registry.execute.assert_called_once_with("status", "")
-    dc.send_message.assert_called_once()
-    assert mq.incoming.empty()
+    assert not mq.incoming.empty()
+    msg = await mq.incoming.get()
+    assert msg.content == "/status"
+    dc.send_message.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_on_message_command_with_args():
+async def test_on_message_command_with_args_enqueued():
     dc, mq = make_discord_channel()
-    dc.registry.execute = AsyncMock(return_value="Model set to: gpt-4")
     dc.send_message = AsyncMock()
     message = MagicMock()
     message.author.id = 123
@@ -313,15 +312,14 @@ async def test_on_message_command_with_args():
 
     await dc.on_message(message)
 
-    dc.registry.execute.assert_called_once_with("model", "gpt-4")
-    dc.send_message.assert_called_once()
-    assert mq.incoming.empty()
+    assert not mq.incoming.empty()
+    msg = await mq.incoming.get()
+    assert msg.content == "/model gpt-4"
 
 
 @pytest.mark.asyncio
-async def test_on_message_unknown_command_falls_through_to_mq():
+async def test_on_message_unknown_command_enqueued():
     dc, mq = make_discord_channel()
-    dc.registry.execute = AsyncMock(return_value=None)
     message = MagicMock()
     message.author.id = 123
     message.author.display_name = "Alice"
