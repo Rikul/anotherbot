@@ -111,15 +111,12 @@ async def test_send_message_skips_when_no_websocket_id(caplog):
 
 
 @pytest.mark.asyncio
-async def test_send_message_skips_when_client_not_connected(caplog):
-    import logging
+async def test_send_message_skips_when_client_not_connected():
     wc, _ = make_websocket_channel()
 
     msg = OutgoingMessage(
         content="hi", channel=wc, metadata={"websocket_id": "ghost"}
     )
-    # _safe_send_json just returns when client not in _connections
-    # No warning is logged by send_message itself — it delegates to _safe_send_json
     await wc.send_message(msg)
     # No exception, no crash — just a no-op
 
@@ -140,6 +137,59 @@ async def test_send_message_splits_long_content():
 
     # Should have called send_json twice (two chunks)
     assert mock_ws.send_json.call_count == 2
+
+
+# --- _extract_content -------------------------------------------------------
+
+class TestExtractContent:
+    """Tests for _extract_content: JSON framing, raw text, edge cases."""
+
+    def test_raw_text_passed_through(self):
+        assert WebSocketChannel._extract_content("hello world") == "hello world"
+
+    def test_json_message_extracts_content(self):
+        result = WebSocketChannel._extract_content(
+            '{"type": "message", "content": "hello"}'
+        )
+        assert result == "hello"
+
+    def test_json_typing_message_ignored(self):
+        """A non-message JSON type (e.g. 'ping') is returned as raw text."""
+        result = WebSocketChannel._extract_content(
+            '{"type": "ping", "content": "keepalive"}'
+        )
+        # Falls back to raw text for unknown JSON shapes
+        assert result == '{"type": "ping", "content": "keepalive"}'
+
+    def test_json_without_type_is_returned_as_raw(self):
+        """Missing 'type' field means the JSON is returned as raw text."""
+        result = WebSocketChannel._extract_content(
+            '{"content": "hello"}'
+        )
+        assert result == '{"content": "hello"}'
+
+    def test_malformed_json_falls_back_to_raw_text(self):
+        result = WebSocketChannel._extract_content('{"broken json')
+        assert result == '{"broken json'
+
+    def test_empty_after_strip_returns_none(self):
+        assert WebSocketChannel._extract_content("   ") is None
+
+    def test_empty_content_in_json_returns_none(self):
+        result = WebSocketChannel._extract_content(
+            '{"type": "message", "content": " "}'
+        )
+        assert result is None
+
+    def test_json_list_returns_raw(self):
+        result = WebSocketChannel._extract_content('["not", "a", "dict"]')
+        assert result == '["not", "a", "dict"]'
+
+    def test_raw_starts_with_brace_but_not_json(self):
+        result = WebSocketChannel._extract_content(
+            "{this is not json but raw text}"
+        )
+        assert result == "{this is not json but raw text}"
 
 
 # --- run_polling / uvicorn integration -------------------------------------
@@ -189,27 +239,25 @@ async def test_process_message_is_noop():
 # --- WebSocket endpoint (simulated) ----------------------------------------
 
 @pytest.mark.asyncio
-async def test_ws_endpoint_accepts_and_routes_message():
-    """Simulate the WS endpoint flow: accept → receive text → enqueue."""
+async def test_ws_endpoint_accepts_and_routes_json_message():
+    """Simulate the WS endpoint flow: accept JSON → extract → enqueue."""
     wc, mq = make_websocket_channel()
     wc.start()
 
-    # Mock a WebSocket object
     mock_ws = AsyncMock()
     mock_ws.receive_text.side_effect = [
-        "hello from ws",
+        '{"type": "message", "content": "hello from ws"}',
         asyncio.CancelledError,  # simulate disconnect
     ]
 
-    # Drive _connections directly
     client_id = "test-client-id"
     wc._connections[client_id] = mock_ws
 
-    # Manually simulate the endpoint's receive loop logic
-    content = await mock_ws.receive_text()  # "hello from ws"
+    raw = await mock_ws.receive_text()
+    content = WebSocketChannel._extract_content(raw)
     await wc.mq.incoming.put(
         IncomingMessage(
-            content=content.strip(),
+            content=content,
             channel=ChannelType.WEB,
             metadata={"websocket_id": client_id},
         )
@@ -222,6 +270,27 @@ async def test_ws_endpoint_accepts_and_routes_message():
     assert msg.metadata == {"websocket_id": client_id}
 
 
+@pytest.mark.asyncio
+async def test_ws_endpoint_accepts_raw_text():
+    """Raw text messages also work (backward-compatible fallback)."""
+    wc, _ = make_websocket_channel()
+    wc.start()
+
+    mock_ws = AsyncMock()
+    mock_ws.receive_text.side_effect = [
+        "raw message without json",
+        asyncio.CancelledError,
+    ]
+
+    client_id = "test-raw"
+    wc._connections[client_id] = mock_ws
+
+    raw = await mock_ws.receive_text()
+    content = WebSocketChannel._extract_content(raw)
+
+    assert content == "raw message without json"
+
+
 # --- Command handling (simulated endpoint logic) ----------------------------
 
 @pytest.mark.asyncio
@@ -232,7 +301,6 @@ async def test_command_whoami_replies_with_client_id():
     client_id = "abc-456"
     wc._connections[client_id] = mock_ws
 
-    # Simulate /whoami handling
     await wc._safe_send_json(
         client_id,
         {"type": "message", "content": f"Your connection ID is {client_id}."},
@@ -253,7 +321,6 @@ async def test_command_stop_sets_stopped_flag():
     client_id = "abc-789"
     wc._connections[client_id] = mock_ws
 
-    # Simulate /stop handling
     wc.stopped = True
     await wc._safe_send_json(
         client_id,
@@ -267,12 +334,32 @@ async def test_command_stop_sets_stopped_flag():
     assert mq.incoming.empty()
 
 
+@pytest.mark.asyncio
+async def test_bare_slash_does_not_crash():
+    """Sending just '/' should not cause an IndexError."""
+    content = WebSocketChannel._extract_content("/")
+    assert content == "/"
+
+    cmd_parts = content[1:].split(maxsplit=1)
+    assert cmd_parts == []
+
+
+@pytest.mark.asyncio
+async def test_slash_space_does_not_crash():
+    """Sending '/ ' should not cause an IndexError."""
+    content = WebSocketChannel._extract_content("/ ")
+    # _extract_content strips whitespace, so "/ " becomes "/"
+    assert content == "/"
+
+    cmd_parts = content[1:].split(maxsplit=1)
+    assert cmd_parts == []
+
+
 # --- safe_send_json edge cases ----------------------------------------------
 
 @pytest.mark.asyncio
 async def test_safe_send_json_skips_disconnected_client():
     wc, _ = make_websocket_channel()
-    # Client not in _connections → should be a no-op
     await wc._safe_send_json("nonexistent", {"type": "message", "content": "test"})
     # No exception, no crash
 
@@ -298,11 +385,9 @@ async def test_connection_added_and_removed():
     mock_ws = AsyncMock()
     client_id = "conn-1"
 
-    # Add
     wc._connections[client_id] = mock_ws
     assert client_id in wc._connections
 
-    # Remove
     wc._connections.pop(client_id, None)
     assert client_id not in wc._connections
 

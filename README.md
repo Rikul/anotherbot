@@ -128,13 +128,16 @@ ws.onmessage = (event) => {
   console.log("Agent:", data.content);
 };
 
-ws.send("Summarize the README in one sentence");
+// Send messages as JSON frames
+ws.send(JSON.stringify({type: "message", content: "Summarize the README in one sentence"}));
 ```
 
 **Connect using websocat:**
 ```bash
-websocat ws://127.0.0.1:8765/ws
-# With auth: websocat ws://127.0.0.1:8765/ws?api_key=my-secret
+# Send JSON frames (replace the message content as needed)
+echo '{"type":"message","content":"hello from websocat"}' | websocat ws://127.0.0.1:8765/ws
+# With auth:
+# echo '{"type":"message","content":"hello"}' | websocat ws://127.0.0.1:8765/ws?api_key=my-secret
 ```
 
 **Message format (both directions):**

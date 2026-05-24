@@ -6,11 +6,19 @@ client via metadata.
 
 Authentication: optional ``api_key`` query parameter checked on connect.
 Rejects mismatched keys with WebSocket close code 4001.
+
+Message framing is JSON in both directions::
+
+    {"type": "message", "content": "Your prompt or response here"}
+
+Raw text is also accepted on input as a convenience for simple clients
+(e.g. ``websocat``).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 
@@ -80,7 +88,7 @@ class WebSocketChannel(Channel):
     def start(self) -> None:
         """Build the FastAPI app but do *not* run it yet.
 
-        ``run_polling()`` starts uvicorn in a background task.
+        ``run_polling()`` starts uvicorn and awaits it until shutdown.
         """
         log.info(f"Building WebSocket channel on {self.host}:{self.port}")
 
@@ -91,13 +99,15 @@ class WebSocketChannel(Channel):
             ws: WebSocket,
             api_key: str = Query(default=""),
         ) -> None:
+            # Always accept first so close codes are delivered in-band.
+            await ws.accept()
+
             # Auth: reject if api_key is configured and doesn't match
             if self.api_key and api_key != self.api_key:
                 await ws.close(code=4001, reason="Unauthorized — bad api_key")
                 log.warning("WebSocket connection rejected: invalid api_key")
                 return
 
-            await ws.accept()
             client_id = str(uuid.uuid4())
             log.info(f"WebSocket client connected: {client_id}")
 
@@ -107,13 +117,16 @@ class WebSocketChannel(Channel):
             try:
                 while True:
                     raw = await ws.receive_text()
-                    content = raw.strip()
+                    content = self._extract_content(raw)
                     if not content:
                         continue
 
                     # Check for local commands
                     if content.startswith("/"):
-                        cmd_name = content[1:].split(maxsplit=1)[0].lower()
+                        cmd_parts = content[1:].split(maxsplit=1)
+                        if not cmd_parts:
+                            continue
+                        cmd_name = cmd_parts[0].lower()
 
                         if cmd_name == "whoami":
                             await self._safe_send_json(
@@ -147,10 +160,12 @@ class WebSocketChannel(Channel):
                     self._connections.pop(client_id, None)
 
     async def run_polling(self) -> None:
-        """Start uvicorn in a background task and block forever.
+        """Start uvicorn and await until shutdown.
 
-        This mirrors the Telegram channel's ``run_polling()`` pattern
-        where the event loop is kept alive by ``asyncio.Event().wait()``.
+        Blocks on ``server.serve()``, which runs until cancelled or the
+        server is stopped externally.  This mirrors the Telegram channel's
+        ``run_polling()`` pattern where the event loop is kept alive by the
+        underlying server's own event loop.
         """
         config = uvicorn.Config(
             app=self._app,
@@ -159,15 +174,9 @@ class WebSocketChannel(Channel):
             log_level="info",
         )
         server = uvicorn.Server(config)
-        task = asyncio.create_task(server.serve())
 
         log.info(f"WebSocket server listening on ws://{self.host}:{self.port}/ws")
-        try:
-            await asyncio.Event().wait()
-        finally:
-            log.info("Shutting down WebSocket server...")
-            server.should_exit = True
-            await task
+        await server.serve()
 
     # -- Message delivery ---------------------------------------------------
 
@@ -185,6 +194,32 @@ class WebSocketChannel(Channel):
         await self._safe_send_json(client_id, {"type": "message", "content": message.content})
 
     # -- Helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _extract_content(raw: str) -> str | None:
+        """Extract message content from a raw WebSocket text frame.
+
+        Tries JSON decoding first (matching the documented protocol).
+        Falls back to treating the raw string as plain text for simple
+        clients such as ``websocat``.  Returns ``None`` for empty payloads.
+        """
+        raw = raw.strip()
+        if not raw:
+            return None
+
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            # Plain text fallback
+            return raw
+
+        # JSON framing: {"type": "message", "content": "..."}
+        if isinstance(data, dict) and data.get("type") == "message":
+            content = data.get("content", "")
+            return content.strip() or None
+
+        # Unknown JSON shape — forward raw as-is
+        return raw
 
     async def _safe_send_json(self, client_id: str, payload: dict) -> None:
         """Send a JSON payload to a WebSocket client, handling disconnects.
