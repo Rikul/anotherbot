@@ -54,12 +54,12 @@ class BackgroundAgent(Agent):
         self.registry.register(BotCommand("model",  "Get or set model. Usage: /model [name]", model_cmd))
         self.registry.register(BotCommand("status", "Show bot status.", make_status_cmd(ch)))
         self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
-        self.registry.register(BotCommand("list-conversations",  "List conversations.", list_conversations_cmd(self._store, ch)))
-        self.registry.register(BotCommand("new-conversation",    "Start a new conversation.", new_conversation_cmd(self)))
-        self.registry.register(BotCommand("load-conversation",   "Load a conversation. Usage: /load-conversation <id>", load_conversation_cmd(self)))
-        self.registry.register(BotCommand("fork-conversation",   "Fork a conversation. Usage: /fork-conversation [id]", fork_conversation_cmd(self)))
-        self.registry.register(BotCommand("rename-conversation", "Rename a conversation. Usage: /rename-conversation <id> <name>", rename_conversation_cmd(self._store, ch)))
-        self.registry.register(BotCommand("export-conversation", "Export a conversation to JSON. Usage: /export-conversation [id]", export_conversation_cmd(self._store, ch)))
+        self.registry.register(BotCommand("list",   "List conversations.", list_conversations_cmd(self._store, ch)))
+        self.registry.register(BotCommand("new",    "Start a new conversation.", new_conversation_cmd(self)))
+        self.registry.register(BotCommand("load",   "Load a conversation. Usage: /load <id>", load_conversation_cmd(self)))
+        self.registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]", fork_conversation_cmd(self)))
+        self.registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(self._store, ch)))
+        self.registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(self._store, ch)))
         self.registry.register(BotCommand("help", "Show available commands.", help_cmd(self.registry)))
 
     async def _stop_cmd(self, args: str = "") -> str:

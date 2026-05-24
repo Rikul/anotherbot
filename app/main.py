@@ -81,12 +81,12 @@ async def run_cli(args):
     cli_registry = CommandRegistry()
     cli_registry.register(BotCommand("status",               "Show bot status.",                        make_status_cmd()))
     cli_registry.register(BotCommand("model",                "Get or set model. Usage: /model [name]",  model_cmd))
-    cli_registry.register(BotCommand("list-conversations",   "List conversations.",                      list_conversations_cmd(agent._store, agent._channel_str)))
-    cli_registry.register(BotCommand("new-conversation",     "Start a new conversation.",                new_conversation_cmd(agent)))
-    cli_registry.register(BotCommand("load-conversation",    "Load a conversation. Usage: /load-conversation <id>",   load_conversation_cmd(agent)))
-    cli_registry.register(BotCommand("fork-conversation",    "Fork a conversation. Usage: /fork-conversation [id]",   fork_conversation_cmd(agent)))
-    cli_registry.register(BotCommand("rename-conversation",  "Rename a conversation. Usage: /rename-conversation <id> <name>", rename_conversation_cmd(agent._store, agent._channel_str)))
-    cli_registry.register(BotCommand("export-conversation",  "Export a conversation to JSON. Usage: /export-conversation [id]", export_conversation_cmd(agent._store, agent._channel_str)))
+    cli_registry.register(BotCommand("list",   "List conversations.",                      list_conversations_cmd(agent._store, agent._channel_str)))
+    cli_registry.register(BotCommand("new",    "Start a new conversation.",                new_conversation_cmd(agent)))
+    cli_registry.register(BotCommand("load",   "Load a conversation. Usage: /load <id>",   load_conversation_cmd(agent)))
+    cli_registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]",   fork_conversation_cmd(agent)))
+    cli_registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(agent._store, agent._channel_str)))
+    cli_registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(agent._store, agent._channel_str)))
     cli_registry.register(BotCommand("help",                 "Show available commands.",                 help_cmd(cli_registry)))
 
     try:
