@@ -15,6 +15,8 @@ async def start_server() -> None:
     telegram_agent = None
     discord_channel = None
     discord_agent = None
+    websocket_channel = None
+    websocket_agent = None
 
     # Change CWD to PROJECT_HOME/workspace to ensure all file operations are relative to this directory
     # This is important for the agent to read/write files in the workspace
@@ -44,7 +46,20 @@ async def start_server() -> None:
             discord_channel.start()
             discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel, max_iterations=runtime.get("max_iterations", 250))
 
-    if not telegram_channel and not discord_channel:
+    if config.get("websocket"):
+        from .channels.websocket import WebSocketChannel
+        ws_host = config.websocket.get("HOST", "127.0.0.1")
+        ws_port = config.websocket.get("PORT", 8765)
+        ws_api_key = config.websocket.get("API_KEY") or None
+        log.info(f"Starting WebSocket channel on {ws_host}:{ws_port}")
+        websocket_mq = MessageQueue()
+        websocket_channel = WebSocketChannel(
+            websocket_mq, host=ws_host, port=ws_port, api_key=ws_api_key
+        )
+        websocket_channel.start()
+        websocket_agent = BackgroundAgent(mq=websocket_mq, channel=websocket_channel, max_iterations=runtime.get("max_iterations", 250))
+
+    if not telegram_channel and not discord_channel and not websocket_channel:
         log.error("No channels configured, exiting...")
         return
 
@@ -56,6 +71,9 @@ async def start_server() -> None:
     if discord_channel:
         channels["discord"] = discord_channel
         mqs["discord"] = discord_mq
+    if websocket_channel:
+        channels["websocket"] = websocket_channel
+        mqs["websocket"] = websocket_mq
 
     tasks = ScheduledTasks(mqs=mqs, channels=channels)
 
@@ -64,5 +82,7 @@ async def start_server() -> None:
         coros.extend([telegram_channel.run_polling(), telegram_agent.process_incoming(), telegram_mq.process_outgoing()])
     if discord_channel:
         coros.extend([discord_channel.run_polling(), discord_agent.process_incoming(), discord_mq.process_outgoing()])
+    if websocket_channel:
+        coros.extend([websocket_channel.run_polling(), websocket_agent.process_incoming(), websocket_mq.process_outgoing()])
 
     await asyncio.gather(*coros)

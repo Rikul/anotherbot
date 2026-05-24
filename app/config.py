@@ -37,6 +37,12 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
         _config.setdefault("discord", {})["TOKEN"] = v
     if v := os.environ.get("DISCORD_ALLOW_FROM"):
         _config.setdefault("discord", {})["ALLOW_FROM"] = [int(x.strip()) for x in v.split(",") if x.strip()]
+    if v := os.environ.get("WEBSOCKET_HOST"):
+        _config.setdefault("websocket", {})["HOST"] = v
+    if v := os.environ.get("WEBSOCKET_PORT"):
+        _config.setdefault("websocket", {})["PORT"] = int(v)
+    if v := os.environ.get("WEBSOCKET_API_KEY"):
+        _config.setdefault("websocket", {})["API_KEY"] = v
 
 
 def get(key: str, default=None):
@@ -64,4 +70,9 @@ ALLOW_FROM = []  # List of allowed Telegram user IDs (integers). Must be non-emp
 [discord]
 TOKEN = ""
 ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
+
+[websocket]
+HOST = "127.0.0.1"
+PORT = 8765
+API_KEY = ""  # Optional. Set to require authentication via ?api_key= query param.
 """

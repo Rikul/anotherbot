@@ -10,6 +10,8 @@ dependencies = [
     "ddgs>=9.14.1",
     "geocoder>=1.38.1",
     "discord-py>=2.7.1",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
 ]
 
 [dependency-groups]
@@ -22,5 +24,3 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
-
-

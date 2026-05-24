@@ -6,6 +6,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 - **Background Agent**: Runs as a persistent bot, receiving and sending messages via channels
 - **Telegram Integration**: Built-in Telegram bot — receive messages, respond, run tools, deliver results
 - **Discord Integration**: Discord bot — same agent loop, per-channel message isolation, owner DM fallback for scheduled tasks
+- **WebSocket Integration**: FastAPI + WebSocket server — connect browser or programmatic clients for real-time agent interaction
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
 - **Tool Calling**: File I/O, shell commands, web fetch, web search (text/images/video/news/books), calculator, Hacker News, todo list
 - **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing)
@@ -52,6 +53,11 @@ ALLOW_FROM = []  # List of allowed Telegram user IDs (integers).
 [discord]
 TOKEN = ""
 ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
+
+[websocket]
+HOST = "127.0.0.1"
+PORT = 8765
+API_KEY = ""  # Optional. Set to require authentication via ?api_key= query param.
 ```
 
 Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
@@ -82,9 +88,9 @@ Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel
 ./run.sh cli -p "Summarize this repo" -s
 ```
 
-### Background Agent (Telegram / Discord)
+### Background Agent (Telegram / Discord / WebSocket)
 
-Configure one or both channels in `~/.crafterscode/config.toml`:
+Configure one or more channels in `~/.crafterscode/config.toml`:
 
 ```toml
 [telegram]
@@ -94,6 +100,11 @@ ALLOW_FROM = [123456789]  # restrict by user ID; empty = allow all
 [discord]
 TOKEN = "your-discord-bot-token"
 ALLOW_FROM = []  # restrict by user ID; empty = allow all
+
+[websocket]
+HOST = "127.0.0.1"
+PORT = 8765
+API_KEY = ""  # optional shared secret
 ```
 
 ```bash
@@ -101,6 +112,37 @@ ALLOW_FROM = []  # restrict by user ID; empty = allow all
 ```
 
 Each channel gets its own message queue and agent. Scheduled task results are delivered to the channel the task was created from; if no context is available, the Discord bot owner is DM'd.
+
+#### WebSocket Channel
+
+When the `[websocket]` section is present, a FastAPI-based WebSocket server starts alongside other channels.
+
+**Connect from a browser:**
+```javascript
+const ws = new WebSocket("ws://127.0.0.1:8765/ws");
+// With API key auth:
+// const ws = new WebSocket("ws://127.0.0.1:8765/ws?api_key=my-secret");
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log("Agent:", data.content);
+};
+
+ws.send("Summarize the README in one sentence");
+```
+
+**Connect using websocat:**
+```bash
+websocat ws://127.0.0.1:8765/ws
+# With auth: websocat ws://127.0.0.1:8765/ws?api_key=my-secret
+```
+
+**Message format (both directions):**
+```json
+{"type": "message", "content": "Your message or response here"}
+```
+
+**Built-in commands:** `/whoami` — returns your connection UUID; `/stop` — stops the agent. All other `/command` messages are forwarded to the agent's command registry.
 
 **Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — pause the bot; `/whoami` — show your user ID (Telegram only); `/list`, `/new`, `/load <id>`, `/fork [id]`, `/rename <id> <name>`, `/export [id]` — manage conversation history.
 
@@ -137,6 +179,16 @@ docker run -d \
   -e DISCORD_ALLOW_FROM=123456789 \
   -v anotherbot-data:/data \
   anotherbot
+
+# WebSocket
+docker run -d \
+  -e LLM_API_KEY=sk-... \
+  -e WEBSOCKET_HOST=0.0.0.0 \
+  -e WEBSOCKET_PORT=8765 \
+  -e WEBSOCKET_API_KEY=my-secret \
+  -p 8765:8765 \
+  -v anotherbot-data:/data \
+  anotherbot
 ```
 
 | Env var | Required | Description |
@@ -146,11 +198,14 @@ docker run -d \
 | `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = allow all) |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
 | `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
+| `WEBSOCKET_HOST` | — | WebSocket server host (default: `127.0.0.1`) |
+| `WEBSOCKET_PORT` | — | WebSocket server port (default: `8765`) |
+| `WEBSOCKET_API_KEY` | — | Optional API key for WebSocket auth |
 | `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
 | `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
 
-At least one channel (`TELEGRAM_BOT_TOKEN` or `DISCORD_BOT_TOKEN`) must be set.
+At least one channel (`TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, or `WEBSOCKET_HOST`) must be set.
 
 The `/data` volume persists the SQLite database and workspace across restarts. To supply a `config.toml` instead of env vars, mount it at `/data/config.toml` — env vars always take precedence over the file.
 
