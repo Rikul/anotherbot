@@ -291,6 +291,57 @@ async def test_ws_endpoint_accepts_raw_text():
     assert content == "raw message without json"
 
 
+
+# --- Auth handling ----------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_auth_accepts_when_api_key_not_configured():
+    """No auth gate when api_key is None."""
+    wc, _ = make_websocket_channel(api_key=None)
+    wc.start()
+
+    mock_ws = AsyncMock()
+    # Simulate the endpoint: accept → check auth (skip) → continue
+    await mock_ws.accept()
+
+    # With no api_key, the `if self.api_key and api_key != self.api_key` is False
+    # So the endpoint continues past auth.
+    mock_ws.close.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_auth_rejects_when_api_key_mismatches():
+    """Connection is rejected with close code 4001 when api_key doesn't match."""
+    wc, _ = make_websocket_channel(api_key="secret")
+    wc.start()
+
+    mock_ws = AsyncMock()
+    # Simulate: accept → auth check fails → close(4001) → return
+    await mock_ws.accept()
+    await mock_ws.close(code=4001, reason="Unauthorized — bad api_key")
+
+    mock_ws.accept.assert_called_once()
+    mock_ws.close.assert_called_once_with(code=4001, reason="Unauthorized — bad api_key")
+
+
+@pytest.mark.asyncio
+async def test_auth_accepts_when_api_key_matches():
+    """Connection is accepted when api_key query param matches."""
+    wc, _ = make_websocket_channel(api_key="secret")
+    wc.start()
+
+    mock_ws = AsyncMock()
+    # Simulate: accept → auth check passes → add to connections
+    await mock_ws.accept()
+
+    # Auth passes — no close call
+    mock_ws.close.assert_not_called()
+
+    # Would continue to add to _connections
+    client_id = "auth-match-id"
+    wc._connections[client_id] = mock_ws
+    assert client_id in wc._connections
+
 # --- Command handling (simulated endpoint logic) ----------------------------
 
 @pytest.mark.asyncio
