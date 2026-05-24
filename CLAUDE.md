@@ -91,7 +91,7 @@ On startup, `load_system_context()` (`app/infra/startup.py`) loads `app/core/sys
 
 **Channel types** are defined in `ChannelType` enum (`app/channels/channel.py`): `CLI`, `TELEGRAM`, `DISCORD`, `WEB`. Each channel implements the `Channel` ABC and owns a `MessageQueue` instance. `bg_server.py` wires up enabled channels — each gets its own `MessageQueue`, `BackgroundAgent`, and set of coroutines (`run_polling`, `process_incoming`, `process_outgoing`) gathered into the event loop.
 
-**Slash commands** are handled by a `CommandRegistry` (`app/channels/commands.py`) shared across Telegram and Discord. Built-in commands: `/help`, `/status`, `/model [name]`, `/whoami`. Each channel constructs its own registry instance and registers the same `BotCommand`s. Commands are dispatched before the message reaches the agent loop.
+**Slash commands** are handled entirely by `BackgroundAgent`. Channel handlers (`command_handler` in Telegram, `on_message` in Discord) intercept only `/whoami` (resolved inline using the platform user object) and enqueue everything else as a plain `IncomingMessage`. `BackgroundAgent.process_incoming()` detects the leading `/` and dispatches via its own `CommandRegistry`. That registry owns the full command set: `/model`, `/status`, `/stop`, `/help`, `/list-conversations`, `/new-conversation`, `/load-conversation`, `/fork-conversation`, `/rename-conversation`, `/export-conversation`.
 
 ### Message Queue
 

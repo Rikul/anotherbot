@@ -11,15 +11,6 @@ from ..config import APP_DB, PROJECT_HOME
 from .app_logging import log
 
 
-def _clean_name(name: str, fallback: str = "New Conversation") -> str:
-    n = name.strip()[:80]
-    return n or fallback
-
-
-def _slug(name: str) -> str:
-    return re.sub(r"[^a-z0-9-]", "", name.lower().replace(" ", "-"))[:40]
-
-
 @contextlib.contextmanager
 def _fk_conn(db_path: Path):
     """sqlite3 connection with FK constraints enforced."""
@@ -122,7 +113,7 @@ class ConversationStore:
             raise
 
     def create(self, channel: str, name: str = "New Conversation", parent_id: int = None) -> int:
-        clean = _clean_name(name)
+        clean = name.strip()[:80] or "New Conversation"
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
             cid = conn.execute(
@@ -186,7 +177,7 @@ class ConversationStore:
             raise ValueError(
                 f"Conversation {conversation_id} does not belong to channel {channel!r}"
             )
-        clean = _clean_name(name)
+        clean = name.strip()[:80] or "New Conversation"
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
             conn.execute(
@@ -256,7 +247,7 @@ class ConversationStore:
 
         export_dir = PROJECT_HOME / "conversations"
         export_dir.mkdir(parents=True, exist_ok=True)
-        slug = _slug(conv["name"]) or "conversation"
+        slug = re.sub(r"[^a-z0-9-]", "", conv["name"].lower().replace(" ", "-"))[:40] or "conversation"
         filename = f"{conversation_id}-{slug}.json"
         path = export_dir / filename
         with open(path, "w", encoding="utf-8") as f:

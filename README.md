@@ -102,7 +102,7 @@ ALLOW_FROM = []  # restrict by user ID; empty = allow all
 
 Each channel gets its own message queue and agent. Scheduled task results are delivered to the channel the task was created from; if no context is available, the Discord bot owner is DM'd.
 
-**Telegram commands:** `/help` — list commands; `/whoami` — show your Telegram user ID.
+**Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — pause the bot; `/whoami` — show your user ID (Telegram only); `/list-conversations`, `/new-conversation`, `/load-conversation <id>`, `/fork-conversation [id]`, `/rename-conversation <id> <name>`, `/export-conversation [id]` — manage conversation history.
 
 ### Scheduled Tasks
 

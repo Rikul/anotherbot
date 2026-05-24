@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import platform
+import re
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,12 @@ from ..infra.app_logging import log
 from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
+
+
+def _slugify(name: str) -> str:
+    return re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", "-"))[:40]
+
+
 TOOL_RESULT_HISTORY_LIMIT = 100
 
 
@@ -108,12 +115,12 @@ class Agent(ABC):
         )
         try:
             name = await HelperAgent().run(prompt)
+            name = _slugify(name) or "new-conversation"
             conv = store.get(conv_id)
             if conv and conv["name"] == "New Conversation":
-                clean = name.strip()[:80] or "New Conversation"
-                store.rename(conv_id, clean, conv["channel"])
-                runtime.set(name_runtime_key, clean)
-                log.info(f"Auto-named conversation {conv_id}: {clean!r}")
+                store.rename(conv_id, name, conv["channel"])
+                runtime.set(name_runtime_key, name)
+                log.info(f"Auto-named conversation {conv_id}: {name!r}")
         except Exception as e:
             log.warning(f"Auto-naming conversation {conv_id} failed: {e}")
 
