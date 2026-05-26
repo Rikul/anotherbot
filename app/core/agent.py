@@ -134,7 +134,7 @@ class Agent(ABC):
             if not await self._check_permission(tool_name, tool_args):
                 return "User denied permission to run this tool. Ask for permission to run the tool again if you want to try running it."
             await self._on_tool_start(tool_name, tool_args)
-            return run_tool(tool_name=tool_name, tool_args=tool_args)
+            return await run_tool(tool_name=tool_name, tool_args=tool_args)
         except Exception as e:
             error_msg = f"Error running tool {tool_name}: {str(e)}"
             log.error(error_msg)

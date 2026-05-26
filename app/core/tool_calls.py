@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 from ..infra.app_logging import log
@@ -22,6 +23,7 @@ from ..tools.sched_tasks_tool import ListScheduledTasks, AddScheduledTask, Updat
 
 from ..tools.get_city_state import GetCityState
 from ..tools.get_datetime import GetDateTime
+from ..tools.helper_agent import HelperAgentTool
 
 import json
 
@@ -53,7 +55,8 @@ tool_registry = {
     "get_scheduled_task_output": GetScheduledTaskOutput,
 
     "get_city_state": GetCityState,
-    "get_datetime": GetDateTime
+    "get_datetime": GetDateTime,
+    "helper_agent": HelperAgentTool
 }
 
 all_tool_specs = [tool.spec() for tool in tool_registry.values()]
@@ -65,12 +68,14 @@ helper_tool_specs = [tool.spec() for k, tool in tool_registry.items() if k in _H
 
 MAX_TOOL_RESULT_LENGTH = 16000
 
-def run_tool(tool_name: str, tool_args: dict) -> str:
+async def run_tool(tool_name: str, tool_args: dict) -> str:
     original_cwd = os.getcwd()
     
     try:
         func = tool_registry[tool_name].call
         result = func(**tool_args)
+        if asyncio.iscoroutine(result):
+            result = await result
     except Exception as e:
         log.error(f"Error running tool {tool_name}: {str(e)}")
         result = f"Error running tool {tool_name}: {str(e)}"
