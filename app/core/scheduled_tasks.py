@@ -116,20 +116,35 @@ class ScheduledTasks:
     def _after_run(self, task: dict, now: datetime):
         """Update task state after execution.
 
-        For repeating tasks, the next run is derived from the task's original
-        scheduled time (next_run) rather than the current time. This prevents
+        For repeating tasks, the next run is always advanced by exactly one
+        interval from the original scheduled time (next_run). This prevents
         timing drift that would otherwise accumulate if task execution takes
         significant time.
 
-        If the task is already overdue (e.g. after a server restart), the next
-        run is still advanced by exactly one interval from the original
-        schedule — meaning the task will fire again next cycle to catch up one
-        period at a time (Option A).
+        If multiple intervals have passed since the original next_run (e.g.
+        after a server restart or prolonged downtime), skipped intervals are
+        fast-forwarded rather than caught up one at a time. This avoids a
+        catch-up storm where many runs would fire in rapid succession.
+
+        Specifically:
+        - Calculate how many full intervals have passed since the task's
+          original next_run.
+        - Schedule the next run at the next future slot:
+          original_next_run + (intervals_passed + 1) * interval
         """
         name = task["name"]
         if task["repeat"]:
             original_next = datetime.fromisoformat(task["next_run"])
-            next_run = (original_next + timedelta(minutes=task["interval_mins"])).isoformat()
+            interval = timedelta(minutes=task["interval_mins"])
+            # Advance by one interval from original schedule
+            next_due = original_next + interval
+            # If we're already past that due time, skip missed intervals
+            # by jumping to the next future slot
+            if now >= next_due:
+                elapsed_secs = (now - original_next).total_seconds()
+                intervals_passed = int(elapsed_secs // interval.total_seconds())
+                next_due = original_next + (intervals_passed + 1) * interval
+            next_run = next_due.isoformat()
             with sqlite3.connect(APP_DB) as conn:
                 conn.execute("""UPDATE tasks SET last_run = ?, next_run = ?, run_count = run_count + 1
                                 WHERE name = ?""", (now.isoformat(), next_run, name))
