@@ -114,9 +114,22 @@ class ScheduledTasks:
                 for p, o, s, d, t in reversed(rows)]
 
     def _after_run(self, task: dict, now: datetime):
+        """Update task state after execution.
+
+        For repeating tasks, the next run is derived from the task's original
+        scheduled time (next_run) rather than the current time. This prevents
+        timing drift that would otherwise accumulate if task execution takes
+        significant time.
+
+        If the task is already overdue (e.g. after a server restart), the next
+        run is still advanced by exactly one interval from the original
+        schedule — meaning the task will fire again next cycle to catch up one
+        period at a time (Option A).
+        """
         name = task["name"]
         if task["repeat"]:
-            next_run = (now + timedelta(minutes=task["interval_mins"])).isoformat()
+            original_next = datetime.fromisoformat(task["next_run"])
+            next_run = (original_next + timedelta(minutes=task["interval_mins"])).isoformat()
             with sqlite3.connect(APP_DB) as conn:
                 conn.execute("""UPDATE tasks SET last_run = ?, next_run = ?, run_count = run_count + 1
                                 WHERE name = ?""", (now.isoformat(), next_run, name))
@@ -170,4 +183,4 @@ class ScheduledTasks:
                     await asyncio.gather(*[self.run_task(t) for t in due], return_exceptions=True)
             except Exception as e:
                 log.error(f"ScheduledTasks.run error: {e}", exc_info=True)
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
