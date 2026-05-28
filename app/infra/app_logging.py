@@ -51,7 +51,7 @@ def setup_logging(level: int = logging.INFO):
     logging.basicConfig(level=level, handlers=[console, file_handler])
 
     # silence noisy libraries
-    for lib in ("httpx", "httpcore", "openai", "urllib3"):
+    for lib in ("httpx", "httpcore", "LiteLLM", "litellm", "urllib3"):
         logging.getLogger(lib).setLevel(logging.WARNING)
 
 

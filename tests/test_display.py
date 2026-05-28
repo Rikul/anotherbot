@@ -18,7 +18,7 @@ def test_log_level_is_info_by_default():
 
 def test_library_loggers_silenced():
     """Test that noisy library loggers are set to WARNING level"""
-    for name in ("httpx", "httpcore", "openai", "urllib3"):
+    for name in ("httpx", "httpcore", "LiteLLM", "litellm", "urllib3"):
         assert logging.getLogger(name).level == logging.WARNING
 
 

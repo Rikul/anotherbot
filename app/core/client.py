@@ -1,8 +1,32 @@
 from __future__ import annotations
 
-from openai import AsyncOpenAI
 import os
 from .. import config
+
+
+class _Completions:
+    def __init__(self, api_key: str, api_base: str | None) -> None:
+        self._api_key = api_key
+        self._api_base = api_base or None
+
+    async def create(self, **kwargs):
+        import litellm  # lazy — avoids import-time pydantic/Python version issues
+        return await litellm.acompletion(
+            api_key=self._api_key,
+            api_base=self._api_base,
+            **kwargs,
+        )
+
+
+class _Chat:
+    def __init__(self, api_key: str, api_base: str | None) -> None:
+        self.completions = _Completions(api_key, api_base)
+
+
+class LiteLLMClient:
+    def __init__(self, api_key: str, api_base: str | None) -> None:
+        self.chat = _Chat(api_key, api_base)
+
 
 class Client:
 
@@ -16,7 +40,7 @@ class Client:
         if not api_key:
             raise RuntimeError("LLM_API_KEY is not set")
 
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        self._client = LiteLLMClient(api_key=api_key, api_base=base_url)
 
     def get_client(self):
-        return self.client
+        return self._client
