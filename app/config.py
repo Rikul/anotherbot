@@ -44,6 +44,12 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
             _config.setdefault("websocket", {})["PORT"] = int(v)
         except ValueError:
             raise ValueError(f"WEBSOCKET_PORT must be an integer, got: {v!r}") from None
+    if v := os.environ.get("SLACK_BOT_TOKEN"):
+        _config.setdefault("slack", {})["BOT_TOKEN"] = v
+    if v := os.environ.get("SLACK_APP_TOKEN"):
+        _config.setdefault("slack", {})["APP_TOKEN"] = v
+    if v := os.environ.get("SLACK_ALLOW_FROM"):
+        _config.setdefault("slack", {})["ALLOW_FROM"] = [x.strip() for x in v.split(",") if x.strip()]
 
 
 def get(key: str, default=None):
@@ -51,7 +57,7 @@ def get(key: str, default=None):
 
 def set(key: str, value) -> None:
     _config[key] = value
-    
+
 def __getattr__(name: str):
     if name in _config:
         return _config[name]
@@ -75,4 +81,9 @@ ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allo
 [websocket]
 HOST = "127.0.0.1"
 PORT = 8765
+
+[slack]
+BOT_TOKEN = ""   # xoxb-... bot token
+APP_TOKEN = ""   # xapp-... app-level token (required for Socket Mode)
+ALLOW_FROM = []  # List of allowed Slack user IDs (strings). Empty means allow all.
 """
