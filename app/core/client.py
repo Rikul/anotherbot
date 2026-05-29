@@ -4,6 +4,11 @@ import os
 from .. import config
 
 
+_OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+_GEMINI_PROVIDERS = {"gemini", "google"}
+
+
 class _Completions:
     def __init__(self, api_key: str, api_base: str | None) -> None:
         self._api_key = api_key
@@ -11,11 +16,29 @@ class _Completions:
 
     async def create(self, **kwargs):
         import litellm  # lazy — avoids import-time pydantic/Python version issues
-        return await litellm.acompletion(
-            api_key=self._api_key,
-            api_base=self._api_base,
-            **kwargs,
-        )
+
+        api_key = self._api_key
+        api_base = self._api_base
+
+        # If the model has a provider prefix and a provider-specific key exists
+        # in the environment, let litellm route natively instead of forcing the
+        # global key/base (which would send traffic through OpenRouter).
+        model = kwargs.get("model", "")
+        if "/" in model:
+            provider = model.split("/")[0].lower()
+            env_key = "GOOGLE_API_KEY" if provider in _GEMINI_PROVIDERS else f"{provider.upper()}_API_KEY"
+            if os.environ.get(env_key):
+                api_key = None
+                if api_base == _OPENROUTER_BASE:
+                    api_base = None
+
+        params = {}
+        if api_key is not None:
+            params["api_key"] = api_key
+        if api_base is not None:
+            params["api_base"] = api_base
+
+        return await litellm.acompletion(**params, **kwargs)
 
 
 class _Chat:

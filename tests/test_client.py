@@ -51,3 +51,49 @@ async def test_litellm_client_create_calls_acompletion():
         model="test-model",
         messages=[],
     )
+
+
+@pytest.mark.asyncio
+async def test_native_provider_routing_omits_key_and_base():
+    """When a provider-specific env key exists, api_key and OpenRouter base are dropped."""
+    client = Client(api_key="openrouter-key", base_url="https://openrouter.ai/api/v1")
+    litellm_client = client.get_client()
+
+    mock_litellm = MagicMock()
+    mock_litellm.acompletion = AsyncMock(return_value=MagicMock())
+
+    env = {**os.environ, "ANTHROPIC_API_KEY": "sk-ant-test"}
+    with patch.dict("sys.modules", {"litellm": mock_litellm}):
+        with patch.dict(os.environ, env, clear=True):
+            await litellm_client.chat.completions.create(
+                model="anthropic/claude-haiku-4-5", messages=[]
+            )
+
+    mock_litellm.acompletion.assert_called_once_with(
+        model="anthropic/claude-haiku-4-5",
+        messages=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_routing_uses_global_key_for_unknown_provider():
+    """If no provider-specific env key exists, the global key/base are still passed."""
+    client = Client(api_key="openrouter-key", base_url="https://openrouter.ai/api/v1")
+    litellm_client = client.get_client()
+
+    mock_litellm = MagicMock()
+    mock_litellm.acompletion = AsyncMock(return_value=MagicMock())
+
+    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    with patch.dict("sys.modules", {"litellm": mock_litellm}):
+        with patch.dict(os.environ, env, clear=True):
+            await litellm_client.chat.completions.create(
+                model="anthropic/claude-haiku-4-5", messages=[]
+            )
+
+    mock_litellm.acompletion.assert_called_once_with(
+        api_key="openrouter-key",
+        api_base="https://openrouter.ai/api/v1",
+        model="anthropic/claude-haiku-4-5",
+        messages=[],
+    )
