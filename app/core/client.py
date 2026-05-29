@@ -27,10 +27,9 @@ class _Completions:
         if "/" in model:
             provider = model.split("/")[0].lower()
             env_key = "GOOGLE_API_KEY" if provider in _GEMINI_PROVIDERS else f"{provider.upper()}_API_KEY"
-            if os.environ.get(env_key):
+            if os.environ.get(env_key) and api_base in (None, _OPENROUTER_BASE):
                 api_key = None
-                if api_base == _OPENROUTER_BASE:
-                    api_base = None
+                api_base = None
 
         params = {}
         if api_key is not None:
