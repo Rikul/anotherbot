@@ -86,16 +86,29 @@ async def test_handle_message_ignores_bot_messages():
 
 
 @pytest.mark.asyncio
-async def test_handle_message_ignores_subtypes():
+async def test_handle_message_ignores_edit_and_delete_subtypes():
     sc, mq = make_slack_channel()
     say = AsyncMock()
 
-    await sc._handle_message(
-        event={"user": "U123", "text": "edited", "channel": "C456", "subtype": "message_changed"},
-        say=say,
-    )
+    for subtype in ("message_changed", "message_deleted", "channel_join", "channel_leave"):
+        await sc._handle_message(
+            event={"user": "U123", "text": "hi", "channel": "C456", "subtype": subtype},
+            say=say,
+        )
 
     assert mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_handle_message_allows_user_subtypes():
+    sc, mq = make_slack_channel()
+
+    await sc._handle_message(
+        event={"user": "U123", "text": "check this out", "channel": "C456", "subtype": "file_share"},
+        say=AsyncMock(),
+    )
+
+    assert not mq.incoming.empty()
 
 
 @pytest.mark.asyncio

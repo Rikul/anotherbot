@@ -13,6 +13,19 @@ log = logging.getLogger(__name__)
 MAX_SLACK_LENGTH = 3000
 
 
+_IGNORED_SUBTYPES = {
+    "message_changed",
+    "message_deleted",
+    "channel_join",
+    "channel_leave",
+    "channel_topic",
+    "channel_purpose",
+    "channel_name",
+    "group_join",
+    "group_leave",
+}
+
+
 class SlackChannel(Channel):
     def __init__(
         self,
@@ -27,13 +40,16 @@ class SlackChannel(Channel):
         self.mq = mq
         self.stopped = False
         self._last_channel_id: str | None = None
-        self._bot_user_id: str | None = None
         self.app = AsyncApp(token=bot_token)
         mq.register(self, self.send_message)
         self._register_handlers()
 
     def _register_handlers(self) -> None:
         self.app.event("message")(self._handle_message)
+        self.app.error(self._slack_error_handler)
+
+    async def _slack_error_handler(self, error: Exception, body: dict, logger) -> None:
+        logger.error(f"Slack error: {error}", exc_info=error)
 
     @property
     def has_stopped(self) -> bool:
@@ -51,8 +67,7 @@ class SlackChannel(Channel):
         return {"channel_id": self._last_channel_id} if self._last_channel_id else {}
 
     async def _handle_message(self, event: dict, say) -> None:
-        # ignore bot messages and message edits/deletes
-        if event.get("bot_id") or event.get("subtype"):
+        if event.get("bot_id") or event.get("subtype") in _IGNORED_SUBTYPES:
             return
 
         user_id = event.get("user", "")
