@@ -48,18 +48,19 @@ _CSS = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-    --bg:        #0f172a;
-    --surface:   #1e293b;
-    --surface2:  #273548;
-    --border:    #334155;
-    --text:      #e2e8f0;
-    --text-muted:#94a3b8;
-    --accent:    #6366f1;
-    --accent-h:  #818cf8;
-    --user-bg:   #6366f1;
-    --ai-bg:     #1e293b;
-    --radius:    14px;
-    --font:      'Inter', 'Segoe UI', system-ui, sans-serif;
+    --bg:          #0f172a;
+    --surface:     #1e293b;
+    --surface2:    #273548;
+    --border:      #334155;
+    --text:        #e2e8f0;
+    --text-muted:  #94a3b8;
+    --accent:      #6366f1;
+    --accent-h:    #818cf8;
+    --user-bg:     #6366f1;
+    --ai-bg:       #1e293b;
+    --sidebar-w:   260px;
+    --radius:      14px;
+    --font:        'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 
 [data-theme="light"] {
@@ -75,7 +76,7 @@ _CSS = """
     --ai-bg:     #f1f5f9;
 }
 
-html, body { height: 100%; }
+html, body { height: 100%; overflow: hidden; }
 
 body {
     background: var(--bg);
@@ -84,20 +85,107 @@ body {
     font-size: 15px;
     line-height: 1.6;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 0;
     transition: background .2s, color .2s;
 }
 
-/* ---- layout ---- */
+/* ---- top-level layout: sidebar + main ---- */
 #app {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     width: 100%;
-    max-width: 820px;
     height: 100vh;
-    padding: 0;
+}
+
+/* ---- sidebar ---- */
+#sidebar {
+    width: var(--sidebar-w);
+    min-width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width .25s ease, min-width .25s ease, border-color .2s;
+    flex-shrink: 0;
+}
+#sidebar.collapsed {
+    width: 0;
+    min-width: 0;
+    border-right-width: 0;
+}
+
+#sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    flex-shrink: 0;
+}
+#sidebar-header span {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+#new-conv-btn {
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 5px 10px;
+    white-space: nowrap;
+    transition: background .15s;
+}
+#new-conv-btn:hover { background: var(--accent-h); }
+
+#conv-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 8px 12px;
+}
+#conv-list::-webkit-scrollbar { width: 3px; }
+#conv-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+.conv-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .12s;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.conv-item:hover { background: var(--surface2); }
+.conv-item.active { background: var(--surface2); }
+.conv-item.active .conv-name { color: var(--accent); }
+.conv-name {
+    font-size: 0.86rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text);
+}
+.conv-meta {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+/* ---- main panel ---- */
+#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    max-width: 820px;
+    margin: 0 auto;
+    width: 100%;
 }
 
 /* ---- header ---- */
@@ -111,13 +199,25 @@ body {
     flex-shrink: 0;
     transition: background .2s, border-color .2s;
 }
-#header-left { display: flex; align-items: center; gap: 12px; }
+#header-left { display: flex; align-items: center; gap: 10px; }
 #header h1 {
     font-size: 1.1rem;
     font-weight: 600;
     letter-spacing: -0.01em;
 }
 #header-right { display: flex; align-items: center; gap: 14px; }
+#sidebar-toggle {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 4px 8px;
+    line-height: 1;
+    transition: border-color .15s, color .15s;
+}
+#sidebar-toggle:hover { border-color: var(--accent); color: var(--accent); }
 #status {
     display: flex;
     align-items: center;
@@ -144,14 +244,8 @@ body {
     transition: background .3s;
 }
 #status-dot.connected { background: #22c55e; }
-#status-dot.thinking {
-    background: #f59e0b;
-    animation: pulse 1s infinite;
-}
-@keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50%       { opacity: .4; }
-}
+#status-dot.thinking  { background: #f59e0b; animation: pulse 1s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 /* ---- messages ---- */
 #messages {
@@ -175,22 +269,21 @@ body {
     animation: fadeUp .2s ease;
 }
 @keyframes fadeUp {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from { opacity:0; transform:translateY(8px); }
+    to   { opacity:1; transform:translateY(0); }
 }
-.msg-row.user  { align-self: flex-end; flex-direction: row-reverse; }
-.msg-row.ai    { align-self: flex-start; }
+.msg-row.user   { align-self: flex-end;   flex-direction: row-reverse; }
+.msg-row.ai     { align-self: flex-start; }
+.msg-row.system { align-self: center; }
 
 .avatar {
     width: 32px; height: 32px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    font-size: 0.85rem;
-    font-weight: 700;
-    flex-shrink: 0;
+    font-size: 0.85rem; font-weight: 700; flex-shrink: 0;
 }
-.user .avatar  { background: var(--accent); color: #fff; }
-.ai   .avatar  { background: var(--surface2); color: var(--text-muted); }
+.user .avatar { background: var(--accent);   color: #fff; }
+.ai   .avatar { background: var(--surface2); color: var(--text-muted); }
 
 .bubble {
     padding: 10px 14px;
@@ -200,89 +293,27 @@ body {
     max-width: 100%;
     font-size: 0.92rem;
 }
-.user .bubble {
-    background: var(--user-bg);
-    color: #fff;
-    border-bottom-right-radius: 4px;
-}
-.ai .bubble {
-    background: var(--ai-bg);
-    border: 1px solid var(--border);
-    border-bottom-left-radius: 4px;
-    transition: background .2s, border-color .2s;
-}
+.user   .bubble { background: var(--user-bg); color: #fff; border-bottom-right-radius: 4px; }
+.ai     .bubble { background: var(--ai-bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; transition: background .2s, border-color .2s; }
+.system .bubble { background: transparent; border: 1px dashed var(--border); color: var(--text-muted); font-size: 0.82rem; padding: 6px 12px; border-radius: 8px; }
 
-/* system / slash-command responses */
-.msg-row.system { align-self: center; }
-.system .bubble {
-    background: transparent;
-    border: 1px dashed var(--border);
-    color: var(--text-muted);
-    font-size: 0.82rem;
-    padding: 6px 12px;
-    border-radius: 8px;
-}
-
-/* code blocks inside messages */
-.bubble code {
-    background: var(--surface2);
-    border-radius: 4px;
-    padding: 1px 5px;
-    font-size: 0.85em;
-    font-family: 'Fira Code', 'Cascadia Code', monospace;
-}
-.bubble pre {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 12px;
-    overflow-x: auto;
-    margin-top: 6px;
-}
+.bubble code { background: var(--surface2); border-radius: 4px; padding: 1px 5px; font-size: .85em; font-family: 'Fira Code','Cascadia Code',monospace; }
+.bubble pre  { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin-top: 6px; }
 .bubble pre code { background: none; padding: 0; }
 
 /* thinking dots */
-#thinking {
-    display: none;
-    align-self: flex-start;
-    gap: 10px;
-}
-#thinking.visible { display: flex; }
-.thinking-bubble {
-    background: var(--ai-bg);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    border-bottom-left-radius: 4px;
-    padding: 12px 16px;
-}
-.dots span {
-    display: inline-block;
-    width: 6px; height: 6px;
-    background: var(--text-muted);
-    border-radius: 50%;
-    margin: 0 2px;
-    animation: bounce .9s infinite;
-}
-.dots span:nth-child(2) { animation-delay: .15s; }
-.dots span:nth-child(3) { animation-delay: .3s; }
-@keyframes bounce {
-    0%, 60%, 100% { transform: translateY(0); }
-    30%           { transform: translateY(-6px); }
-}
+#thinking { display:none; align-self:flex-start; gap:10px; }
+#thinking.visible { display:flex; }
+.thinking-bubble { background:var(--ai-bg); border:1px solid var(--border); border-radius:var(--radius); border-bottom-left-radius:4px; padding:12px 16px; }
+.dots span { display:inline-block; width:6px; height:6px; background:var(--text-muted); border-radius:50%; margin:0 2px; animation:bounce .9s infinite; }
+.dots span:nth-child(2) { animation-delay:.15s; }
+.dots span:nth-child(3) { animation-delay:.3s;  }
+@keyframes bounce { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-6px)} }
 
 /* ---- empty state ---- */
-#empty {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    color: var(--text-muted);
-    pointer-events: none;
-}
-#empty .icon { font-size: 2.5rem; }
-#empty p { font-size: 0.9rem; }
+#empty { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; color:var(--text-muted); pointer-events:none; }
+#empty .icon { font-size:2.5rem; }
+#empty p { font-size:0.9rem; }
 
 /* ---- input area ---- */
 #input-area {
@@ -326,8 +357,8 @@ body {
     height: 42px;
     white-space: nowrap;
 }
-#send-btn:hover  { background: var(--accent-h); }
-#send-btn:active { transform: scale(.97); }
+#send-btn:hover   { background: var(--accent-h); }
+#send-btn:active  { transform: scale(.97); }
 #send-btn:disabled { background: var(--border); cursor: not-allowed; }
 """
 
@@ -343,30 +374,112 @@ _JS = """
 
     let ws = null;
     let reconnectDelay = 1000;
+    let activeConvId = null;
 
-    const messagesEl = document.getElementById('messages');
-    const emptyEl    = document.getElementById('empty');
-    const thinkingEl = document.getElementById('thinking');
-    const inputEl    = document.getElementById('msg-input');
-    const sendBtn    = document.getElementById('send-btn');
-    const statusDot  = document.getElementById('status-dot');
-    const statusTxt  = document.getElementById('status-text');
-    const themeBtn   = document.getElementById('theme-btn');
+    const messagesEl  = document.getElementById('messages');
+    const emptyEl     = document.getElementById('empty');
+    const thinkingEl  = document.getElementById('thinking');
+    const inputEl     = document.getElementById('msg-input');
+    const sendBtn     = document.getElementById('send-btn');
+    const statusDot   = document.getElementById('status-dot');
+    const statusTxt   = document.getElementById('status-text');
+    const themeBtn    = document.getElementById('theme-btn');
+    const sidebarEl   = document.getElementById('sidebar');
+    const toggleBtn   = document.getElementById('sidebar-toggle');
+    const convListEl  = document.getElementById('conv-list');
+    const newConvBtn  = document.getElementById('new-conv-btn');
 
-    // ---- theme toggle ----
+    // ---- theme ----
     const savedTheme = localStorage.getItem('ab-theme') || 'dark';
     applyTheme(savedTheme);
-
     function applyTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
         themeBtn.textContent = theme === 'dark' ? '☀' : '☾';
         localStorage.setItem('ab-theme', theme);
     }
-
     themeBtn.addEventListener('click', () => {
-        const current = document.documentElement.getAttribute('data-theme') || 'dark';
-        applyTheme(current === 'dark' ? 'light' : 'dark');
+        applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
     });
+
+    // ---- sidebar toggle ----
+    const sidebarOpen = localStorage.getItem('ab-sidebar') !== 'closed';
+    if (!sidebarOpen) sidebarEl.classList.add('collapsed');
+    toggleBtn.addEventListener('click', () => {
+        const collapsed = sidebarEl.classList.toggle('collapsed');
+        localStorage.setItem('ab-sidebar', collapsed ? 'closed' : 'open');
+        if (!collapsed) loadConversations();
+    });
+
+    // ---- conversations ----
+    async function loadConversations() {
+        try {
+            const res = await fetch('/api/conversations');
+            if (!res.ok) return;
+            const { conversations, active_id } = await res.json();
+            activeConvId = active_id;
+            renderConversations(conversations, active_id);
+        } catch (e) { /* server may not be fully up yet */ }
+    }
+
+    function fmtDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        const now = new Date();
+        const diffDays = Math.floor((now - d) / 86400000);
+        if (diffDays === 0) return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        if (diffDays === 1) return 'Yesterday';
+        if (diffDays < 7)  return d.toLocaleDateString([], {weekday:'short'});
+        return d.toLocaleDateString([], {month:'short', day:'numeric'});
+    }
+
+    function renderConversations(list, activeId) {
+        convListEl.innerHTML = '';
+        if (!list || !list.length) {
+            convListEl.innerHTML = '<p style="padding:8px 10px;font-size:.8rem;color:var(--text-muted)">No conversations yet</p>';
+            return;
+        }
+        list.forEach(conv => {
+            const item = document.createElement('div');
+            item.className = 'conv-item' + (conv.id === activeId ? ' active' : '');
+            item.dataset.id = conv.id;
+            item.innerHTML = `<span class="conv-name">${escapeHtml(conv.name || 'Untitled')}</span>` +
+                             `<span class="conv-meta">${fmtDate(conv.updated_at)} · ${conv.message_count || 0} msgs</span>`;
+            item.addEventListener('click', () => loadConv(conv.id));
+            convListEl.appendChild(item);
+        });
+    }
+
+    function loadConv(id) {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: 'message', content: `/load ${id}` }));
+        activeConvId = id;
+        // optimistically highlight
+        convListEl.querySelectorAll('.conv-item').forEach(el => {
+            el.classList.toggle('active', parseInt(el.dataset.id) === id);
+        });
+        clearMessages();
+    }
+
+    newConvBtn.addEventListener('click', () => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({ type: 'message', content: '/new' }));
+        clearMessages();
+        setTimeout(loadConversations, 300);
+    });
+
+    function clearMessages() {
+        messagesEl.innerHTML = '';
+        messagesEl.appendChild(buildEmptyState());
+        thinkingEl.remove && thinkingEl.remove();
+        messagesEl.appendChild(thinkingEl);
+    }
+
+    function buildEmptyState() {
+        const d = document.createElement('div');
+        d.id = 'empty';
+        d.innerHTML = '<div class="icon">✦</div><p>Ask me anything, or try /help for available commands.</p>';
+        return d;
+    }
 
     // ---- status ----
     function setStatus(state, text) {
@@ -383,6 +496,7 @@ _JS = """
             reconnectDelay = 1000;
             setStatus('connected', 'Connected');
             sendBtn.disabled = false;
+            loadConversations();
         };
 
         ws.onclose = () => {
@@ -399,8 +513,15 @@ _JS = """
             hideThinking();
             try {
                 const data = JSON.parse(evt.data);
-                if (data.type === 'message') appendMessage(data.content, 'ai');
-                else if (data.type === 'system') appendMessage(data.content, 'system');
+                if (data.type === 'message') {
+                    appendMessage(data.content, 'ai');
+                } else if (data.type === 'system') {
+                    appendMessage(data.content, 'system');
+                    // refresh list after conversation-mutating commands
+                    if (/loaded|created|forked|renamed/i.test(data.content)) {
+                        setTimeout(loadConversations, 150);
+                    }
+                }
             } catch (e) {
                 appendMessage(evt.data, 'ai');
             }
@@ -412,7 +533,6 @@ _JS = """
         setStatus('thinking', 'Thinking…');
         scrollBottom();
     }
-
     function hideThinking() {
         thinkingEl.classList.remove('visible');
         if (ws && ws.readyState === WebSocket.OPEN) setStatus('connected', 'Connected');
@@ -420,45 +540,36 @@ _JS = """
 
     // ---- rendering ----
     function escapeHtml(t) {
-        return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
-
     function formatMessage(text) {
         text = escapeHtml(text);
         text = text.replace(/```[\\w]*\\n?([\\s\\S]*?)```/g, '<pre><code>$1</code></pre>');
         text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
         return text;
     }
-
     function appendMessage(content, role) {
-        if (emptyEl) emptyEl.style.display = 'none';
+        const empty = document.getElementById('empty');
+        if (empty) empty.style.display = 'none';
 
         const row = document.createElement('div');
         row.className = `msg-row ${role}`;
-
         if (role !== 'system') {
-            const avatar = document.createElement('div');
-            avatar.className = 'avatar';
-            avatar.textContent = role === 'user' ? 'U' : 'AI';
-            row.appendChild(avatar);
+            const av = document.createElement('div');
+            av.className = 'avatar';
+            av.textContent = role === 'user' ? 'U' : 'AI';
+            row.appendChild(av);
         }
-
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
         bubble.innerHTML = role === 'system' ? escapeHtml(content) : formatMessage(content);
         row.appendChild(bubble);
-
         messagesEl.appendChild(row);
         scrollBottom();
     }
-
-    function scrollBottom() {
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-    }
+    function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
 
     // ---- send ----
-    function isSlashCmd(text) { return text.startsWith('/'); }
-
     function send() {
         const text = inputEl.value.trim();
         if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -466,20 +577,20 @@ _JS = """
         ws.send(JSON.stringify({ type: 'message', content: text }));
         inputEl.value = '';
         inputEl.style.height = '42px';
-        // Slash commands are resolved server-side without an LLM call — no spinner
-        if (!isSlashCmd(text)) showThinking();
+        if (!text.startsWith('/')) showThinking();
     }
 
     sendBtn.addEventListener('click', send);
-
     inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
-
     inputEl.addEventListener('input', () => {
         inputEl.style.height = 'auto';
         inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
     });
+
+    // initial conversation load if sidebar starts open
+    if (sidebarOpen) loadConversations();
 
     connect();
 })();
@@ -504,44 +615,62 @@ def _build_page(api_key: str | None) -> Html:
         ),
         Body(
             Div(
-                # Header
+                # ---- Sidebar ----
                 Div(
-                    Div(H1("anotherbot"), id="header-left"),
+                    Div(
+                        Span("Conversations"),
+                        Button("+ New", id="new-conv-btn"),
+                        id="sidebar-header",
+                    ),
+                    Div(id="conv-list"),
+                    id="sidebar",
+                ),
+                # ---- Main panel ----
+                Div(
+                    # Header
                     Div(
                         Div(
-                            Span(id="status-dot"),
-                            Span("Connecting…", id="status-text"),
-                            id="status",
+                            Button("☰", id="sidebar-toggle", title="Toggle sidebar"),
+                            H1("anotherbot"),
+                            id="header-left",
                         ),
-                        Button("☾", id="theme-btn", title="Toggle light/dark"),
-                        id="header-right",
+                        Div(
+                            Div(
+                                Span(id="status-dot"),
+                                Span("Connecting…", id="status-text"),
+                                id="status",
+                            ),
+                            Button("☾", id="theme-btn", title="Toggle light/dark"),
+                            id="header-right",
+                        ),
+                        id="header",
                     ),
-                    id="header",
-                ),
-                # Messages
-                Div(
+                    # Messages
                     Div(
-                        Div("✦", cls="icon"),
-                        P("Ask me anything, or try /help for available commands."),
-                        id="empty",
+                        Div(
+                            Div("✦", cls="icon"),
+                            P("Ask me anything, or try /help for available commands."),
+                            id="empty",
+                        ),
+                        Div(
+                            Div(cls="avatar", style="background:var(--surface2);color:var(--text-muted)"),
+                            Div(Div(Span(), Span(), Span(), cls="dots"), cls="thinking-bubble"),
+                            id="thinking",
+                        ),
+                        id="messages",
                     ),
+                    # Input area
                     Div(
-                        Div(cls="avatar", style="background:var(--surface2);color:var(--text-muted)"),
-                        Div(Div(Span(), Span(), Span(), cls="dots"), cls="thinking-bubble"),
-                        id="thinking",
+                        Input(
+                            type="text",
+                            id="msg-input",
+                            placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
+                            autocomplete="off",
+                        ),
+                        Button("Send", id="send-btn", disabled=True),
+                        id="input-area",
                     ),
-                    id="messages",
-                ),
-                # Input area
-                Div(
-                    Input(
-                        type="text",
-                        id="msg-input",
-                        placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
-                        autocomplete="off",
-                    ),
-                    Button("Send", id="send-btn", disabled=True),
-                    id="input-area",
+                    id="main",
                 ),
                 id="app",
             ),
@@ -614,6 +743,17 @@ class WebChannel(Channel):
         @rt("/")
         def index():
             return _build_page(self.api_key)
+
+        @rt("/api/conversations")
+        async def conversations_api(req):
+            from starlette.responses import JSONResponse
+            from ..infra.conversations import ConversationStore
+            from ..core import runtime as _rt
+            store = ConversationStore()
+            ch = ChannelType.WEB.value
+            convs = store.list(ch)
+            active_id = _rt.get(f"conversation_id:{ch}")
+            return JSONResponse({"conversations": convs, "active_id": active_id})
 
         # Starlette WebSocket route (low-level, for multi-client management)
         async def _ws_endpoint(ws: WebSocket) -> None:
