@@ -44,7 +44,20 @@ async def start_server() -> None:
             discord_channel.start()
             discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel, max_iterations=runtime.get("max_iterations", 250))
 
-    if not telegram_channel and not discord_channel:
+    web_channel = None
+    web_agent = None
+    if config.get("websocket"):
+        from .channels.web_channel import WebChannel
+        ws_host = config.websocket.get("HOST", "127.0.0.1")
+        ws_port = config.websocket.get("PORT", 8765)
+        ws_api_key = config.websocket.get("API_KEY") or None
+        log.info(f"Starting web channel on {ws_host}:{ws_port}")
+        web_mq = MessageQueue()
+        web_channel = WebChannel(web_mq, host=ws_host, port=ws_port, api_key=ws_api_key)
+        web_channel.start()
+        web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
+
+    if not telegram_channel and not discord_channel and not web_channel:
         log.error("No channels configured, exiting...")
         return
 
@@ -56,6 +69,9 @@ async def start_server() -> None:
     if discord_channel:
         channels["discord"] = discord_channel
         mqs["discord"] = discord_mq
+    if web_channel:
+        channels["websocket"] = web_channel
+        mqs["websocket"] = web_mq
 
     tasks = ScheduledTasks(mqs=mqs, channels=channels)
 
@@ -64,5 +80,7 @@ async def start_server() -> None:
         coros.extend([telegram_channel.run_polling(), telegram_agent.process_incoming(), telegram_mq.process_outgoing()])
     if discord_channel:
         coros.extend([discord_channel.run_polling(), discord_agent.process_incoming(), discord_mq.process_outgoing()])
+    if web_channel:
+        coros.extend([web_channel.run_polling(), web_agent.process_incoming(), web_mq.process_outgoing()])
 
     await asyncio.gather(*coros)
