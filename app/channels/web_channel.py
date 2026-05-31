@@ -160,6 +160,7 @@ body {
     padding: 20px;
     display: flex;
     flex-direction: column;
+    justify-content: flex-end;
     gap: 16px;
     scroll-behavior: smooth;
 }
