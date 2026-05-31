@@ -413,7 +413,8 @@ _JS = """
     // ---- conversations ----
     async function loadConversations() {
         try {
-            const res = await fetch('/api/conversations');
+            const url = '/api/conversations' + (API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : '');
+            const res = await fetch(url);
             if (!res.ok) return;
             const { conversations, active_id } = await res.json();
             activeConvId = active_id;
@@ -464,7 +465,7 @@ _JS = """
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         ws.send(JSON.stringify({ type: 'message', content: '/new' }));
         clearMessages();
-        setTimeout(loadConversations, 300);
+        // list refresh is driven by the ws.onmessage handler when server responds with "created"
     });
 
     function clearMessages() {
@@ -746,9 +747,12 @@ class WebChannel(Channel):
 
         @rt("/api/conversations")
         async def conversations_api(req):
-            from starlette.responses import JSONResponse
+            from starlette.responses import JSONResponse, Response
             from ..infra.conversations import ConversationStore
             from ..core import runtime as _rt
+            api_key_val = req.query_params.get("api_key", req.headers.get("x-api-key", ""))
+            if self.api_key and api_key_val != self.api_key:
+                return Response(status_code=401)
             store = ConversationStore()
             ch = ChannelType.WEB.value
             convs = store.list(ch)
@@ -860,10 +864,14 @@ class WebChannel(Channel):
 
     async def send_message(self, message: OutgoingMessage) -> None:
         client_id = message.metadata.get("websocket_id")
-        if not client_id:
-            log.error("Cannot send WebSocket message: no websocket_id in metadata")
-            return
-        await self._safe_send_json(client_id, {"type": "message", "content": message.content})
+        if client_id:
+            await self._safe_send_json(client_id, {"type": "message", "content": message.content})
+        else:
+            # No specific client (e.g. scheduled task delivery) — broadcast to all connected clients
+            async with self._conn_lock:
+                targets = list(self._connections.keys())
+            for cid in targets:
+                await self._safe_send_json(cid, {"type": "message", "content": message.content})
 
     # -- Helpers ------------------------------------------------------------
 

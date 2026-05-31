@@ -70,8 +70,9 @@ async def start_server() -> None:
         channels["discord"] = discord_channel
         mqs["discord"] = discord_mq
     if web_channel:
-        channels["websocket"] = web_channel
-        mqs["websocket"] = web_mq
+        from .channels.channel import ChannelType
+        channels[ChannelType.WEB.value] = web_channel
+        mqs[ChannelType.WEB.value] = web_mq
 
     tasks = ScheduledTasks(mqs=mqs, channels=channels)
 
