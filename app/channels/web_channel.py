@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import datetime
 
 import uvicorn
 from fasthtml.common import (
@@ -37,6 +38,7 @@ from .message_queue import MessageQueue
 log = logging.getLogger(__name__)
 
 MAX_WS_MESSAGE_LENGTH = 4096
+_startup_time = datetime.now()
 
 # --------------------------------------------------------------------------- #
 # CSS                                                                          #
@@ -662,6 +664,22 @@ class WebChannel(Channel):
                                     "/export · /model [name] · /status"
                                 )},
                             )
+                            continue
+                        if name == "status":
+                            from .. import config as _cfg
+                            from ..core import runtime as _rt
+                            uptime = datetime.now() - _startup_time
+                            h, rem = divmod(int(uptime.total_seconds()), 3600)
+                            m, s = divmod(rem, 60)
+                            ch_str = ChannelType.WEB.value
+                            model = _rt.get("model", _cfg.get("model", "unknown"))
+                            conv_id = _rt.get(f"conversation_id:{ch_str}", "—")
+                            conv_name = _rt.get(f"conversation_name:{ch_str}", "—")
+                            await self._safe_send_json(client_id, {"type": "system", "content": (
+                                f"model: {model}  |  uptime: {h}h {m}m {s}s  |  "
+                                f"conversation: [{conv_id}] {conv_name}  |  "
+                                f"clients: {len(self._connections)}"
+                            )})
                             continue
 
                     await self.mq.incoming.put(
