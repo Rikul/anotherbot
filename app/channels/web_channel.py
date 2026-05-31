@@ -60,6 +60,19 @@ _CSS = """
     --font:      'Inter', 'Segoe UI', system-ui, sans-serif;
 }
 
+[data-theme="light"] {
+    --bg:        #f8fafc;
+    --surface:   #ffffff;
+    --surface2:  #f1f5f9;
+    --border:    #e2e8f0;
+    --text:      #0f172a;
+    --text-muted:#64748b;
+    --accent:    #6366f1;
+    --accent-h:  #4f46e5;
+    --user-bg:   #6366f1;
+    --ai-bg:     #f1f5f9;
+}
+
 html, body { height: 100%; }
 
 body {
@@ -72,6 +85,7 @@ body {
     flex-direction: column;
     align-items: center;
     padding: 0;
+    transition: background .2s, color .2s;
 }
 
 /* ---- layout ---- */
@@ -93,12 +107,15 @@ body {
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-shrink: 0;
+    transition: background .2s, border-color .2s;
 }
+#header-left { display: flex; align-items: center; gap: 12px; }
 #header h1 {
     font-size: 1.1rem;
     font-weight: 600;
     letter-spacing: -0.01em;
 }
+#header-right { display: flex; align-items: center; gap: 14px; }
 #status {
     display: flex;
     align-items: center;
@@ -106,6 +123,18 @@ body {
     font-size: 0.8rem;
     color: var(--text-muted);
 }
+#theme-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 4px 8px;
+    transition: border-color .15s, color .15s;
+}
+#theme-btn:hover { border-color: var(--accent); color: var(--accent); }
 #status-dot {
     width: 8px; height: 8px;
     border-radius: 50%;
@@ -177,6 +206,18 @@ body {
     background: var(--ai-bg);
     border: 1px solid var(--border);
     border-bottom-left-radius: 4px;
+    transition: background .2s, border-color .2s;
+}
+
+/* system / slash-command responses */
+.msg-row.system { align-self: center; }
+.system .bubble {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    padding: 6px 12px;
+    border-radius: 8px;
 }
 
 /* code blocks inside messages */
@@ -299,7 +340,6 @@ _JS = """
 
     let ws = null;
     let reconnectDelay = 1000;
-    let pendingResponse = null;
 
     const messagesEl = document.getElementById('messages');
     const emptyEl    = document.getElementById('empty');
@@ -308,12 +348,30 @@ _JS = """
     const sendBtn    = document.getElementById('send-btn');
     const statusDot  = document.getElementById('status-dot');
     const statusTxt  = document.getElementById('status-text');
+    const themeBtn   = document.getElementById('theme-btn');
 
+    // ---- theme toggle ----
+    const savedTheme = localStorage.getItem('ab-theme') || 'dark';
+    applyTheme(savedTheme);
+
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        themeBtn.textContent = theme === 'dark' ? '☀' : '☾';
+        localStorage.setItem('ab-theme', theme);
+    }
+
+    themeBtn.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme') || 'dark';
+        applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+
+    // ---- status ----
     function setStatus(state, text) {
         statusDot.className = state;
         statusTxt.textContent = text;
     }
 
+    // ---- WebSocket ----
     function connect() {
         setStatus('', 'Connecting…');
         ws = new WebSocket(wsUrl);
@@ -332,15 +390,14 @@ _JS = """
             reconnectDelay = Math.min(reconnectDelay * 2, 30000);
         };
 
-        ws.onerror = () => {
-            setStatus('', 'Error');
-        };
+        ws.onerror = () => setStatus('', 'Error');
 
         ws.onmessage = (evt) => {
             hideThinking();
             try {
                 const data = JSON.parse(evt.data);
                 if (data.type === 'message') appendMessage(data.content, 'ai');
+                else if (data.type === 'system') appendMessage(data.content, 'system');
             } catch (e) {
                 appendMessage(evt.data, 'ai');
             }
@@ -358,16 +415,14 @@ _JS = """
         if (ws && ws.readyState === WebSocket.OPEN) setStatus('connected', 'Connected');
     }
 
+    // ---- rendering ----
     function escapeHtml(t) {
         return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
     function formatMessage(text) {
-        // Simple code-block and inline-code rendering
         text = escapeHtml(text);
-        // ```lang\\ncode\\n```
         text = text.replace(/```[\\w]*\\n?([\\s\\S]*?)```/g, '<pre><code>$1</code></pre>');
-        // `inline`
         text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
         return text;
     }
@@ -378,16 +433,18 @@ _JS = """
         const row = document.createElement('div');
         row.className = `msg-row ${role}`;
 
-        const avatar = document.createElement('div');
-        avatar.className = 'avatar';
-        avatar.textContent = role === 'user' ? 'U' : 'AI';
+        if (role !== 'system') {
+            const avatar = document.createElement('div');
+            avatar.className = 'avatar';
+            avatar.textContent = role === 'user' ? 'U' : 'AI';
+            row.appendChild(avatar);
+        }
 
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.innerHTML = formatMessage(content);
-
-        row.appendChild(avatar);
+        bubble.innerHTML = role === 'system' ? escapeHtml(content) : formatMessage(content);
         row.appendChild(bubble);
+
         messagesEl.appendChild(row);
         scrollBottom();
     }
@@ -396,6 +453,9 @@ _JS = """
         messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    // ---- send ----
+    function isSlashCmd(text) { return text.startsWith('/'); }
+
     function send() {
         const text = inputEl.value.trim();
         if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
@@ -403,19 +463,16 @@ _JS = """
         ws.send(JSON.stringify({ type: 'message', content: text }));
         inputEl.value = '';
         inputEl.style.height = '42px';
-        showThinking();
+        // Slash commands are resolved server-side without an LLM call — no spinner
+        if (!isSlashCmd(text)) showThinking();
     }
 
     sendBtn.addEventListener('click', send);
 
     inputEl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            send();
-        }
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
 
-    // Auto-grow textarea
     inputEl.addEventListener('input', () => {
         inputEl.style.height = 'auto';
         inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
@@ -436,7 +493,7 @@ def _build_page(api_key: str | None) -> Html:
         Head(
             Meta(charset="utf-8"),
             Meta(name="viewport", content="width=device-width, initial-scale=1"),
-            Title("CraftersCode AI"),
+            Title("anotherbot"),
             Link(rel="preconnect", href="https://fonts.googleapis.com"),
             Link(rel="stylesheet",
                  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"),
@@ -446,11 +503,15 @@ def _build_page(api_key: str | None) -> Html:
             Div(
                 # Header
                 Div(
-                    H1("CraftersCode AI"),
+                    Div(H1("anotherbot"), id="header-left"),
                     Div(
-                        Span(id="status-dot"),
-                        Span("Connecting…", id="status-text"),
-                        id="status",
+                        Div(
+                            Span(id="status-dot"),
+                            Span("Connecting…", id="status-text"),
+                            id="status",
+                        ),
+                        Button("☾", id="theme-btn", title="Toggle light/dark"),
+                        id="header-right",
                     ),
                     id="header",
                 ),
@@ -458,7 +519,7 @@ def _build_page(api_key: str | None) -> Html:
                 Div(
                     Div(
                         Div("✦", cls="icon"),
-                        P("Ask me anything. I can browse the web, run code, and more."),
+                        P("Ask me anything, or try /help for available commands."),
                         id="empty",
                     ),
                     Div(
@@ -473,7 +534,7 @@ def _build_page(api_key: str | None) -> Html:
                     Input(
                         type="text",
                         id="msg-input",
-                        placeholder="Message CraftersCode…  (Enter to send, Shift+Enter for newline)",
+                        placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
                         autocomplete="off",
                     ),
                     Button("Send", id="send-btn", disabled=True),
@@ -578,17 +639,28 @@ class WebChannel(Channel):
                         cmd = content[1:].split(maxsplit=1)
                         if not cmd:
                             continue
-                        if cmd[0].lower() == "whoami":
+                        name = cmd[0].lower()
+                        if name == "whoami":
                             await self._safe_send_json(
                                 client_id,
-                                {"type": "message", "content": f"Your connection ID is {client_id}."},
+                                {"type": "system", "content": f"Connection ID: {client_id}"},
                             )
                             continue
-                        if cmd[0].lower() == "stop":
+                        if name == "stop":
                             self.stopped = True
                             await self._safe_send_json(
                                 client_id,
-                                {"type": "message", "content": "Stopped."},
+                                {"type": "system", "content": "Agent stopped."},
+                            )
+                            continue
+                        if name == "help":
+                            await self._safe_send_json(
+                                client_id,
+                                {"type": "system", "content": (
+                                    "Available commands: /help · /whoami · /stop · "
+                                    "/new · /list · /load <n> · /fork · /rename <name> · "
+                                    "/export · /model [name] · /status"
+                                )},
                             )
                             continue
 
