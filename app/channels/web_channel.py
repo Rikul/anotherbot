@@ -25,8 +25,8 @@ from datetime import datetime
 
 import uvicorn
 from fasthtml.common import (
-    A, Button, Div, Form, Head, Html, Input, Link, Meta, Script, Span, Style,
-    Title, Body, H1, P, fast_app, serve,
+    Button, Div, Head, Html, Input, Link, Meta, Script, Span, Style,
+    Textarea, Title, Body, H1, P, fast_app,
 )
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -37,7 +37,6 @@ from .message_queue import MessageQueue
 
 log = logging.getLogger(__name__)
 
-MAX_WS_MESSAGE_LENGTH = 4096
 _startup_time = datetime.now()
 
 # --------------------------------------------------------------------------- #
@@ -602,8 +601,9 @@ _JS = """
 # FastHTML page builder                                                        #
 # --------------------------------------------------------------------------- #
 
-def _build_page(api_key: str | None) -> Html:
-    api_key_script = f"window._apiKey = {json.dumps(api_key or '')};"
+def _build_page() -> Html:
+    # api_key is read from ?api_key= URL param in the browser — never embedded in HTML
+    api_key_script = "window._apiKey = new URLSearchParams(location.search).get('api_key') || '';"
     return Html(
         Head(
             Meta(charset="utf-8"),
@@ -662,11 +662,11 @@ def _build_page(api_key: str | None) -> Html:
                     ),
                     # Input area
                     Div(
-                        Input(
-                            type="text",
+                        Textarea(
                             id="msg-input",
                             placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
                             autocomplete="off",
+                            rows="1",
                         ),
                         Button("Send", id="send-btn", disabled=True),
                         id="input-area",
@@ -707,6 +707,7 @@ class WebChannel(Channel):
         self.api_key = api_key
         self.stopped: bool = False
         self._connections: dict[str, WebSocket] = {}
+        self._send_locks: dict[str, asyncio.Lock] = {}
         self._conn_lock = asyncio.Lock()
         mq.register(self, self.send_message)
 
@@ -743,7 +744,7 @@ class WebChannel(Channel):
 
         @rt("/")
         def index():
-            return _build_page(self.api_key)
+            return _build_page()
 
         @rt("/api/conversations")
         async def conversations_api(req):
@@ -831,7 +832,10 @@ class WebChannel(Channel):
                         IncomingMessage(
                             content=content,
                             channel=ChannelType.WEB,
-                            metadata={"websocket_id": client_id},
+                            metadata={
+                                "websocket_id": client_id,
+                                "is_command": content.startswith("/"),
+                            },
                         )
                     )
             except WebSocketDisconnect:
@@ -841,6 +845,7 @@ class WebChannel(Channel):
             finally:
                 async with self._conn_lock:
                     self._connections.pop(client_id, None)
+                    self._send_locks.pop(client_id, None)
 
         # Mount the WebSocket route on the FastHTML (Starlette) app
         self._fasthtml_app.router.routes.insert(
@@ -864,14 +869,17 @@ class WebChannel(Channel):
 
     async def send_message(self, message: OutgoingMessage) -> None:
         client_id = message.metadata.get("websocket_id")
+        is_command = message.metadata.get("is_command", False)
+        msg_type = "system" if is_command else "message"
+        payload = {"type": msg_type, "content": message.content}
         if client_id:
-            await self._safe_send_json(client_id, {"type": "message", "content": message.content})
+            await self._safe_send_json(client_id, payload)
         else:
             # No specific client (e.g. scheduled task delivery) — broadcast to all connected clients
             async with self._conn_lock:
                 targets = list(self._connections.keys())
             for cid in targets:
-                await self._safe_send_json(cid, {"type": "message", "content": message.content})
+                await self._safe_send_json(cid, payload)
 
     # -- Helpers ------------------------------------------------------------
 
@@ -891,17 +899,14 @@ class WebChannel(Channel):
     async def _safe_send_json(self, client_id: str, payload: dict) -> None:
         async with self._conn_lock:
             ws = self._connections.get(client_id)
-        if ws is None:
-            return
-        try:
-            text = payload.get("content", "")
-            if len(text) > MAX_WS_MESSAGE_LENGTH:
-                for i in range(0, len(text), MAX_WS_MESSAGE_LENGTH):
-                    chunk = text[i : i + MAX_WS_MESSAGE_LENGTH]
-                    await ws.send_json({"type": "message", "content": chunk})
-            else:
+            if ws is None:
+                return
+            lock = self._send_locks.setdefault(client_id, asyncio.Lock())
+        async with lock:
+            try:
                 await ws.send_json(payload)
-        except Exception:
-            log.exception(f"Failed to send to WebSocket client {client_id}")
-            async with self._conn_lock:
-                self._connections.pop(client_id, None)
+            except Exception:
+                log.exception(f"Failed to send to WebSocket client {client_id}")
+                async with self._conn_lock:
+                    self._connections.pop(client_id, None)
+                    self._send_locks.pop(client_id, None)
