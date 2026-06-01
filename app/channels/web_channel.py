@@ -285,18 +285,9 @@ body {
     from { opacity:0; transform:translateY(8px); }
     to   { opacity:1; transform:translateY(0); }
 }
-.msg-row.user   { align-self: flex-end;   flex-direction: row-reverse; }
+.msg-row.user   { align-self: flex-end; }
 .msg-row.ai     { align-self: flex-start; }
 .msg-row.system { align-self: center; }
-
-.avatar {
-    width: 32px; height: 32px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 0.85rem; font-weight: 700; flex-shrink: 0;
-}
-.user .avatar { background: var(--accent);   color: #fff; }
-.ai   .avatar { background: var(--surface2); color: var(--text-muted); }
 
 .bubble {
     padding: 10px 14px;
@@ -394,8 +385,6 @@ _JS = """
     let ws = null;
     let reconnectDelay = 1000;
     let activeConvId = null;
-    let modelName = 'AI';
-    let modelLabel = '';
 
     const messagesEl  = document.getElementById('messages');
     const scrollEl    = document.getElementById('messages-wrap');
@@ -428,26 +417,11 @@ _JS = """
     toggleBtn.addEventListener('click', () => {
         const collapsed = sidebarEl.classList.toggle('collapsed');
         localStorage.setItem('ab-sidebar', collapsed ? 'closed' : 'open');
-        if (!collapsed) loadConversations();
+        if (!collapsed) loadConversations(false);
     });
 
-    // ---- model name ----
-    async function loadStatus() {
-        try {
-            const url = '/api/status' + (API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : '');
-            const res = await fetch(url);
-            if (!res.ok) return;
-            const { model } = await res.json();
-            if (model) {
-                const seg = model.split('/').pop();
-                modelLabel = seg;
-                modelName  = seg.substring(0, 4).toUpperCase();
-            }
-        } catch (e) { /* server may not be fully up yet */ }
-    }
-
     // ---- conversations ----
-    async function loadConversations() {
+    async function loadConversations(populateMessages) {
         try {
             const url = '/api/conversations' + (API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : '');
             const res = await fetch(url);
@@ -455,7 +429,22 @@ _JS = """
             const { conversations, active_id } = await res.json();
             activeConvId = active_id;
             renderConversations(conversations, active_id);
+            if (populateMessages && active_id) await loadMessages(active_id);
         } catch (e) { /* server may not be fully up yet */ }
+    }
+
+    async function loadMessages(convId) {
+        if (!convId) return;
+        try {
+            const url = `/api/messages?conv_id=${convId}` + (API_KEY ? '&api_key=' + encodeURIComponent(API_KEY) : '');
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const { messages } = await res.json();
+            if (!messages || !messages.length) return;
+            const empty = document.getElementById('empty');
+            if (empty) empty.style.display = 'none';
+            messages.forEach(msg => appendMessage(msg.content, msg.role === 'user' ? 'user' : 'ai'));
+        } catch (e) { /* ignore */ }
     }
 
     function fmtDate(iso) {
@@ -490,11 +479,11 @@ _JS = """
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         ws.send(JSON.stringify({ type: 'message', content: `/load ${id}` }));
         activeConvId = id;
-        // optimistically highlight
         convListEl.querySelectorAll('.conv-item').forEach(el => {
             el.classList.toggle('active', parseInt(el.dataset.id) === id);
         });
         clearMessages();
+        loadMessages(id);
     }
 
     newConvBtn.addEventListener('click', () => {
@@ -533,8 +522,7 @@ _JS = """
             reconnectDelay = 1000;
             setStatus('connected', 'Connected');
             sendBtn.disabled = false;
-            loadConversations();
-            loadStatus();
+            loadConversations(true);
         };
 
         ws.onclose = () => {
@@ -555,9 +543,9 @@ _JS = """
                     appendMessage(data.content, 'ai');
                 } else if (data.type === 'system') {
                     appendMessage(data.content, 'system');
-                    // refresh list after conversation-mutating commands
+                    // refresh sidebar after conversation-mutating commands
                     if (/loaded|created|forked|renamed/i.test(data.content)) {
-                        setTimeout(loadConversations, 150);
+                        setTimeout(() => loadConversations(false), 150);
                     }
                 }
             } catch (e) {
@@ -592,13 +580,6 @@ _JS = """
 
         const row = document.createElement('div');
         row.className = `msg-row ${role}`;
-        if (role !== 'system') {
-            const av = document.createElement('div');
-            av.className = 'avatar';
-            av.textContent = role === 'user' ? 'U' : modelName;
-            if (role !== 'user') av.title = modelLabel || modelName;
-            row.appendChild(av);
-        }
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
         bubble.innerHTML = role === 'system' ? escapeHtml(content) : formatMessage(content);
@@ -616,7 +597,15 @@ _JS = """
         ws.send(JSON.stringify({ type: 'message', content: text }));
         inputEl.value = '';
         inputEl.style.height = '42px';
-        if (!text.startsWith('/')) showThinking();
+        if (text === '/new') {
+            clearMessages();
+        } else if (/^\/load\s+\d+/.test(text)) {
+            const id = parseInt(text.split(/\s+/)[1]);
+            clearMessages();
+            loadMessages(id);
+        } else if (!text.startsWith('/')) {
+            showThinking();
+        }
     }
 
     sendBtn.addEventListener('click', send);
@@ -628,8 +617,8 @@ _JS = """
         inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
     });
 
-    // initial conversation load if sidebar starts open
-    if (sidebarOpen) loadConversations();
+    // sidebar pre-populate (messages already loaded via ws.onopen → loadConversations(true))
+    if (sidebarOpen) loadConversations(false);
 
     connect();
 })();
@@ -701,7 +690,6 @@ def _build_page() -> Html:
                         ),
                         # Thinking dots — always just above the input box
                         Div(
-                            Div(cls="avatar", style="background:var(--surface2);color:var(--text-muted)"),
                             Div(Div(Span(), Span(), Span(), cls="dots"), cls="thinking-bubble"),
                             id="thinking",
                         ),
@@ -806,6 +794,23 @@ class WebChannel(Channel):
             convs = store.list(ch)
             active_id = _rt.get(f"conversation_id:{ch}")
             return JSONResponse({"conversations": convs, "active_id": active_id})
+
+        @rt("/api/messages")
+        def messages_api(req):
+            from starlette.responses import JSONResponse, Response
+            from ..infra.conversations import ConversationStore
+            api_key_val = req.query_params.get("api_key", req.headers.get("x-api-key", ""))
+            if self.api_key and api_key_val != self.api_key:
+                return Response(status_code=401)
+            try:
+                conv_id = int(req.query_params.get("conv_id", 0))
+            except (ValueError, TypeError):
+                return Response(status_code=400)
+            if not conv_id:
+                return Response(status_code=400)
+            store = ConversationStore()
+            msgs = store.load_messages(conv_id)
+            return JSONResponse({"messages": msgs})
 
         @rt("/api/status")
         def status_api(req):
