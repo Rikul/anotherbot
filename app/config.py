@@ -40,7 +40,10 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
     if v := os.environ.get("WEBSOCKET_HOST"):
         _config.setdefault("websocket", {})["HOST"] = v
     if v := os.environ.get("WEBSOCKET_PORT"):
-        _config.setdefault("websocket", {})["PORT"] = int(v)
+        try:
+            _config.setdefault("websocket", {})["PORT"] = int(v)
+        except ValueError:
+            raise ValueError(f"WEBSOCKET_PORT must be an integer, got: {v!r}") from None
     if v := os.environ.get("WEBSOCKET_API_KEY"):
         _config.setdefault("websocket", {})["API_KEY"] = v
 

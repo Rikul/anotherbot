@@ -3,12 +3,12 @@
 The channel exposes two endpoints on the same uvicorn server:
 
     GET /          — FastHTML chat UI (HTML page, served to browsers)
-    WS  /ws        — WebSocket endpoint (JSON protocol, same as websocket.py)
+    WS  /ws        — WebSocket endpoint (JSON framing)
 
 Authentication: optional ``api_key`` query parameter, checked on connect.
 Mismatched keys are rejected with WebSocket close code 4001.
 
-WebSocket message framing (identical to the existing websocket.py channel)::
+WebSocket message framing::
 
     {"type": "message", "content": "..."}
 
@@ -25,7 +25,7 @@ from datetime import datetime
 
 import uvicorn
 from fasthtml.common import (
-    Button, Div, Head, Html, Input, Link, Meta, Script, Span, Style,
+    Button, Div, Head, Html, Link, Meta, Script, Span, Style,
     Textarea, Title, Body, H1, P, fast_app,
 )
 from starlette.routing import WebSocketRoute
@@ -368,6 +368,12 @@ body {
 _JS = """
 (function() {
     const API_KEY = window._apiKey || '';
+    // Strip api_key from address bar so it doesn't leak via browser history or copy-paste
+    if (API_KEY) {
+        const p = new URLSearchParams(location.search);
+        p.delete('api_key');
+        history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
+    }
     const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
     const wsUrl = `${wsProto}://${location.host}/ws${API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : ''}`;
 
@@ -747,7 +753,7 @@ class WebChannel(Channel):
             return _build_page()
 
         @rt("/api/conversations")
-        async def conversations_api(req):
+        def conversations_api(req):
             from starlette.responses import JSONResponse, Response
             from ..infra.conversations import ConversationStore
             from ..core import runtime as _rt
@@ -779,6 +785,9 @@ class WebChannel(Channel):
             try:
                 while True:
                     raw = await ws.receive_text()
+                    if len(raw) > 65_536:
+                        await ws.close(code=1009, reason="Message too large")
+                        return
                     content = self._extract_content(raw)
                     if not content:
                         continue
