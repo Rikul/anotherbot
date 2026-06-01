@@ -87,12 +87,19 @@ body {
     transition: background .2s, color .2s;
 }
 
-/* ---- top-level layout: sidebar + main ---- */
+/* ---- top-level layout: header on top, then sidebar + chat ---- */
 #app {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     width: 100%;
     height: 100vh;
+}
+
+#body-row {
+    display: flex;
+    flex-direction: row;
+    flex: 1;
+    overflow: hidden;
 }
 
 /* ---- sidebar ---- */
@@ -176,18 +183,7 @@ body {
     color: var(--text-muted);
 }
 
-/* ---- main panel ---- */
-#main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    max-width: 820px;
-    margin: 0 auto;
-    width: 100%;
-}
-
-/* ---- header ---- */
+/* ---- header (full-width, top of page) ---- */
 #header {
     display: flex;
     align-items: center;
@@ -196,7 +192,19 @@ body {
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-shrink: 0;
+    width: 100%;
     transition: background .2s, border-color .2s;
+}
+
+/* ---- chat panel ---- */
+#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    max-width: 820px;
+    margin: 0 auto;
+    width: 100%;
 }
 #header-left { display: flex; align-items: center; gap: 10px; }
 #header h1 {
@@ -247,19 +255,25 @@ body {
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
 
 /* ---- messages ---- */
-#messages {
+/* Outer scroll container — must be separate from the flex container to allow scrolling to top */
+#messages-wrap {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    scroll-behavior: smooth;
+}
+#messages-wrap::-webkit-scrollbar { width: 4px; }
+#messages-wrap::-webkit-scrollbar-track { background: transparent; }
+#messages-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+/* Inner flex container — min-height: 100% + justify-content: flex-end anchors messages to bottom */
+#messages {
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
+    min-height: 100%;
+    padding: 20px;
     gap: 16px;
-    scroll-behavior: smooth;
 }
-#messages::-webkit-scrollbar { width: 4px; }
-#messages::-webkit-scrollbar-track { background: transparent; }
-#messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 
 .msg-row {
     display: flex;
@@ -300,8 +314,8 @@ body {
 .bubble pre  { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin-top: 6px; }
 .bubble pre code { background: none; padding: 0; }
 
-/* thinking dots */
-#thinking { display:none; align-self:flex-start; gap:10px; }
+/* thinking dots — sits between scroll area and input, always above the input box */
+#thinking { display:none; align-self:flex-start; gap:10px; padding: 4px 20px 8px; flex-shrink: 0; }
 #thinking.visible { display:flex; }
 .thinking-bubble { background:var(--ai-bg); border:1px solid var(--border); border-radius:var(--radius); border-bottom-left-radius:4px; padding:12px 16px; }
 .dots span { display:inline-block; width:6px; height:6px; background:var(--text-muted); border-radius:50%; margin:0 2px; animation:bounce .9s infinite; }
@@ -380,9 +394,11 @@ _JS = """
     let ws = null;
     let reconnectDelay = 1000;
     let activeConvId = null;
+    let modelName = 'AI';
+    let modelLabel = '';
 
     const messagesEl  = document.getElementById('messages');
-    const emptyEl     = document.getElementById('empty');
+    const scrollEl    = document.getElementById('messages-wrap');
     const thinkingEl  = document.getElementById('thinking');
     const inputEl     = document.getElementById('msg-input');
     const sendBtn     = document.getElementById('send-btn');
@@ -414,6 +430,21 @@ _JS = """
         localStorage.setItem('ab-sidebar', collapsed ? 'closed' : 'open');
         if (!collapsed) loadConversations();
     });
+
+    // ---- model name ----
+    async function loadStatus() {
+        try {
+            const url = '/api/status' + (API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : '');
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const { model } = await res.json();
+            if (model) {
+                const seg = model.split('/').pop();
+                modelLabel = seg;
+                modelName  = seg.substring(0, 4).toUpperCase();
+            }
+        } catch (e) { /* server may not be fully up yet */ }
+    }
 
     // ---- conversations ----
     async function loadConversations() {
@@ -474,17 +505,17 @@ _JS = """
     });
 
     function clearMessages() {
-        messagesEl.innerHTML = '';
-        messagesEl.appendChild(buildEmptyState());
-        thinkingEl.remove && thinkingEl.remove();
-        messagesEl.appendChild(thinkingEl);
-    }
-
-    function buildEmptyState() {
-        const d = document.createElement('div');
-        d.id = 'empty';
-        d.innerHTML = '<div class="icon">✦</div><p>Ask me anything, or try /help for available commands.</p>';
-        return d;
+        messagesEl.querySelectorAll('.msg-row').forEach(el => el.remove());
+        const empty = document.getElementById('empty');
+        if (empty) {
+            empty.style.display = '';
+        } else {
+            const d = document.createElement('div');
+            d.id = 'empty';
+            d.innerHTML = '<div class="icon">✦</div><p>Ask me anything, or try /help for available commands.</p>';
+            messagesEl.appendChild(d);
+        }
+        hideThinking();
     }
 
     // ---- status ----
@@ -503,6 +534,7 @@ _JS = """
             setStatus('connected', 'Connected');
             sendBtn.disabled = false;
             loadConversations();
+            loadStatus();
         };
 
         ws.onclose = () => {
@@ -563,7 +595,8 @@ _JS = """
         if (role !== 'system') {
             const av = document.createElement('div');
             av.className = 'avatar';
-            av.textContent = role === 'user' ? 'U' : 'AI';
+            av.textContent = role === 'user' ? 'U' : modelName;
+            if (role !== 'user') av.title = modelLabel || modelName;
             row.appendChild(av);
         }
         const bubble = document.createElement('div');
@@ -573,7 +606,7 @@ _JS = """
         messagesEl.appendChild(row);
         scrollBottom();
     }
-    function scrollBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+    function scrollBottom() { scrollEl.scrollTop = scrollEl.scrollHeight; }
 
     // ---- send ----
     function send() {
@@ -622,62 +655,70 @@ def _build_page() -> Html:
         ),
         Body(
             Div(
-                # ---- Sidebar ----
+                # ---- Header (full width) ----
                 Div(
                     Div(
-                        Span("Conversations"),
-                        Button("+ New", id="new-conv-btn"),
-                        id="sidebar-header",
+                        Button("☰", id="sidebar-toggle", title="Toggle sidebar"),
+                        H1("anotherbot"),
+                        id="header-left",
                     ),
-                    Div(id="conv-list"),
-                    id="sidebar",
-                ),
-                # ---- Main panel ----
-                Div(
-                    # Header
                     Div(
                         Div(
-                            Button("☰", id="sidebar-toggle", title="Toggle sidebar"),
-                            H1("anotherbot"),
-                            id="header-left",
+                            Span(id="status-dot"),
+                            Span("Connecting…", id="status-text"),
+                            id="status",
                         ),
+                        Button("☾", id="theme-btn", title="Toggle light/dark"),
+                        id="header-right",
+                    ),
+                    id="header",
+                ),
+                # ---- Body row: sidebar + chat ----
+                Div(
+                    # Sidebar
+                    Div(
+                        Div(
+                            Span("Conversations"),
+                            Button("+ New", id="new-conv-btn"),
+                            id="sidebar-header",
+                        ),
+                        Div(id="conv-list"),
+                        id="sidebar",
+                    ),
+                    # Chat panel
+                    Div(
+                        # Scroll container (outer) + messages (inner flex, bottom-anchored)
                         Div(
                             Div(
-                                Span(id="status-dot"),
-                                Span("Connecting…", id="status-text"),
-                                id="status",
+                                Div(
+                                    Div("✦", cls="icon"),
+                                    P("Ask me anything, or try /help for available commands."),
+                                    id="empty",
+                                ),
+                                id="messages",
                             ),
-                            Button("☾", id="theme-btn", title="Toggle light/dark"),
-                            id="header-right",
+                            id="messages-wrap",
                         ),
-                        id="header",
-                    ),
-                    # Messages
-                    Div(
-                        Div(
-                            Div("✦", cls="icon"),
-                            P("Ask me anything, or try /help for available commands."),
-                            id="empty",
-                        ),
+                        # Thinking dots — always just above the input box
                         Div(
                             Div(cls="avatar", style="background:var(--surface2);color:var(--text-muted)"),
                             Div(Div(Span(), Span(), Span(), cls="dots"), cls="thinking-bubble"),
                             id="thinking",
                         ),
-                        id="messages",
-                    ),
-                    # Input area
-                    Div(
-                        Textarea(
-                            id="msg-input",
-                            placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
-                            autocomplete="off",
-                            rows="1",
+                        # Input area
+                        Div(
+                            Textarea(
+                                id="msg-input",
+                                placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
+                                autocomplete="off",
+                                rows="1",
+                            ),
+                            Button("Send", id="send-btn", disabled=True),
+                            id="input-area",
                         ),
-                        Button("Send", id="send-btn", disabled=True),
-                        id="input-area",
+                        id="main",
                     ),
-                    id="main",
+                    id="body-row",
                 ),
                 id="app",
             ),
@@ -765,6 +806,17 @@ class WebChannel(Channel):
             convs = store.list(ch)
             active_id = _rt.get(f"conversation_id:{ch}")
             return JSONResponse({"conversations": convs, "active_id": active_id})
+
+        @rt("/api/status")
+        def status_api(req):
+            from starlette.responses import JSONResponse, Response
+            from .. import config as _cfg
+            from ..core import runtime as _rt
+            api_key_val = req.query_params.get("api_key", req.headers.get("x-api-key", ""))
+            if self.api_key and api_key_val != self.api_key:
+                return Response(status_code=401)
+            model = _rt.get("model", _cfg.get("model", "AI"))
+            return JSONResponse({"model": model})
 
         # Starlette WebSocket route (low-level, for multi-client management)
         async def _ws_endpoint(ws: WebSocket) -> None:
