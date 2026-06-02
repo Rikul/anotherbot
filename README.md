@@ -4,6 +4,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 
 - **Interactive CLI**: Multi-turn REPL sessions with tool use
 - **Background Agent**: Runs as a persistent bot, receiving and sending messages via channels
+- **Web UI**: Browser-based chat interface served by FastHTML + uvicorn — dark/light theme, collapsible conversation sidebar, full conversation history
 - **Telegram Integration**: Built-in Telegram bot — receive messages, respond, run tools, deliver results
 - **Discord Integration**: Discord bot — same agent loop, per-channel message isolation, owner DM fallback for scheduled tasks
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
@@ -52,6 +53,10 @@ ALLOW_FROM = []  # List of allowed Telegram user IDs (integers).
 [discord]
 TOKEN = ""
 ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
+
+[websocket]
+HOST = "127.0.0.1"   # use 0.0.0.0 to expose on all interfaces (required for Docker)
+PORT = 8765
 ```
 
 Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
@@ -81,6 +86,24 @@ Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel
 # Silent mode
 ./run.sh cli -p "Summarize this repo" -s
 ```
+
+### Web UI
+
+The background agent can serve a browser-based chat UI on the same port as the WebSocket endpoint. Enable it by adding a `[websocket]` section to `config.toml` or by setting the `WEBSOCKET_*` env vars:
+
+```bash
+# Start the background server with the web channel enabled
+WEBSOCKET_HOST=127.0.0.1 WEBSOCKET_PORT=8765 LLM_API_KEY=... ./run.sh background
+```
+
+Then open `http://localhost:8765/` in a browser.
+
+**Features:**
+- Dark/light theme toggle (persisted in `localStorage`)
+- Collapsible sidebar listing all conversations — click to load history
+- `+ New` button and `/new` command to start a fresh conversation
+- `/help`, `/status`, `/whoami`, `/stop` answered instantly without an LLM call
+- All other slash commands (`/model`, `/load`, `/fork`, `/rename`, `/export`) forwarded to the agent
 
 ### Background Agent (Telegram / Discord)
 
@@ -119,18 +142,56 @@ Tasks persist in `~/.crafterscode/app.db` (shared with message history) and surv
 
 ## Docker
 
+### Build
+
 ```bash
 docker build -t anotherbot .
+```
 
-# Telegram
+### Run — Web UI
+
+**All flags inline:**
+```bash
+docker run -d \
+  -e LLM_API_KEY=sk-... \
+  -e WEBSOCKET_HOST=0.0.0.0 \
+  -e WEBSOCKET_PORT=8765 \
+  -p 8765:8765 \
+  -v anotherbot-data:/data \
+  anotherbot
+```
+
+**Using `export` first (keeps the run command clean):**
+```bash
+export LLM_API_KEY=sk-...
+export WEBSOCKET_HOST=0.0.0.0
+export WEBSOCKET_PORT=8765
+
+docker run -d \
+  -e LLM_API_KEY \
+  -e WEBSOCKET_HOST \
+  -e WEBSOCKET_PORT \
+  -p 8765:8765 \
+  -v anotherbot-data:/data \
+  anotherbot
+```
+
+Then open `http://localhost:8765/` in a browser. `WEBSOCKET_HOST=0.0.0.0` is required — the default `127.0.0.1` is the container's own loopback and is not reachable via Docker port mapping.
+
+### Run — Telegram
+
+```bash
 docker run -d \
   -e LLM_API_KEY=sk-... \
   -e TELEGRAM_BOT_TOKEN=123:abc... \
   -e TELEGRAM_ALLOW_FROM=123456789 \
   -v anotherbot-data:/data \
   anotherbot
+```
 
-# Discord
+### Run — Discord
+
+```bash
 docker run -d \
   -e LLM_API_KEY=sk-... \
   -e DISCORD_BOT_TOKEN=your-discord-token \
@@ -139,9 +200,35 @@ docker run -d \
   anotherbot
 ```
 
+### Run — all channels at once
+
+```bash
+export LLM_API_KEY=sk-...
+export TELEGRAM_BOT_TOKEN=123:abc...
+export TELEGRAM_ALLOW_FROM=123456789
+export DISCORD_BOT_TOKEN=your-discord-token
+export WEBSOCKET_HOST=0.0.0.0
+export WEBSOCKET_PORT=8765
+
+docker run -d \
+  -e LLM_API_KEY \
+  -e TELEGRAM_BOT_TOKEN \
+  -e TELEGRAM_ALLOW_FROM \
+  -e DISCORD_BOT_TOKEN \
+  -e WEBSOCKET_HOST \
+  -e WEBSOCKET_PORT \
+  -p 8765:8765 \
+  -v anotherbot-data:/data \
+  anotherbot
+```
+
+### Environment variables
+
 | Env var | Required | Description |
 |---|---|---|
-| `LLM_API_KEY` | yes | OpenRouter / OpenAI-compatible API key |
+| `LLM_API_KEY` | **yes** | OpenRouter / OpenAI-compatible API key |
+| `WEBSOCKET_HOST` | — | Bind host for web UI (use `0.0.0.0` in Docker; default: `127.0.0.1`) |
+| `WEBSOCKET_PORT` | — | Port for web UI and WebSocket (default: `8765`) |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token from @BotFather |
 | `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = allow all) |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
@@ -150,7 +237,7 @@ docker run -d \
 | `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
 
-At least one channel (`TELEGRAM_BOT_TOKEN` or `DISCORD_BOT_TOKEN`) must be set.
+At least one channel (`WEBSOCKET_HOST`, `TELEGRAM_BOT_TOKEN`, or `DISCORD_BOT_TOKEN`) must be set or the server will exit.
 
 The `/data` volume persists the SQLite database and workspace across restarts. To supply a `config.toml` instead of env vars, mount it at `/data/config.toml` — env vars always take precedence over the file.
 
