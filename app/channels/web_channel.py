@@ -285,8 +285,8 @@ class WebChannel(Channel):
         from starlette.routing import Mount
         from starlette.staticfiles import StaticFiles
         static_dir = Path(__file__).parent / "static"
-        self._fasthtml_app.router.routes.append(
-            Mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        self._fasthtml_app.router.routes.insert(
+            1, Mount("/static", StaticFiles(directory=str(static_dir)), name="static")
         )
 
     async def run_polling(self) -> None:
