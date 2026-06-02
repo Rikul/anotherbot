@@ -5,9 +5,6 @@ The channel exposes two endpoints on the same uvicorn server:
     GET /          — FastHTML chat UI (HTML page, served to browsers)
     WS  /ws        — WebSocket endpoint (JSON framing)
 
-Authentication: optional ``api_key`` query parameter, checked on connect.
-Mismatched keys are rejected with WebSocket close code 4001.
-
 WebSocket message framing::
 
     {"type": "message", "content": "..."}
@@ -143,12 +140,10 @@ class WebChannel(Channel):
         mq: MessageQueue,
         host: str = "127.0.0.1",
         port: int = 8765,
-        api_key: str | None = None,
     ) -> None:
         self.mq = mq
         self.host = host
         self.port = port
-        self.api_key = api_key
         self.stopped: bool = False
         self._connections: dict[str, WebSocket] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
@@ -192,12 +187,9 @@ class WebChannel(Channel):
 
         @rt("/api/conversations")
         def conversations_api(req):
-            from starlette.responses import JSONResponse, Response
+            from starlette.responses import JSONResponse
             from ..infra.conversations import ConversationStore
             from ..core import runtime as _rt
-            api_key_val = req.query_params.get("api_key", req.headers.get("x-api-key", ""))
-            if self.api_key and api_key_val != self.api_key:
-                return Response(status_code=401)
             store = ConversationStore()
             ch = ChannelType.WEB.value
             convs = store.list(ch)
@@ -208,9 +200,6 @@ class WebChannel(Channel):
         def messages_api(req):
             from starlette.responses import JSONResponse, Response
             from ..infra.conversations import ConversationStore
-            api_key_val = req.query_params.get("api_key", req.headers.get("x-api-key", ""))
-            if self.api_key and api_key_val != self.api_key:
-                return Response(status_code=401)
             try:
                 conv_id = int(req.query_params.get("conv_id", 0))
             except (ValueError, TypeError):
@@ -223,24 +212,15 @@ class WebChannel(Channel):
 
         @rt("/api/status")
         def status_api(req):
-            from starlette.responses import JSONResponse, Response
+            from starlette.responses import JSONResponse
             from .. import config as _cfg
             from ..core import runtime as _rt
-            api_key_val = req.query_params.get("api_key", req.headers.get("x-api-key", ""))
-            if self.api_key and api_key_val != self.api_key:
-                return Response(status_code=401)
             model = _rt.get("model", _cfg.get("model", "AI"))
             return JSONResponse({"model": model})
 
         # Starlette WebSocket route (low-level, for multi-client management)
         async def _ws_endpoint(ws: WebSocket) -> None:
             await ws.accept()
-
-            api_key_param = ws.query_params.get("api_key", "")
-            if self.api_key and api_key_param != self.api_key:
-                await ws.close(code=4001, reason="Unauthorized — bad api_key")
-                log.warning("WebSocket connection rejected: invalid api_key")
-                return
 
             client_id = str(uuid.uuid4())
             log.info(f"WebSocket client connected: {client_id}")

@@ -44,8 +44,6 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
             _config.setdefault("websocket", {})["PORT"] = int(v)
         except ValueError:
             raise ValueError(f"WEBSOCKET_PORT must be an integer, got: {v!r}") from None
-    if v := os.environ.get("WEBSOCKET_API_KEY"):
-        _config.setdefault("websocket", {})["API_KEY"] = v
 
 
 def get(key: str, default=None):
@@ -77,5 +75,4 @@ ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allo
 [websocket]
 HOST = "127.0.0.1"
 PORT = 8765
-API_KEY = ""  # Optional. Set to require authentication via ?api_key= query param.
 """

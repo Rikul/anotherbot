@@ -9,9 +9,9 @@ from app.channels.message_queue import MessageQueue
 from app.channels.web_channel import WebChannel, _build_page
 
 
-def make_web_channel(api_key=None):
+def make_web_channel():
     mq = MessageQueue()
-    ch = WebChannel(mq=mq, host="127.0.0.1", port=8765, api_key=api_key)
+    ch = WebChannel(mq=mq, host="127.0.0.1", port=8765)
     return ch, mq
 
 
@@ -22,16 +22,10 @@ def test_registers_delivery_function():
     assert ch in mq._delivery
 
 
-def test_stores_host_port_api_key():
-    ch, _ = make_web_channel(api_key="secret")
+def test_stores_host_and_port():
+    ch, _ = make_web_channel()
     assert ch.host == "127.0.0.1"
     assert ch.port == 8765
-    assert ch.api_key == "secret"
-
-
-def test_api_key_defaults_to_none():
-    ch, _ = make_web_channel()
-    assert ch.api_key is None
 
 
 def test_initial_stopped_false():
@@ -118,12 +112,6 @@ def test_build_page_has_no_inline_js():
     assert "function connect()" not in html
 
 
-def test_build_page_has_no_inline_api_key_script():
-    html = str(_build_page())
-    # window._apiKey assignment was previously inlined; now it lives in web_channel.js
-    assert "window._apiKey" not in html
-
-
 def test_build_page_key_structural_elements():
     html = str(_build_page())
     for element_id in ("messages", "input-area", "sidebar", "header", "messages-wrap", "thinking"):
@@ -156,10 +144,6 @@ def test_static_css_has_theme_variables():
     assert "--bg:" in content
     assert "--accent:" in content
 
-
-def test_static_js_sets_api_key_variable():
-    content = (_STATIC_DIR / "web_channel.js").read_text()
-    assert "window._apiKey" in content
 
 
 def test_static_js_has_iife():

@@ -57,7 +57,6 @@ ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allo
 [websocket]
 HOST = "127.0.0.1"   # use 0.0.0.0 to expose on all interfaces (required for Docker)
 PORT = 8765
-API_KEY = ""         # optional — clients must pass ?api_key=<value> if set
 ```
 
 Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
@@ -97,7 +96,7 @@ The background agent can serve a browser-based chat UI on the same port as the W
 WEBSOCKET_HOST=127.0.0.1 WEBSOCKET_PORT=8765 LLM_API_KEY=... ./run.sh background
 ```
 
-Then open `http://localhost:8765/` in a browser. If `API_KEY` is set, append `?api_key=<value>` to the URL — it is stripped from the address bar after the first load.
+Then open `http://localhost:8765/` in a browser.
 
 **Features:**
 - Dark/light theme toggle (persisted in `localStorage`)
@@ -230,7 +229,6 @@ docker run -d \
 | `LLM_API_KEY` | **yes** | OpenRouter / OpenAI-compatible API key |
 | `WEBSOCKET_HOST` | — | Bind host for web UI (use `0.0.0.0` in Docker; default: `127.0.0.1`) |
 | `WEBSOCKET_PORT` | — | Port for web UI and WebSocket (default: `8765`) |
-| `WEBSOCKET_API_KEY` | — | Optional secret — clients must pass `?api_key=<value>` |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token from @BotFather |
 | `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = allow all) |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |

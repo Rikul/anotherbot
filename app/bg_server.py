@@ -51,10 +51,9 @@ async def start_server() -> None:
         ws_config = config.get("websocket")
         ws_host = ws_config.get("HOST", "127.0.0.1")
         ws_port = ws_config.get("PORT", 8765)
-        ws_api_key = ws_config.get("API_KEY") or None
         log.info(f"Starting web channel on {ws_host}:{ws_port}")
         web_mq = MessageQueue()
-        web_channel = WebChannel(web_mq, host=ws_host, port=ws_port, api_key=ws_api_key)
+        web_channel = WebChannel(web_mq, host=ws_host, port=ws_port)
         web_channel.start()
         web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
 

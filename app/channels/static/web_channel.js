@@ -1,14 +1,6 @@
-window._apiKey = new URLSearchParams(location.search).get('api_key') || '';
 (function() {
-    const API_KEY = window._apiKey || '';
-    // Strip api_key from address bar so it doesn't leak via browser history or copy-paste
-    if (API_KEY) {
-        const p = new URLSearchParams(location.search);
-        p.delete('api_key');
-        history.replaceState(null, '', location.pathname + (p.toString() ? '?' + p : ''));
-    }
     const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const wsUrl = `${wsProto}://${location.host}/ws${API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : ''}`;
+    const wsUrl = `${wsProto}://${location.host}/ws`;
 
     let ws = null;
     let reconnectDelay = 1000;
@@ -51,7 +43,7 @@ window._apiKey = new URLSearchParams(location.search).get('api_key') || '';
     // ---- conversations ----
     async function loadConversations(populateMessages) {
         try {
-            const url = '/api/conversations' + (API_KEY ? '?api_key=' + encodeURIComponent(API_KEY) : '');
+            const url = '/api/conversations';
             const res = await fetch(url);
             if (!res.ok) return;
             const { conversations, active_id } = await res.json();
@@ -64,7 +56,7 @@ window._apiKey = new URLSearchParams(location.search).get('api_key') || '';
     async function loadMessages(convId) {
         if (!convId) return;
         try {
-            const url = `/api/messages?conv_id=${convId}` + (API_KEY ? '&api_key=' + encodeURIComponent(API_KEY) : '');
+            const url = `/api/messages?conv_id=${convId}`;
             const res = await fetch(url);
             if (!res.ok) return;
             const { messages } = await res.json();
