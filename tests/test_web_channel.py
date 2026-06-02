@@ -83,6 +83,11 @@ def test_extract_json_wrong_type_returns_raw():
     assert WebChannel._extract_content(raw) == raw
 
 
+def test_extract_json_null_content_returns_none():
+    raw = json.dumps({"type": "message", "content": None})
+    assert WebChannel._extract_content(raw) is None
+
+
 def test_extract_json_empty_content_returns_none():
     raw = json.dumps({"type": "message", "content": "   "})
     assert WebChannel._extract_content(raw) is None
@@ -236,6 +241,34 @@ async def test_send_message_removes_dead_connection_on_error():
     await ch.send_message(msg)
 
     assert "dead" not in ch._connections
+
+
+# --- /api/messages channel isolation ---
+
+def test_api_messages_rejects_foreign_channel_conv():
+    from unittest.mock import patch
+    ch, _ = make_web_channel()
+    ch.start()
+
+    from starlette.testclient import TestClient
+    # Conversation exists but belongs to 'telegram', not 'web'
+    foreign_conv = {"id": 5, "channel": "telegram", "name": "TG conv"}
+    with patch("app.infra.conversations.ConversationStore.get", return_value=foreign_conv):
+        client = TestClient(ch._fasthtml_app, raise_server_exceptions=True)
+        resp = client.get("/api/messages?conv_id=5")
+    assert resp.status_code == 404
+
+
+def test_api_messages_rejects_missing_conv():
+    from unittest.mock import patch
+    ch, _ = make_web_channel()
+    ch.start()
+
+    from starlette.testclient import TestClient
+    with patch("app.infra.conversations.ConversationStore.get", return_value=None):
+        client = TestClient(ch._fasthtml_app, raise_server_exceptions=True)
+        resp = client.get("/api/messages?conv_id=99")
+    assert resp.status_code == 404
 
 
 # --- start(): route registration ---

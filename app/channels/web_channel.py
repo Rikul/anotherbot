@@ -207,6 +207,9 @@ class WebChannel(Channel):
             if not conv_id:
                 return Response(status_code=400)
             store = ConversationStore()
+            conv = store.get(conv_id)
+            if conv is None or conv.get("channel") != ChannelType.WEB.value:
+                return Response(status_code=404)
             msgs = store.load_messages(conv_id)
             return JSONResponse({"messages": msgs})
 
@@ -327,7 +330,7 @@ class WebChannel(Channel):
         except (json.JSONDecodeError, TypeError):
             return raw
         if isinstance(data, dict) and data.get("type") == "message":
-            return data.get("content", "").strip() or None
+            return str(data.get("content") or "").strip() or None
         return raw
 
     async def _safe_send_json(self, client_id: str, payload: dict) -> None:
