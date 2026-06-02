@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Python-based AI agent ("crafterscode") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, silent/non-interactive mode, and a background server architecture with Telegram and Discord channels.
+This is a Python-based AI agent ("crafterscode") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, silent/non-interactive mode, and a background server architecture with Telegram, Discord, and a FastHTML web UI channel.
 
 ## Running & Development
 
@@ -41,6 +41,7 @@ Config lives at `~/.crafterscode/config.toml` (created automatically on first ru
 - `base_url` — API base URL (default: `"https://openrouter.ai/api/v1"`)
 - `[telegram]` — `BOT_TOKEN`, `ALLOW_FROM` (list of integer user IDs)
 - `[discord]` — `TOKEN`, `ALLOW_FROM` (list of integer user IDs; empty = allow all)
+- `[websocket]` — `HOST` (default `"127.0.0.1"`), `PORT` (default `8765`)
 
 Environment variables (all override config file values):
 - `LLM_API_KEY` — required
@@ -50,6 +51,8 @@ Environment variables (all override config file values):
 - `TELEGRAM_ALLOW_FROM` — comma-separated Telegram user IDs (e.g. `"123,456"`)
 - `DISCORD_BOT_TOKEN` — Discord bot token (alternative to config file)
 - `DISCORD_ALLOW_FROM` — comma-separated Discord user IDs
+- `WEBSOCKET_HOST` — bind host for the web UI (set to `0.0.0.0` in Docker)
+- `WEBSOCKET_PORT` — port for web UI + WebSocket (default: `8765`)
 - `ANOTHERBOT_HOME` — overrides the data directory (default: `~/.crafterscode`)
 
 For Docker, no config file is needed — pass everything as env vars. See `Dockerfile` and the Docker section in README.
@@ -90,6 +93,8 @@ On startup, `load_system_context()` (`app/infra/startup.py`) loads `app/core/sys
 ### Channels & Command Registry
 
 **Channel types** are defined in `ChannelType` enum (`app/channels/channel.py`): `CLI`, `TELEGRAM`, `DISCORD`, `WEB`. Each channel implements the `Channel` ABC and owns a `MessageQueue` instance. `bg_server.py` wires up enabled channels — each gets its own `MessageQueue`, `BackgroundAgent`, and set of coroutines (`run_polling`, `process_incoming`, `process_outgoing`) gathered into the event loop.
+
+**WebChannel** (`app/channels/web_channel.py`) uses `python-fasthtml` + uvicorn to serve both a browser chat UI (`GET /`) and a JSON WebSocket endpoint (`WS /ws`) on the same port. Multiple concurrent browser tabs are supported — each connection gets a UUID tracked in `_connections`. A per-connection `asyncio.Lock` in `_send_locks` serializes writes to each WebSocket. The channel also exposes `GET /api/conversations`, `GET /api/messages` (scoped to web channel only), and `GET /api/status` REST endpoints. Only `/whoami` is handled inline (it needs the per-connection client ID); all other slash commands — including `/help`, `/status`, `/stop` — are forwarded to `BackgroundAgent`'s `CommandRegistry` via the message queue with `is_command=True` in metadata so `send_message()` emits `{"type":"system"}` responses, enabling the sidebar to refresh after conversation-mutating commands.
 
 **Slash commands** are handled entirely by `BackgroundAgent`. Channel handlers (`command_handler` in Telegram, `on_message` in Discord) intercept only `/whoami` (resolved inline using the platform user object) and enqueue everything else as a plain `IncomingMessage`. `BackgroundAgent.process_incoming()` detects the leading `/` and dispatches via its own `CommandRegistry`. That registry owns the full command set: `/model`, `/status`, `/stop`, `/help`, `/list`, `/new`, `/load`, `/fork`, `/rename`, `/export`.
 

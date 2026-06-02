@@ -10,6 +10,8 @@ dependencies = [
     "ddgs>=9.14.1",
     "geocoder>=1.38.1",
     "discord-py>=2.7.1",
+    "python-fasthtml>=0.14.2",
+    "uvicorn[standard]>=0.48.0",
 ]
 
 [dependency-groups]
