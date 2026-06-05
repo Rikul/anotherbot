@@ -290,3 +290,99 @@ async def test_send_message_logs_error_when_no_channel_id(caplog):
 
     assert sc.app.client.chat_postMessage.call_count == 0
     assert "channel_id" in caplog.text
+
+
+# --- _handle_slash_command ---
+
+def make_command(cmd="/status", text="", user_id="U123", channel_id="C456"):
+    return {"command": cmd, "text": text, "user_id": user_id, "channel_id": channel_id}
+
+
+@pytest.mark.asyncio
+async def test_slash_command_enqueued():
+    sc, mq = make_slack_channel()
+    ack = AsyncMock()
+
+    await sc._handle_slash_command(ack, make_command("/status"), AsyncMock())
+
+    ack.assert_called_once()
+    assert not mq.incoming.empty()
+    msg = await mq.incoming.get()
+    assert msg.content == "/status"
+    assert msg.metadata == {"channel_id": "C456"}
+
+
+@pytest.mark.asyncio
+async def test_slash_command_with_args_enqueued():
+    sc, mq = make_slack_channel()
+    ack = AsyncMock()
+
+    await sc._handle_slash_command(ack, make_command("/model", text="gpt-4"), AsyncMock())
+
+    ack.assert_called_once()
+    msg = await mq.incoming.get()
+    assert msg.content == "/model gpt-4"
+
+
+@pytest.mark.asyncio
+async def test_slash_command_whoami():
+    sc, mq = make_slack_channel()
+    sc.send_message = AsyncMock()
+    ack = AsyncMock()
+
+    await sc._handle_slash_command(ack, make_command("/whoami"), AsyncMock())
+
+    sc.send_message.assert_called_once()
+    assert "U123" in sc.send_message.call_args[0][0].content
+    assert mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_slash_command_stop():
+    sc, mq = make_slack_channel()
+    sc.send_message = AsyncMock()
+    ack = AsyncMock()
+
+    await sc._handle_slash_command(ack, make_command("/stop"), AsyncMock())
+
+    assert sc.has_stopped is True
+    assert mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_slash_command_rejects_unauthorized_user():
+    sc, mq = make_slack_channel(allow_from=["U123"])
+    ack = AsyncMock()
+    say = AsyncMock()
+
+    await sc._handle_slash_command(ack, make_command("/status", user_id="U999"), say)
+
+    ack.assert_called_once()
+    assert mq.incoming.empty()
+    say.assert_called_once()
+    assert "not authorized" in say.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_slash_command_updates_last_channel_id():
+    sc, mq = make_slack_channel()
+    ack = AsyncMock()
+
+    await sc._handle_slash_command(ack, make_command("/status", channel_id="C999"), AsyncMock())
+
+    assert sc._last_channel_id == "C999"
+
+
+# --- _last_channel_id updated before command branch in _handle_message ---
+
+@pytest.mark.asyncio
+async def test_handle_message_updates_last_channel_id_for_commands():
+    sc, mq = make_slack_channel()
+    sc.send_message = AsyncMock()
+
+    await sc._handle_message(
+        event={"user": "U123", "text": "/whoami", "channel": "C777"},
+        say=AsyncMock(),
+    )
+
+    assert sc._last_channel_id == "C777"

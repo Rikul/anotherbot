@@ -56,6 +56,11 @@ class TelegramChannel(Channel):
             )
 
     async def command_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        user_id = update.effective_user.id if update.effective_user else None
+        if user_id is None or user_id not in self.allow_from:
+            log.warning(f"Telegram: ignoring command from unauthorized user id={user_id}")
+            await update.message.reply_text("Sorry, you are not authorized to use this bot.")
+            return
         if update.message and update.message.text:
             content = update.message.text.strip()
             if content.startswith("/"):
