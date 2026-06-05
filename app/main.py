@@ -136,7 +136,6 @@ async def main():
 
     await load_config()
     setup_logging(level=logging.INFO)
-    await initialize_mcp()
 
     args = parse_args()
 
@@ -145,6 +144,7 @@ async def main():
 
     from .core.mcp_manager import mcp_manager
     try:
+        await initialize_mcp()
         if args.command == "cli":
             await run_cli(args)
         elif args.command == "background":
