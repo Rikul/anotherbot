@@ -71,7 +71,7 @@ class SlackChannel(Channel):
             return
 
         user_id = event.get("user", "")
-        if self.allow_from and user_id not in self.allow_from:
+        if user_id not in self.allow_from:
             log.warning(f"Slack: ignoring message from unauthorized user id={user_id}")
             await say("Sorry, you are not authorized to use this bot.")
             return

@@ -8,6 +8,8 @@ from app.channels.telegram import TelegramChannel
 
 
 def make_telegram_channel(allow_from=None):
+    if allow_from is None:
+        allow_from = [123]  # default authorized user used across these tests
     mq = MessageQueue()
     with patch("app.channels.telegram.ApplicationBuilder"):
         tc = TelegramChannel(mq=mq, bot_token="test-token", allow_from=allow_from)
@@ -31,8 +33,9 @@ def test_stores_bot_token_and_allow_from():
     assert tc.allow_from == [111, 222]
 
 
-def test_allow_from_defaults_to_empty_list():
-    tc, _ = make_telegram_channel()
+def test_allow_from_none_becomes_empty_list():
+    with patch("app.channels.telegram.ApplicationBuilder"):
+        tc = TelegramChannel(mq=MessageQueue(), bot_token="t", allow_from=None)
     assert tc.allow_from == []
 
 
@@ -80,7 +83,7 @@ def make_update(text="hello", user_id=123, chat_id=456):
 @pytest.mark.asyncio
 async def test_process_message_puts_to_incoming_queue():
     tc, mq = make_telegram_channel()
-    update = make_update(text="do something", user_id=1, chat_id=10)
+    update = make_update(text="do something", user_id=123, chat_id=10)
 
     await tc.process_message(update, AsyncMock())
 
@@ -104,13 +107,13 @@ async def test_process_message_rejects_unauthorized_user():
 
 
 @pytest.mark.asyncio
-async def test_process_message_allows_when_allow_from_empty():
+async def test_process_message_denies_when_allow_from_empty():
     tc, mq = make_telegram_channel(allow_from=[])
     update = make_update(user_id=999, text="hi")
 
     await tc.process_message(update, AsyncMock())
 
-    assert not mq.incoming.empty()
+    assert mq.incoming.empty()
 
 
 @pytest.mark.asyncio

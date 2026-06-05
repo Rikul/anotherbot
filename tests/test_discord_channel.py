@@ -9,6 +9,8 @@ from app.channels.message_queue import MessageQueue
 
 
 def make_discord_channel(allow_from=None):
+    if allow_from is None:
+        allow_from = [123]  # default authorized user used across these tests
     mq = MessageQueue()
     with patch.object(discord.Client, "__init__", return_value=None):
         dc = DiscordChannel(mq=mq, token="test-token", allow_from=allow_from)
@@ -107,16 +109,18 @@ async def test_on_message_rejects_unauthorized_user():
 
 
 @pytest.mark.asyncio
-async def test_on_message_allows_when_allow_from_empty():
+async def test_on_message_denies_when_allow_from_empty():
     dc, mq = make_discord_channel(allow_from=[])
     message = MagicMock()
-    message.author.id = 456  # any user allowed when allow_from is empty
+    message.author.id = 456
     message.channel.id = 1
     message.content = "hello"
+    message.reply = AsyncMock()
 
     await dc.on_message(message)
 
-    assert not mq.incoming.empty()
+    assert mq.incoming.empty()
+    message.reply.assert_called_once()
 
 
 @pytest.mark.asyncio

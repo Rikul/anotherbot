@@ -72,11 +72,11 @@ base_url = "https://openrouter.ai/api/v1"
 
 [telegram]
 BOT_TOKEN = ""
-ALLOW_FROM = []  # List of allowed Telegram user IDs (integers). Must be non-empty.
+ALLOW_FROM = []  # List of allowed Telegram user IDs (integers). Empty = deny all.
 
 [discord]
 TOKEN = ""
-ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
+ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty = deny all.
 
 [websocket]
 HOST = "127.0.0.1"
@@ -85,5 +85,5 @@ PORT = 8765
 [slack]
 BOT_TOKEN = ""   # xoxb-... bot token
 APP_TOKEN = ""   # xapp-... app-level token (required for Socket Mode)
-ALLOW_FROM = []  # List of allowed Slack user IDs (strings). Empty means allow all.
+ALLOW_FROM = []  # List of allowed Slack user IDs (strings). Empty = deny all.
 """

@@ -8,6 +8,8 @@ from app.channels.message_queue import MessageQueue
 
 
 def make_slack_channel(allow_from=None):
+    if allow_from is None:
+        allow_from = ["U123"]  # default authorized user used across these tests
     mq = MessageQueue()
     with patch("app.channels.slack.AsyncApp"), \
          patch("app.channels.slack.AsyncSocketModeHandler"):
@@ -139,15 +141,17 @@ async def test_handle_message_rejects_unauthorized_user():
 
 
 @pytest.mark.asyncio
-async def test_handle_message_allows_when_allow_from_empty():
+async def test_handle_message_denies_when_allow_from_empty():
     sc, mq = make_slack_channel(allow_from=[])
+    say = AsyncMock()
 
     await sc._handle_message(
         event={"user": "U999", "text": "hello", "channel": "C456"},
-        say=AsyncMock(),
+        say=say,
     )
 
-    assert not mq.incoming.empty()
+    assert mq.incoming.empty()
+    say.assert_called_once()
 
 
 @pytest.mark.asyncio

@@ -53,7 +53,7 @@ ALLOW_FROM = []  # List of allowed Telegram user IDs (integers).
 
 [discord]
 TOKEN = ""
-ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
+ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty = deny all.
 
 [websocket]
 HOST = "127.0.0.1"   # use 0.0.0.0 to expose on all interfaces (required for Docker)
@@ -62,7 +62,7 @@ PORT = 8765
 [slack]
 BOT_TOKEN = ""   # xoxb-... bot token
 APP_TOKEN = ""   # xapp-... app-level token (required for Socket Mode)
-ALLOW_FROM = []  # List of allowed Slack user IDs (strings). Empty means allow all.
+ALLOW_FROM = []  # List of allowed Slack user IDs (strings). Empty = deny all.
 ```
 
 Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
@@ -118,16 +118,16 @@ Configure one or more channels in `~/.crafterscode/config.toml`:
 ```toml
 [telegram]
 BOT_TOKEN = "123456:ABC-your-bot-token"
-ALLOW_FROM = [123456789]  # restrict by user ID; empty = allow all
+ALLOW_FROM = [123456789]  # restrict by user ID
 
 [discord]
 TOKEN = "your-discord-bot-token"
-ALLOW_FROM = []  # restrict by user ID; empty = allow all
+ALLOW_FROM = []  # restrict by user ID
 
 [slack]
 BOT_TOKEN = "xoxb-..."   # bot token from Slack app settings
 APP_TOKEN = "xapp-..."   # app-level token with connections:write scope
-ALLOW_FROM = []          # restrict by Slack user ID; empty = allow all
+ALLOW_FROM = []          # restrict by Slack user ID
 ```
 
 ```bash
@@ -250,12 +250,12 @@ docker run -d \
 | `WEBSOCKET_HOST` | — | Bind host for web UI (use `0.0.0.0` in Docker; default: `127.0.0.1`) |
 | `WEBSOCKET_PORT` | — | Port for web UI and WebSocket (default: `8765`) |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token from @BotFather |
-| `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = allow all) |
+| `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = deny all) |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
-| `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
+| `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = deny all) |
 | `SLACK_BOT_TOKEN` | — | Slack bot token (`xoxb-...`) from app settings |
 | `SLACK_APP_TOKEN` | — | Slack app-level token (`xapp-...`) with `connections:write` scope |
-| `SLACK_ALLOW_FROM` | — | Comma-separated Slack user IDs (empty = allow all) |
+| `SLACK_ALLOW_FROM` | — | Comma-separated Slack user IDs (empty = deny all) |
 | `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
 | `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
