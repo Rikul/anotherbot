@@ -23,7 +23,7 @@ async def initialize_mcp() -> None:
     if not mcp_config_path.exists():
         return
     try:
-        with open(mcp_config_path) as f:
+        with open(mcp_config_path, encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
         log.error(f"Failed to load mcp_servers.json: {e}")
@@ -143,12 +143,16 @@ async def main():
     runtime.set("model",  config.get("model", "deepseek/deepseek-v4-flash"))
     runtime.set("max_iterations", args.max_iterations)
 
-    if args.command == "cli":
-        await run_cli(args)
-    elif args.command == "background":
-        await run_background_agent(args)
-    else:
-        raise ValueError(f"Unknown command: {args.command}")
+    from .core.mcp_manager import mcp_manager
+    try:
+        if args.command == "cli":
+            await run_cli(args)
+        elif args.command == "background":
+            await run_background_agent(args)
+        else:
+            raise ValueError(f"Unknown command: {args.command}")
+    finally:
+        await mcp_manager.shutdown()
     
     
 if __name__ == "__main__":

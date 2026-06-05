@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 from fastmcp import Client
@@ -19,13 +20,16 @@ class MCPManager:
         self._specs: dict[str, dict] = {}
 
     async def initialize(self, mcp_servers: dict[str, dict]) -> None:
-        for name, cfg in mcp_servers.items():
-            await self._connect_server(name, cfg)
+        await asyncio.gather(*(self._connect_server(n, c) for n, c in mcp_servers.items()))
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
+        client = self._build_client(cfg)
         try:
-            client = self._build_client(cfg)
             await client.__aenter__()
+        except Exception as e:
+            log.error(f"MCP server '{name}': failed to connect — {e}")
+            return
+        try:
             tools = await client.list_tools()
             for tool in tools:
                 namespaced = f"{name}{self._SEP}{tool.name}"
@@ -33,7 +37,11 @@ class MCPManager:
             self._clients[name] = client
             log.info(f"MCP server '{name}': connected, {len(tools)} tool(s) discovered")
         except Exception as e:
-            log.error(f"MCP server '{name}': failed to connect — {e}")
+            log.error(f"MCP server '{name}': failed to initialize — {e}")
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception:
+                pass
 
     def _build_client(self, cfg: dict) -> Client:
         if "url" in cfg:
