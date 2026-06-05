@@ -4,6 +4,7 @@ import asyncio
 import json
 
 from fastmcp import Client
+from fastmcp.client import StdioTransport
 
 from ..infra.app_logging import log
 from ..infra.helpers import trunc_str_with_ellipsis
@@ -50,12 +51,11 @@ class MCPManager:
     def _build_client(self, cfg: dict) -> Client:
         if "url" in cfg:
             return Client(cfg["url"])
-        spec: dict = {"command": cfg["command"]}
-        if "args" in cfg:
-            spec["args"] = cfg["args"]
-        if "env" in cfg:
-            spec["env"] = cfg["env"]
-        return Client(spec)
+        command = cfg["command"]
+        args = cfg.get("args", [])
+        env = cfg.get("env")
+        cwd = cfg.get("cwd")
+        return Client(StdioTransport(command=command, args=args, env=env, cwd=cwd))
 
     def _to_openai_spec(self, namespaced_name: str, tool) -> dict:
         return {
