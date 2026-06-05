@@ -46,7 +46,7 @@ class DiscordChannel(discord.Client, Channel):
         if message.author.id == self.user.id:
             return
         user_id = message.author.id
-        if self.allow_from and user_id not in self.allow_from:
+        if user_id not in self.allow_from:
             log.warning(f"Discord: ignoring message from unauthorized user id={user_id}")
             await message.reply("Sorry, you are not authorized to use this bot.")
             return

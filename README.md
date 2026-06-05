@@ -7,6 +7,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 - **Web UI**: Browser-based chat interface served by FastHTML + uvicorn — dark/light theme, collapsible conversation sidebar, full conversation history
 - **Telegram Integration**: Built-in Telegram bot — receive messages, respond, run tools, deliver results
 - **Discord Integration**: Discord bot — same agent loop, per-channel message isolation, owner DM fallback for scheduled tasks
+- **Slack Integration**: Slack bot via Socket Mode — no public webhook required
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
 - **Tool Calling**: File I/O, shell commands, web fetch, web search (text/images/video/news/books), calculator, Hacker News, todo list
 - **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing)
@@ -52,11 +53,16 @@ ALLOW_FROM = []  # List of allowed Telegram user IDs (integers).
 
 [discord]
 TOKEN = ""
-ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
+ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty = deny all.
 
 [websocket]
 HOST = "127.0.0.1"   # use 0.0.0.0 to expose on all interfaces (required for Docker)
 PORT = 8765
+
+[slack]
+BOT_TOKEN = ""   # xoxb-... bot token
+APP_TOKEN = ""   # xapp-... app-level token (required for Socket Mode)
+ALLOW_FROM = []  # List of allowed Slack user IDs (strings). Empty = deny all.
 ```
 
 Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
@@ -105,18 +111,23 @@ Then open `http://localhost:8765/` in a browser.
 - `/help`, `/status`, `/whoami`, `/stop` answered instantly without an LLM call
 - All other slash commands (`/model`, `/load`, `/fork`, `/rename`, `/export`) forwarded to the agent
 
-### Background Agent (Telegram / Discord)
+### Background Agent (Telegram / Discord / Slack)
 
-Configure one or both channels in `~/.crafterscode/config.toml`:
+Configure one or more channels in `~/.crafterscode/config.toml`:
 
 ```toml
 [telegram]
 BOT_TOKEN = "123456:ABC-your-bot-token"
-ALLOW_FROM = [123456789]  # restrict by user ID; empty = allow all
+ALLOW_FROM = [123456789]  # restrict by user ID
 
 [discord]
 TOKEN = "your-discord-bot-token"
-ALLOW_FROM = []  # restrict by user ID; empty = allow all
+ALLOW_FROM = []  # restrict by user ID
+
+[slack]
+BOT_TOKEN = "xoxb-..."   # bot token from Slack app settings
+APP_TOKEN = "xapp-..."   # app-level token with connections:write scope
+ALLOW_FROM = []          # restrict by Slack user ID
 ```
 
 ```bash
@@ -198,6 +209,15 @@ docker run -d \
   -e DISCORD_ALLOW_FROM=123456789 \
   -v anotherbot-data:/data \
   anotherbot
+
+# Slack
+docker run -d \
+  -e LLM_API_KEY=sk-... \
+  -e SLACK_BOT_TOKEN=xoxb-... \
+  -e SLACK_APP_TOKEN=xapp-... \
+  -e SLACK_ALLOW_FROM=U123456789 \
+  -v anotherbot-data:/data \
+  anotherbot
 ```
 
 ### Run — all channels at once
@@ -230,14 +250,17 @@ docker run -d \
 | `WEBSOCKET_HOST` | — | Bind host for web UI (use `0.0.0.0` in Docker; default: `127.0.0.1`) |
 | `WEBSOCKET_PORT` | — | Port for web UI and WebSocket (default: `8765`) |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token from @BotFather |
-| `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = allow all) |
+| `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = deny all) |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
-| `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
+| `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = deny all) |
+| `SLACK_BOT_TOKEN` | — | Slack bot token (`xoxb-...`) from app settings |
+| `SLACK_APP_TOKEN` | — | Slack app-level token (`xapp-...`) with `connections:write` scope |
+| `SLACK_ALLOW_FROM` | — | Comma-separated Slack user IDs (empty = deny all) |
 | `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
 | `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
 
-At least one channel (`WEBSOCKET_HOST`, `TELEGRAM_BOT_TOKEN`, or `DISCORD_BOT_TOKEN`) must be set or the server will exit.
+At least one channel (`WEBSOCKET_HOST`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, or `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`) must be set or the server will exit.
 
 The `/data` volume persists the SQLite database and workspace across restarts. To supply a `config.toml` instead of env vars, mount it at `/data/config.toml` — env vars always take precedence over the file.
 
@@ -245,7 +268,6 @@ The `/data` volume persists the SQLite database and workspace across restarts. T
 
 - **Email Support**: IMAP/SMTP integration for reading and sending emails, attachment handling, and mailbox management
 - **MCP Support**: Integration with Model Context Protocol for external data sources, tools, and state management
-- **Slack Integration**: Slack app with interactive messages, modals, and workspace management
 - **WhatsApp Support**: WhatsApp Business API integration via providers like Twilio or MessageBird
 - **Anthropic OAuth**: Direct integration with Claude API using OAuth 2.0
 - **Codex OAuth**: OpenAI Codex API authentication

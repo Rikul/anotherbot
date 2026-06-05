@@ -33,6 +33,7 @@ ENV LLM_BASE_URL=""
 ENV MODEL=""
 ENV TELEGRAM_ALLOW_FROM=""
 ENV DISCORD_ALLOW_FROM=""
+ENV SLACK_ALLOW_FROM=""
 ENV TZ=UTC
 
 # Web channel — bind to all interfaces inside the container so Docker
@@ -46,6 +47,9 @@ ENV WEBSOCKET_PORT=8765
 #  -e LLM_API_KEY=sk-... \
 #  -e DISCORD_BOT_TOKEN=your-discord-token \
 #  -e DISCORD_ALLOW_FROM=123456789 \
+#  -e SLACK_BOT_TOKEN=xoxb-... \
+#  -e SLACK_APP_TOKEN=xapp-... \
+#  -e SLACK_ALLOW_FROM=U123456789 \
 #  -p 8765:8765 \
 #  -v ./anotherbot-data:/data \
 #   or: docker run --env-file .env

@@ -8,6 +8,8 @@ from app.channels.telegram import TelegramChannel
 
 
 def make_telegram_channel(allow_from=None):
+    if allow_from is None:
+        allow_from = [123]  # default authorized user used across these tests
     mq = MessageQueue()
     with patch("app.channels.telegram.ApplicationBuilder"):
         tc = TelegramChannel(mq=mq, bot_token="test-token", allow_from=allow_from)
@@ -31,8 +33,9 @@ def test_stores_bot_token_and_allow_from():
     assert tc.allow_from == [111, 222]
 
 
-def test_allow_from_defaults_to_empty_list():
-    tc, _ = make_telegram_channel()
+def test_allow_from_none_becomes_empty_list():
+    with patch("app.channels.telegram.ApplicationBuilder"):
+        tc = TelegramChannel(mq=MessageQueue(), bot_token="t", allow_from=None)
     assert tc.allow_from == []
 
 
@@ -80,7 +83,7 @@ def make_update(text="hello", user_id=123, chat_id=456):
 @pytest.mark.asyncio
 async def test_process_message_puts_to_incoming_queue():
     tc, mq = make_telegram_channel()
-    update = make_update(text="do something", user_id=1, chat_id=10)
+    update = make_update(text="do something", user_id=123, chat_id=10)
 
     await tc.process_message(update, AsyncMock())
 
@@ -104,13 +107,13 @@ async def test_process_message_rejects_unauthorized_user():
 
 
 @pytest.mark.asyncio
-async def test_process_message_allows_when_allow_from_empty():
+async def test_process_message_denies_when_allow_from_empty():
     tc, mq = make_telegram_channel(allow_from=[])
     update = make_update(user_id=999, text="hi")
 
     await tc.process_message(update, AsyncMock())
 
-    assert not mq.incoming.empty()
+    assert mq.incoming.empty()
 
 
 @pytest.mark.asyncio
@@ -183,11 +186,23 @@ async def test_command_handler_whoami_replies_with_user_info():
     tc, _ = make_telegram_channel()
     tc.send_message = AsyncMock()
 
-    await tc.command_handler(make_update(text="/whoami", user_id=42), MagicMock())
+    await tc.command_handler(make_update(text="/whoami", user_id=123), MagicMock())
 
     tc.send_message.assert_called_once()
     text = tc.send_message.call_args[0][0].content
-    assert "42" in text
+    assert "123" in text
+
+
+@pytest.mark.asyncio
+async def test_command_handler_rejects_unauthorized_user():
+    tc, mq = make_telegram_channel(allow_from=[123])
+    update = make_update(text="/status", user_id=999)
+
+    await tc.command_handler(update, MagicMock())
+
+    assert mq.incoming.empty()
+    update.message.reply_text.assert_called_once()
+    assert "not authorized" in update.message.reply_text.call_args[0][0]
 
 
 @pytest.mark.asyncio

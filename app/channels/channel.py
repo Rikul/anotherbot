@@ -5,6 +5,7 @@ class ChannelType(Enum):
     CLI = "cli"
     TELEGRAM = "telegram"
     DISCORD = "discord"
+    SLACK = "slack"
     WEB = "web"
 
 class Channel(ABC):

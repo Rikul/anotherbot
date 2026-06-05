@@ -12,6 +12,7 @@ dependencies = [
     "discord-py>=2.7.1",
     "python-fasthtml>=0.14.2",
     "uvicorn[standard]>=0.48.0",
+    "slack-bolt>=1.18.0",
 ]
 
 [dependency-groups]
@@ -24,5 +25,4 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
-
 
