@@ -28,6 +28,11 @@ async def initialize_mcp() -> None:
     except Exception as e:
         log.error(f"Failed to load mcp_servers.json: {e}")
         return
+
+    if not isinstance(data, dict):
+        log.error("mcp_servers.json must contain a JSON object at the top level.")
+        return
+
     mcp_servers = data.get("mcpServers", {})
     if not mcp_servers:
         return

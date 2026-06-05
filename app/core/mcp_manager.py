@@ -23,7 +23,11 @@ class MCPManager:
         await asyncio.gather(*(self._connect_server(n, c) for n, c in mcp_servers.items()))
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
-        client = self._build_client(cfg)
+        try:
+            client = self._build_client(cfg)
+        except Exception as e:
+            log.error(f"MCP server '{name}': invalid config — {e}")
+            return
         try:
             await client.__aenter__()
         except Exception as e:
@@ -83,12 +87,16 @@ class MCPManager:
 
     def _result_to_str(self, result) -> str:
         try:
-            if result.content:
-                text = getattr(result.content[0], "text", None)
-                if text is not None:
-                    return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, str(text))
-            if hasattr(result, "data") and result.data is not None:
-                return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, json.dumps(result.data))
+            content = getattr(result, "content", None)
+            if content:
+                texts = [getattr(part, "text", None) for part in content]
+                texts = [t for t in texts if t is not None]
+                if texts:
+                    return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, "\n".join(map(str, texts)))
+
+            data = getattr(result, "data", None)
+            if data is not None:
+                return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, json.dumps(data))
         except Exception:
             pass
         return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, str(result))
