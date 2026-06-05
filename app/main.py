@@ -33,12 +33,19 @@ async def initialize_mcp() -> None:
         log.error("mcp_servers.json must contain a JSON object at the top level.")
         return
 
-    mcp_servers = data.get("mcpServers", {})
+    mcp_servers = data.get("mcpServers")
     if not mcp_servers:
         return
+    if not isinstance(mcp_servers, dict):
+        log.error("mcp_servers.json: 'mcpServers' must be a JSON object mapping server names to configs.")
+        return
+
     from .core.mcp_manager import mcp_manager
     log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
-    await mcp_manager.initialize(mcp_servers)
+    try:
+        await mcp_manager.initialize(mcp_servers)
+    except Exception as e:
+        log.error(f"Failed to initialize MCP servers: {e}")
 
 
 async def load_config() -> None:

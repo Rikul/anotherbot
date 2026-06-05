@@ -74,7 +74,9 @@ class MCPManager:
         return tool_name in self._specs
 
     async def call_tool(self, tool_name: str, tool_args: dict) -> str:
-        server_name, _, bare_name = tool_name.partition(self._SEP)
+        server_name, sep, bare_name = tool_name.rpartition(self._SEP)
+        if not sep:
+            return f"Error: MCP tool '{tool_name}' is not namespaced with '{self._SEP}'."
         client = self._clients.get(server_name)
         if client is None:
             return f"Error: MCP server '{server_name}' is not connected."
