@@ -19,8 +19,10 @@ class MCPManager:
     def __init__(self) -> None:
         self._clients: dict[str, Client] = {}
         self._specs: dict[str, dict] = {}
+        self._server_configs: dict[str, dict] = {}
 
     async def initialize(self, mcp_servers: dict[str, dict]) -> None:
+        self._server_configs = dict(mcp_servers)
         await asyncio.gather(*(self._connect_server(n, c) for n, c in mcp_servers.items()))
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
@@ -70,6 +72,26 @@ class MCPManager:
     def get_tool_specs(self) -> list[dict]:
         return list(self._specs.values())
 
+    def get_server_status(self) -> list[dict]:
+        result = []
+        for name, cfg in self._server_configs.items():
+            prefix = f"{name}{self._SEP}"
+            tool_count = sum(1 for k in self._specs if k.startswith(prefix))
+            transport = "url" if "url" in cfg else "stdio"
+            target = cfg.get("url") or cfg.get("command", "?")
+            result.append({
+                "name": name,
+                "connected": name in self._clients,
+                "transport": transport,
+                "target": target,
+                "tool_count": tool_count,
+            })
+        return result
+
+    def get_tools_for_server(self, server_name: str) -> list[dict]:
+        prefix = f"{server_name}{self._SEP}"
+        return [spec for k, spec in self._specs.items() if k.startswith(prefix)]
+
     def is_mcp_tool(self, tool_name: str) -> bool:
         return tool_name in self._specs
 
@@ -112,6 +134,7 @@ class MCPManager:
                 log.warning(f"MCP server '{name}': error during shutdown — {e}")
         self._clients.clear()
         self._specs.clear()
+        self._server_configs.clear()
 
 
 mcp_manager = MCPManager()

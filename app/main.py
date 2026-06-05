@@ -109,6 +109,7 @@ async def run_cli(args):
         CommandRegistry, BotCommand, make_status_cmd, help_cmd, model_cmd,
         list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
         fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
+        mcp_cmd,
     )
     cli_registry = CommandRegistry()
     cli_registry.register(BotCommand("status",               "Show bot status.",                        make_status_cmd()))
@@ -119,6 +120,7 @@ async def run_cli(args):
     cli_registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]",   fork_conversation_cmd(agent)))
     cli_registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(agent._store, agent._channel_str)))
     cli_registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(agent._store, agent._channel_str)))
+    cli_registry.register(BotCommand("mcp",  "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()))
     cli_registry.register(BotCommand("help",                 "Show available commands.",                 help_cmd(cli_registry)))
 
     try:
