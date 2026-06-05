@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from .tool_calls import all_tool_specs
+from .tool_calls import get_all_tool_specs
 from ..infra.app_logging import log
 from ..channels.channel import Channel
 from ..channels.message import OutgoingMessage
@@ -134,7 +134,7 @@ class BackgroundAgent(Agent):
         system = [{"role": "system", "content": system_context}] if system_context else []
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
 
-        final_content = await self._loop(session_messages, all_tool_specs)
+        final_content = await self._loop(session_messages, get_all_tool_specs())
 
         self.channel.clear_stopped()
 

@@ -16,6 +16,26 @@ from .core import runtime
 from dotenv import load_dotenv
 load_dotenv()
 
+async def initialize_mcp() -> None:
+    import json
+    from pathlib import Path
+    mcp_config_path = Path(config.PROJECT_HOME) / "mcp_servers.json"
+    if not mcp_config_path.exists():
+        return
+    try:
+        with open(mcp_config_path) as f:
+            data = json.load(f)
+    except Exception as e:
+        log.error(f"Failed to load mcp_servers.json: {e}")
+        return
+    mcp_servers = data.get("mcpServers", {})
+    if not mcp_servers:
+        return
+    from .core.mcp_manager import mcp_manager
+    log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
+    await mcp_manager.initialize(mcp_servers)
+
+
 async def load_config() -> None:
     try:
         config.load()
@@ -113,9 +133,10 @@ async def run_background_agent(args):
 async def main():
     
     ensure_home_dir()
-    
+
     await load_config()
     setup_logging(level=logging.INFO)
+    await initialize_mcp()
 
     args = parse_args()
 

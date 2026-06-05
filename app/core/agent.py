@@ -127,14 +127,14 @@ class Agent(ABC):
     # --- shared tool dispatch ---
 
     async def handle_tool_call(self, tool_call) -> str:
-        from .tool_calls import run_tool  # lazy — tool_calls imports scheduled_tasks which imports Agent
+        from .tool_calls import run_tool_async  # lazy — tool_calls imports scheduled_tasks which imports Agent
         tool_name = tool_call.function.name
         try:
             tool_args = json.loads(tool_call.function.arguments)
             if not await self._check_permission(tool_name, tool_args):
                 return "User denied permission to run this tool. Ask for permission to run the tool again if you want to try running it."
             await self._on_tool_start(tool_name, tool_args)
-            return run_tool(tool_name=tool_name, tool_args=tool_args)
+            return await run_tool_async(tool_name=tool_name, tool_args=tool_args)
         except Exception as e:
             error_msg = f"Error running tool {tool_name}: {str(e)}"
             log.error(error_msg)
