@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, AsyncMock
 
 from app.channels.channel import ChannelType
 from app.channels.slack import SlackChannel, MAX_SLACK_LENGTH
@@ -109,6 +109,18 @@ async def test_handle_message_allows_user_subtypes():
     )
 
     assert not mq.incoming.empty()
+
+
+@pytest.mark.asyncio
+async def test_handle_message_ignores_event_with_no_channel():
+    sc, mq = make_slack_channel()
+
+    await sc._handle_message(
+        event={"user": "U123", "text": "hello"},  # no "channel" key
+        say=AsyncMock(),
+    )
+
+    assert mq.incoming.empty()
 
 
 @pytest.mark.asyncio

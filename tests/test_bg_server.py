@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock, AsyncMock, ANY
 from app.bg_server import start_server
 
 
-def _make_config(telegram_token=None, discord_token=None):
+def _make_config(telegram_token=None, discord_token=None, slack_bot_token=None, slack_app_token=None):
     """Build a mock config that returns only the configured channels."""
     mock_config = MagicMock()
     mock_config.PROJECT_HOME = MagicMock()
@@ -22,6 +22,14 @@ def _make_config(telegram_token=None, discord_token=None):
         active["discord"] = True
         mock_config.discord.get.side_effect = lambda key, default=None: {
             "TOKEN": discord_token,
+        }.get(key, default)
+
+    if slack_bot_token:
+        active["slack"] = True
+        mock_config.slack.get.side_effect = lambda key, default=None: {
+            "BOT_TOKEN": slack_bot_token,
+            "APP_TOKEN": slack_app_token,
+            "ALLOW_FROM": [],
         }.get(key, default)
 
     mock_config.get.side_effect = lambda key: active.get(key)
@@ -144,6 +152,72 @@ async def test_start_server_discord_missing_token_skips_channel():
     mock_config = _make_config(discord_token=None)
     mock_config.get.side_effect = lambda key: {"discord": True}.get(key)
     mock_config.discord.get.side_effect = lambda key, default=None: None  # TOKEN missing
+
+    with patch("app.bg_server.config", mock_config), \
+         patch("app.bg_server.os.chdir"), \
+         patch("asyncio.gather", mock_gather):
+
+        await start_server()
+
+    mock_gather.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_start_server_slack_only_starts_slack_agent():
+    mock_gather = AsyncMock()
+    mock_config = _make_config(slack_bot_token="xoxb-test", slack_app_token="xapp-test")
+
+    with patch("app.bg_server.config", mock_config), \
+         patch("app.bg_server.os.chdir"), \
+         patch("app.channels.slack.SlackChannel") as MockSC, \
+         patch("app.bg_server.BackgroundAgent") as MockAgent, \
+         patch("app.bg_server.ScheduledTasks"), \
+         patch("app.bg_server.MessageQueue") as MockMQ, \
+         patch("asyncio.gather", mock_gather):
+
+        mock_sc = MockSC.return_value
+        mock_mq = MockMQ.return_value
+
+        await start_server()
+
+    MockSC.assert_called_once_with(mock_mq, bot_token="xoxb-test", app_token="xapp-test", allow_from=[])
+    MockAgent.assert_called_once_with(mq=mock_mq, channel=mock_sc, max_iterations=ANY)
+    assert mock_gather.called
+
+
+@pytest.mark.asyncio
+async def test_start_server_slack_gather_has_correct_coros():
+    mock_gather = AsyncMock()
+    mock_config = _make_config(slack_bot_token="xoxb-test", slack_app_token="xapp-test")
+
+    with patch("app.bg_server.config", mock_config), \
+         patch("app.bg_server.os.chdir"), \
+         patch("app.channels.slack.SlackChannel") as MockSC, \
+         patch("app.bg_server.BackgroundAgent") as MockAgent, \
+         patch("app.bg_server.ScheduledTasks") as MockTasks, \
+         patch("app.bg_server.MessageQueue") as MockMQ, \
+         patch("asyncio.gather", mock_gather):
+
+        mock_sc = MockSC.return_value
+        mock_agent = MockAgent.return_value
+        mock_mq = MockMQ.return_value
+
+        await start_server()
+
+    # tasks.run + slack run_polling + slack process_incoming + slack process_outgoing = 4
+    coros = mock_gather.call_args[0]
+    assert len(coros) == 4
+    mock_sc.run_polling.assert_called_once()
+    mock_agent.process_incoming.assert_called_once()
+    mock_mq.process_outgoing.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_start_server_slack_missing_tokens_skips_channel():
+    mock_gather = AsyncMock()
+    mock_config = _make_config()
+    mock_config.get.side_effect = lambda key: {"slack": True}.get(key)
+    mock_config.slack.get.side_effect = lambda key, default=None: None  # both tokens missing
 
     with patch("app.bg_server.config", mock_config), \
          patch("app.bg_server.os.chdir"), \

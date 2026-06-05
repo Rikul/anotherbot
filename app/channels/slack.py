@@ -10,7 +10,7 @@ from .message import OutgoingMessage, IncomingMessage
 
 log = logging.getLogger(__name__)
 
-MAX_SLACK_LENGTH = 3000
+MAX_SLACK_LENGTH = 3800
 
 
 _IGNORED_SUBTYPES = {
@@ -49,7 +49,7 @@ class SlackChannel(Channel):
         self.app.error(self._slack_error_handler)
 
     async def _slack_error_handler(self, error: Exception, body: dict, logger) -> None:
-        logger.error(f"Slack error: {error}", exc_info=error)
+        logger.error(f"Slack error: {error}", exc_info=True)
 
     @property
     def has_stopped(self) -> bool:
@@ -81,6 +81,9 @@ class SlackChannel(Channel):
             return
 
         channel_id = event.get("channel", "")
+        if not channel_id:
+            log.warning("Slack: ignoring message with no channel in event")
+            return
         metadata = {"channel_id": channel_id}
 
         if content.startswith("/"):
