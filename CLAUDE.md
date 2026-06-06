@@ -78,9 +78,9 @@ Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gath
 
 ### Tool System
 
-Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` method. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` dispatches by name and restores `os.getcwd()` after each call. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars).
+Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` method. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` is asynchronous and dispatches by name, awaiting the tool's `call` if it is a coroutine function, and restores `os.getcwd()` after execution. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars).
 
-Current built-in tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`.
+Current built-in tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`, `helper_agent`.
 
 `_HELPER_AGENT_TOOLS` in `tool_calls.py` is an explicit allowlist of tools available to `HelperAgent` (used internally by scheduled tasks). Scheduled task mutation tools (`add/update/remove_scheduled_task`) are excluded to prevent recursion.
 
