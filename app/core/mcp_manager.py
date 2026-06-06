@@ -23,7 +23,11 @@ class MCPManager:
 
     async def initialize(self, mcp_servers: dict[str, dict]) -> None:
         self._server_configs = dict(mcp_servers)
-        await asyncio.gather(*(self._connect_server(n, c) for n, c in mcp_servers.items()))
+        await asyncio.gather(*(
+            self._connect_server(n, c)
+            for n, c in mcp_servers.items()
+            if not c.get("disabled")
+        ))
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
         try:
@@ -82,6 +86,7 @@ class MCPManager:
             result.append({
                 "name": name,
                 "connected": name in self._clients,
+                "disabled": bool(cfg.get("disabled")),
                 "transport": transport,
                 "target": target,
                 "tool_count": tool_count,

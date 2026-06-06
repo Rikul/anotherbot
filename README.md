@@ -180,6 +180,20 @@ Each server entry supports one of two transport types:
 | `args` | no | Argument list for the command |
 | `env` | no | Extra environment variables for the subprocess |
 | `url` | one of | SSE/HTTP endpoint URL (remote transport) |
+| `disabled` | no | Set to `true` to skip this server at startup |
+
+To enable only a subset of servers, add `"disabled": true` to those you want to skip:
+
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] },
+    "time":   { "command": "uvx", "args": ["mcp-server-time"], "disabled": true }
+  }
+}
+```
+
+Disabled servers appear in `/mcp` output with status `disabled` so you can see what is configured without connecting it.
 
 ### Tool namespacing
 

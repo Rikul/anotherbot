@@ -241,7 +241,12 @@ def mcp_cmd() -> CommandHandler:
                 return "No MCP servers configured.\nCreate ~/.crafterscode/mcp_servers.json to add servers."
             lines = [f"MCP servers ({len(statuses)}):"]
             for s in statuses:
-                status = "connected" if s["connected"] else "disconnected"
+                if s["disabled"]:
+                    status = "disabled"
+                elif s["connected"]:
+                    status = "connected"
+                else:
+                    status = "disconnected"
                 lines.append(
                     f"  {s['name']} — {status}, {s['transport']} ({s['target']}), {s['tool_count']} tool(s)"
                 )
