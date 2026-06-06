@@ -30,6 +30,9 @@ class MCPManager:
         ))
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
+        if self._SEP in name:
+            log.error(f"MCP server '{name}': invalid name — must not contain '{self._SEP}'.")
+            return
         try:
             client = self._build_client(cfg)
         except Exception as e:
@@ -101,7 +104,7 @@ class MCPManager:
         return tool_name in self._specs
 
     async def call_tool(self, tool_name: str, tool_args: dict) -> str:
-        server_name, sep, bare_name = tool_name.rpartition(self._SEP)
+        server_name, sep, bare_name = tool_name.partition(self._SEP)
         if not sep:
             return f"Error: MCP tool '{tool_name}' is not namespaced with '{self._SEP}'."
         client = self._clients.get(server_name)

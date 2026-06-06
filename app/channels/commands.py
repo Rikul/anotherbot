@@ -221,9 +221,10 @@ def mcp_cmd() -> CommandHandler:
                 lines = [f"Tools for '{subargs}' ({len(specs)}):"]
                 for spec in specs:
                     fn = spec["function"]
-                    bare = fn["name"].rpartition("__")[2]
+                    bare = fn["name"].partition("__")[2]
                     desc = fn.get("description", "")
                     lines.append(f"  {bare}" + (f" — {desc}" if desc else ""))
+                return "\n".join(lines)
                 return "\n".join(lines)
             else:
                 specs = mcp_manager.get_tool_specs()
