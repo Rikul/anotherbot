@@ -55,6 +55,8 @@ Environment variables (all override config file values):
 - `WEBSOCKET_PORT` — port for web UI + WebSocket (default: `8765`)
 - `ANOTHERBOT_HOME` — overrides the data directory (default: `~/.crafterscode`)
 
+MCP servers are configured separately in `~/.crafterscode/mcp_servers.json` (same dir, same format as Claude Desktop's `mcpServers` key). No env-var equivalent — in Docker, mount the file at `$ANOTHERBOT_HOME/mcp_servers.json`.
+
 For Docker, no config file is needed — pass everything as env vars. See `Dockerfile` and the Docker section in README.
 
 ## Architecture
@@ -78,9 +80,17 @@ Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gath
 
 Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` method. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` dispatches by name and restores `os.getcwd()` after each call. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars).
 
-Current tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`.
+Current built-in tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`.
 
 `_HELPER_AGENT_TOOLS` in `tool_calls.py` is an explicit allowlist of tools available to `HelperAgent` (used internally by scheduled tasks). Scheduled task mutation tools (`add/update/remove_scheduled_task`) are excluded to prevent recursion.
+
+`get_all_tool_specs()` merges built-in specs with any MCP tool specs at call time (not module load). `run_tool_async()` is the async dispatcher used by `handle_tool_call` — it routes to `MCPManager.call_tool()` for MCP tools or falls through to the synchronous `run_tool()` for built-ins.
+
+### MCP Servers
+
+`MCPManager` (`app/core/mcp_manager.py`) owns persistent FastMCP client connections and their tool catalogs. It is a module-level singleton (`mcp_manager`). `initialize_mcp()` in `main.py` reads `mcp_servers.json`, then calls `mcp_manager.initialize()` which connects all servers concurrently via `asyncio.gather`. Each server's tools are discovered via `list_tools()` and registered under the namespace `servername__toolname` (`_SEP = "__"`). `rpartition` is used when routing calls so tool names may contain underscores freely; only the server name must not contain `__`.
+
+The singleton is shut down via `mcp_manager.shutdown()` in a `try/finally` block in `main()`. `HelperAgent` does not receive MCP tools — it uses the static `helper_tool_specs` allowlist to prevent recursion.
 
 ### System Context
 

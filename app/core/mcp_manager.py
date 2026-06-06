@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import asyncio
+import json
+
+from fastmcp import Client
+from fastmcp.client import StdioTransport
+
+from ..infra.app_logging import log
+from ..infra.helpers import trunc_str_with_ellipsis
+from .tool_calls import MAX_TOOL_RESULT_LENGTH
+
+
+class MCPManager:
+    """Owns persistent FastMCP client connections and their tool catalogs."""
+
+    _SEP = "__"
+
+    def __init__(self) -> None:
+        self._clients: dict[str, Client] = {}
+        self._specs: dict[str, dict] = {}
+        self._server_configs: dict[str, dict] = {}
+
+    async def initialize(self, mcp_servers: dict[str, dict]) -> None:
+        self._server_configs = dict(mcp_servers)
+        await asyncio.gather(*(
+            self._connect_server(n, c)
+            for n, c in mcp_servers.items()
+            if not c.get("disabled")
+        ))
+
+    async def _connect_server(self, name: str, cfg: dict) -> None:
+        if self._SEP in name:
+            log.error(f"MCP server '{name}': invalid name — must not contain '{self._SEP}'.")
+            return
+        try:
+            client = self._build_client(cfg)
+        except Exception as e:
+            log.error(f"MCP server '{name}': invalid config — {e}")
+            return
+        try:
+            await client.__aenter__()
+        except Exception as e:
+            log.error(f"MCP server '{name}': failed to connect — {e}")
+            return
+        try:
+            tools = await client.list_tools()
+            for tool in tools:
+                namespaced = f"{name}{self._SEP}{tool.name}"
+                self._specs[namespaced] = self._to_openai_spec(namespaced, tool)
+            self._clients[name] = client
+            log.info(f"MCP server '{name}': connected, {len(tools)} tool(s) discovered")
+        except Exception as e:
+            log.error(f"MCP server '{name}': failed to initialize — {e}")
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception:
+                pass
+
+    def _build_client(self, cfg: dict) -> Client:
+        if "url" in cfg:
+            return Client(cfg["url"])
+        command = cfg["command"]
+        args = cfg.get("args", [])
+        env = cfg.get("env")
+        cwd = cfg.get("cwd")
+        return Client(StdioTransport(command=command, args=args, env=env, cwd=cwd))
+
+    def _to_openai_spec(self, namespaced_name: str, tool) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": namespaced_name,
+                "description": tool.description or "",
+                "parameters": tool.inputSchema or {"type": "object", "properties": {}},
+            },
+        }
+
+    def get_tool_specs(self) -> list[dict]:
+        return list(self._specs.values())
+
+    def get_server_status(self) -> list[dict]:
+        result = []
+        for name, cfg in self._server_configs.items():
+            prefix = f"{name}{self._SEP}"
+            tool_count = sum(1 for k in self._specs if k.startswith(prefix))
+            transport = "url" if "url" in cfg else "stdio"
+            target = cfg.get("url") or cfg.get("command", "?")
+            result.append({
+                "name": name,
+                "connected": name in self._clients,
+                "disabled": bool(cfg.get("disabled")),
+                "transport": transport,
+                "target": target,
+                "tool_count": tool_count,
+            })
+        return result
+
+    def get_tools_for_server(self, server_name: str) -> list[dict]:
+        prefix = f"{server_name}{self._SEP}"
+        return [spec for k, spec in self._specs.items() if k.startswith(prefix)]
+
+    def is_mcp_tool(self, tool_name: str) -> bool:
+        return tool_name in self._specs
+
+    async def call_tool(self, tool_name: str, tool_args: dict) -> str:
+        server_name, sep, bare_name = tool_name.partition(self._SEP)
+        if not sep:
+            return f"Error: MCP tool '{tool_name}' is not namespaced with '{self._SEP}'."
+        client = self._clients.get(server_name)
+        if client is None:
+            return f"Error: MCP server '{server_name}' is not connected."
+        try:
+            result = await client.call_tool(bare_name, tool_args)
+            return self._result_to_str(result)
+        except Exception as e:
+            log.error(f"MCP tool call failed [{tool_name}]: {e}")
+            return f"Error calling MCP tool {tool_name}: {e}"
+
+    def _result_to_str(self, result) -> str:
+        try:
+            content = getattr(result, "content", None)
+            if content:
+                texts = [getattr(part, "text", None) for part in content]
+                texts = [t for t in texts if t is not None]
+                if texts:
+                    return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, "\n".join(map(str, texts)))
+
+            data = getattr(result, "data", None)
+            if data is not None:
+                return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, json.dumps(data))
+        except Exception:
+            pass
+        return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, str(result))
+
+    async def shutdown(self) -> None:
+        for name, client in self._clients.items():
+            try:
+                await client.__aexit__(None, None, None)
+                log.info(f"MCP server '{name}': disconnected")
+            except Exception as e:
+                log.warning(f"MCP server '{name}': error during shutdown — {e}")
+        self._clients.clear()
+        self._specs.clear()
+        self._server_configs.clear()
+
+
+mcp_manager = MCPManager()
