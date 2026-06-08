@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from ..core.tool_calls import all_tool_specs
+from ..core.tool_calls import get_all_tool_specs
 from .cli import ask_permission
 from ..core.agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
 from ..core import runtime
@@ -64,7 +64,7 @@ class CliAgent(Agent):
         system = [{"role": "system", "content": system_context}] if system_context else []
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
 
-        final_content = await self._loop(session_messages, all_tool_specs)
+        final_content = await self._loop(session_messages, get_all_tool_specs())
 
         self.messages.append({"role": "user", "content": message})
         self.messages.append({"role": "assistant", "content": final_content})

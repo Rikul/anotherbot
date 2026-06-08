@@ -68,6 +68,19 @@ helper_tool_specs = [tool.spec() for k, tool in tool_registry.items() if k in _H
 
 MAX_TOOL_RESULT_LENGTH = 16000
 
+
+def get_all_tool_specs() -> list[dict]:
+    from .mcp_manager import mcp_manager
+    return all_tool_specs + mcp_manager.get_tool_specs()
+
+
+async def run_tool_async(tool_name: str, tool_args: dict) -> str:
+    from .mcp_manager import mcp_manager
+    if mcp_manager.is_mcp_tool(tool_name):
+        return await mcp_manager.call_tool(tool_name, tool_args)
+    return await run_tool(tool_name=tool_name, tool_args=tool_args)
+
+
 async def run_tool(tool_name: str, tool_args: dict) -> str:
     original_cwd = os.getcwd()
     

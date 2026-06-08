@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from .tool_calls import all_tool_specs
+from .tool_calls import get_all_tool_specs
 from ..infra.app_logging import log
 from ..channels.channel import Channel
 from ..channels.message import OutgoingMessage
@@ -48,6 +48,7 @@ class BackgroundAgent(Agent):
             CommandRegistry, BotCommand, help_cmd, make_status_cmd, model_cmd,
             list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
             fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
+            mcp_cmd,
         )
         self.registry = CommandRegistry()
         ch = self._channel_str
@@ -60,6 +61,7 @@ class BackgroundAgent(Agent):
         self.registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]", fork_conversation_cmd(self)))
         self.registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(self._store, ch)))
         self.registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(self._store, ch)))
+        self.registry.register(BotCommand("mcp",  "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()))
         self.registry.register(BotCommand("help", "Show available commands.", help_cmd(self.registry)))
 
     async def _stop_cmd(self, args: str = "") -> str:
@@ -134,7 +136,7 @@ class BackgroundAgent(Agent):
         system = [{"role": "system", "content": system_context}] if system_context else []
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
 
-        final_content = await self._loop(session_messages, all_tool_specs)
+        final_content = await self._loop(session_messages, get_all_tool_specs())
 
         self.channel.clear_stopped()
 

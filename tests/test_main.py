@@ -1,9 +1,10 @@
+import json
 import logging
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.cli.cli import input_loop
-from app.main import main
+from app.main import main, initialize_mcp
 
 
 # ---------------------------------------------------------------------------
@@ -221,3 +222,43 @@ async def test_main_repl_calls_agent_loop_for_each_input():
     agent_mock.agent_loop.assert_any_call("first")
     agent_mock.agent_loop.assert_any_call("second")
     agent_mock.agent_loop.assert_any_call("third")
+
+
+# ---------------------------------------------------------------------------
+# initialize_mcp
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_initialize_mcp_no_op_when_file_missing(tmp_path):
+    mock_mgr = MagicMock()
+    mock_mgr.initialize = AsyncMock()
+    with patch("app.main.config") as mock_cfg, \
+         patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        mock_cfg.PROJECT_HOME = str(tmp_path)
+        await initialize_mcp()
+    mock_mgr.initialize.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_initialize_mcp_calls_initialize_with_server_dict(tmp_path):
+    servers = {"mem": {"command": "npx", "args": ["-y", "@mcp/mem"]}}
+    (tmp_path / "mcp_servers.json").write_text(json.dumps({"mcpServers": servers}))
+    mock_mgr = MagicMock()
+    mock_mgr.initialize = AsyncMock()
+    with patch("app.main.config") as mock_cfg, \
+         patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        mock_cfg.PROJECT_HOME = str(tmp_path)
+        await initialize_mcp()
+    mock_mgr.initialize.assert_called_once_with(servers)
+
+
+@pytest.mark.asyncio
+async def test_initialize_mcp_handles_malformed_json(tmp_path):
+    (tmp_path / "mcp_servers.json").write_text("not json{{")
+    mock_mgr = MagicMock()
+    mock_mgr.initialize = AsyncMock()
+    with patch("app.main.config") as mock_cfg, \
+         patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        mock_cfg.PROJECT_HOME = str(tmp_path)
+        await initialize_mcp()  # must not raise
+    mock_mgr.initialize.assert_not_called()
