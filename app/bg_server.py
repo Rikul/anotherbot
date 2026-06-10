@@ -56,6 +56,7 @@ async def start_server() -> None:
         web_channel = WebChannel(web_mq, host=ws_host, port=ws_port)
         web_channel.start()
         web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
+        web_channel.set_command_registry(web_agent.registry)
 
     if not telegram_channel and not discord_channel and not web_channel:
         log.error("No channels configured, exiting...")

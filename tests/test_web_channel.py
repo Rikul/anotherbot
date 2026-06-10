@@ -287,3 +287,163 @@ def test_start_mounts_static_files():
     ch.start()
     mounts = [r for r in ch._fasthtml_app.router.routes if isinstance(r, Mount)]
     assert any(getattr(r, "path", None) == "/static" for r in mounts)
+
+
+# --- /api/commands ---
+
+def test_api_commands_includes_whoami_without_registry():
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    client = TestClient(ch._fasthtml_app)
+    data = client.get("/api/commands").json()
+    assert data["commands"] == [{"name": "whoami", "description": "Show your connection ID."}]
+
+
+def test_api_commands_lists_registry_commands():
+    from types import SimpleNamespace
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    registry = MagicMock()
+    registry.list.return_value = [
+        SimpleNamespace(name="model", description="Get or set model."),
+        SimpleNamespace(name="help", description="Show available commands."),
+    ]
+    ch.set_command_registry(registry)
+    ch.start()
+    client = TestClient(ch._fasthtml_app)
+    names = [c["name"] for c in client.get("/api/commands").json()["commands"]]
+    assert names == ["model", "help", "whoami"]
+
+
+# --- /api/model ---
+
+def test_api_model_get_returns_runtime_model():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    with patch("app.core.runtime._store", {"model": "test/model-1"}):
+        client = TestClient(ch._fasthtml_app)
+        data = client.get("/api/model").json()
+    assert data["model"] == "test/model-1"
+
+
+def test_api_model_post_sets_runtime_model():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    store = {"model": "old"}
+    with patch("app.core.runtime._store", store):
+        client = TestClient(ch._fasthtml_app)
+        resp = client.post("/api/model", json={"model": "  new/model  "})
+    assert resp.status_code == 200
+    assert resp.json()["model"] == "new/model"
+    assert store["model"] == "new/model"
+
+
+def test_api_model_post_empty_rejected():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    store = {"model": "old"}
+    with patch("app.core.runtime._store", store):
+        client = TestClient(ch._fasthtml_app)
+        resp = client.post("/api/model", json={"model": "   "})
+    assert resp.status_code == 400
+    assert store["model"] == "old"
+
+
+# --- /api/mcp/servers ---
+
+def _mcp_status(**overrides):
+    status = {"name": "srv", "connected": True, "disabled": False,
+              "transport": "stdio", "target": "npx", "tool_count": 2}
+    status.update(overrides)
+    return status
+
+
+def test_api_mcp_servers_get_returns_status():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    mock_mgr = MagicMock()
+    mock_mgr.get_server_status.return_value = [_mcp_status()]
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        client = TestClient(ch._fasthtml_app)
+        data = client.get("/api/mcp/servers").json()
+    assert data["servers"] == [_mcp_status()]
+
+
+def test_api_mcp_servers_post_disables_server():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    disabled = _mcp_status(connected=False, disabled=True, tool_count=0)
+    mock_mgr = MagicMock()
+    mock_mgr.disable_server = AsyncMock(return_value=disabled)
+    mock_mgr.get_server_status.return_value = [disabled]
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        client = TestClient(ch._fasthtml_app)
+        resp = client.post("/api/mcp/servers", json={"name": "srv", "enabled": False})
+    assert resp.status_code == 200
+    mock_mgr.disable_server.assert_called_once_with("srv")
+    assert resp.json()["server"]["disabled"] is True
+
+
+def test_api_mcp_servers_post_enables_server():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    mock_mgr = MagicMock()
+    mock_mgr.enable_server = AsyncMock(return_value=_mcp_status())
+    mock_mgr.get_server_status.return_value = [_mcp_status()]
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        client = TestClient(ch._fasthtml_app)
+        resp = client.post("/api/mcp/servers", json={"name": "srv", "enabled": True})
+    assert resp.status_code == 200
+    mock_mgr.enable_server.assert_called_once_with("srv")
+
+
+def test_api_mcp_servers_post_unknown_server_404():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    mock_mgr = MagicMock()
+    mock_mgr.enable_server = AsyncMock(side_effect=ValueError("Unknown MCP server 'ghost'"))
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        client = TestClient(ch._fasthtml_app)
+        resp = client.post("/api/mcp/servers", json={"name": "ghost", "enabled": True})
+    assert resp.status_code == 404
+
+
+def test_api_mcp_servers_post_bad_body_400():
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    client = TestClient(ch._fasthtml_app)
+    assert client.post("/api/mcp/servers", json={"name": "srv"}).status_code == 400
+    assert client.post("/api/mcp/servers", json={"enabled": True}).status_code == 400
+    assert client.post("/api/mcp/servers", content=b"not json").status_code == 400
+
+
+# --- settings / palette markup ---
+
+def test_build_page_has_settings_and_palette_elements():
+    html = str(_build_page())
+    for element_id in ("settings-btn", "settings-overlay", "settings-modal",
+                       "model-input", "model-save", "mcp-list", "cmd-palette"):
+        assert f'id="{element_id}"' in html, f"Missing element #{element_id}"
+
+
+def test_static_js_has_palette_and_settings_logic():
+    content = (_STATIC_DIR / "web_channel.js").read_text()
+    assert "/api/commands" in content
+    assert "/api/mcp/servers" in content
+    assert "/api/model" in content

@@ -43,7 +43,7 @@ async def initialize_mcp() -> None:
     from .core.mcp_manager import mcp_manager
     log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
     try:
-        await mcp_manager.initialize(mcp_servers)
+        await mcp_manager.initialize(mcp_servers, config_path=mcp_config_path)
     except Exception as e:
         log.error(f"Failed to initialize MCP servers: {e}")
 
@@ -120,7 +120,7 @@ async def run_cli(args):
     cli_registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]",   fork_conversation_cmd(agent)))
     cli_registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(agent._store, agent._channel_str)))
     cli_registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(agent._store, agent._channel_str)))
-    cli_registry.register(BotCommand("mcp",  "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()))
+    cli_registry.register(BotCommand("mcp",  "Show or configure MCP servers. Usage: /mcp [tools [<server>] | enable <server> | disable <server>]", mcp_cmd()))
     cli_registry.register(BotCommand("help",                 "Show available commands.",                 help_cmd(cli_registry)))
 
     try:

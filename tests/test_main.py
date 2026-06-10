@@ -249,7 +249,9 @@ async def test_initialize_mcp_calls_initialize_with_server_dict(tmp_path):
          patch("app.core.mcp_manager.mcp_manager", mock_mgr):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()
-    mock_mgr.initialize.assert_called_once_with(servers)
+    mock_mgr.initialize.assert_called_once_with(
+        servers, config_path=tmp_path / "mcp_servers.json"
+    )
 
 
 @pytest.mark.asyncio
