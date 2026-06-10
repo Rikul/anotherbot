@@ -135,3 +135,74 @@ async def test_model_cmd_sets_model():
         result = await model_cmd("new-model")
     assert "new-model" in result
     assert mock_store["model"] == "new-model"
+
+
+# --- mcp_cmd enable/disable ---
+
+def _mcp_status(**overrides):
+    status = {"name": "srv", "connected": True, "disabled": False,
+              "transport": "stdio", "target": "npx", "tool_count": 3}
+    status.update(overrides)
+    return status
+
+
+@pytest.mark.asyncio
+async def test_mcp_enable_requires_server_name():
+    from app.channels.commands import mcp_cmd
+    assert await mcp_cmd()("enable") == "Usage: /mcp enable <server>"
+
+
+@pytest.mark.asyncio
+async def test_mcp_disable_requires_server_name():
+    from app.channels.commands import mcp_cmd
+    assert await mcp_cmd()("disable") == "Usage: /mcp disable <server>"
+
+
+@pytest.mark.asyncio
+async def test_mcp_enable_reports_connected():
+    from unittest.mock import MagicMock
+    from app.channels.commands import mcp_cmd
+    mock_mgr = MagicMock()
+    mock_mgr.enable_server = AsyncMock(return_value=_mcp_status())
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        result = await mcp_cmd()("enable srv")
+    mock_mgr.enable_server.assert_called_once_with("srv")
+    assert "enabled and connected" in result
+    assert "3 tool(s)" in result
+
+
+@pytest.mark.asyncio
+async def test_mcp_enable_reports_connect_failure():
+    from unittest.mock import MagicMock
+    from app.channels.commands import mcp_cmd
+    mock_mgr = MagicMock()
+    mock_mgr.enable_server = AsyncMock(return_value=_mcp_status(connected=False, tool_count=0))
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        result = await mcp_cmd()("enable srv")
+    assert "failed to connect" in result
+
+
+@pytest.mark.asyncio
+async def test_mcp_disable_reports_disabled():
+    from unittest.mock import MagicMock
+    from app.channels.commands import mcp_cmd
+    mock_mgr = MagicMock()
+    mock_mgr.disable_server = AsyncMock(
+        return_value=_mcp_status(connected=False, disabled=True, tool_count=0))
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        result = await mcp_cmd()("disable srv")
+    mock_mgr.disable_server.assert_called_once_with("srv")
+    assert "now disabled" in result
+
+
+@pytest.mark.asyncio
+async def test_mcp_enable_unknown_server_lists_configured():
+    from unittest.mock import MagicMock
+    from app.channels.commands import mcp_cmd
+    mock_mgr = MagicMock()
+    mock_mgr.enable_server = AsyncMock(side_effect=ValueError("Unknown MCP server 'ghost'"))
+    mock_mgr.get_server_status.return_value = [_mcp_status()]
+    with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+        result = await mcp_cmd()("enable ghost")
+    assert "Unknown MCP server 'ghost'" in result
+    assert "srv" in result

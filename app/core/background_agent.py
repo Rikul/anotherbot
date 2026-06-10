@@ -61,7 +61,7 @@ class BackgroundAgent(Agent):
         self.registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]", fork_conversation_cmd(self)))
         self.registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(self._store, ch)))
         self.registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(self._store, ch)))
-        self.registry.register(BotCommand("mcp",  "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()))
+        self.registry.register(BotCommand("mcp",  "Show or configure MCP servers. Usage: /mcp [tools [<server>] | enable <server> | disable <server>]", mcp_cmd()))
         self.registry.register(BotCommand("help", "Show available commands.", help_cmd(self.registry)))
 
     async def _stop_cmd(self, args: str = "") -> str:

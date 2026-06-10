@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 from fastmcp import Client
 from fastmcp.client import StdioTransport
@@ -20,9 +21,11 @@ class MCPManager:
         self._clients: dict[str, Client] = {}
         self._specs: dict[str, dict] = {}
         self._server_configs: dict[str, dict] = {}
+        self._config_path: Path | None = None
 
-    async def initialize(self, mcp_servers: dict[str, dict]) -> None:
+    async def initialize(self, mcp_servers: dict[str, dict], config_path: Path | None = None) -> None:
         self._server_configs = dict(mcp_servers)
+        self._config_path = config_path
         await asyncio.gather(*(
             self._connect_server(n, c)
             for n, c in mcp_servers.items()
@@ -80,21 +83,67 @@ class MCPManager:
         return list(self._specs.values())
 
     def get_server_status(self) -> list[dict]:
-        result = []
-        for name, cfg in self._server_configs.items():
-            prefix = f"{name}{self._SEP}"
-            tool_count = sum(1 for k in self._specs if k.startswith(prefix))
-            transport = "url" if "url" in cfg else "stdio"
-            target = cfg.get("url") or cfg.get("command", "?")
-            result.append({
-                "name": name,
-                "connected": name in self._clients,
-                "disabled": bool(cfg.get("disabled")),
-                "transport": transport,
-                "target": target,
-                "tool_count": tool_count,
-            })
-        return result
+        return [self._status_for(name) for name in self._server_configs]
+
+    def _status_for(self, name: str) -> dict:
+        cfg = self._server_configs[name]
+        prefix = f"{name}{self._SEP}"
+        return {
+            "name": name,
+            "connected": name in self._clients,
+            "disabled": bool(cfg.get("disabled")),
+            "transport": "url" if "url" in cfg else "stdio",
+            "target": cfg.get("url") or cfg.get("command", "?"),
+            "tool_count": sum(1 for k in self._specs if k.startswith(prefix)),
+        }
+
+    async def enable_server(self, name: str) -> dict:
+        """Connect a configured server at runtime and clear its disabled flag."""
+        cfg = self._server_configs.get(name)
+        if cfg is None:
+            raise ValueError(f"Unknown MCP server '{name}'")
+        cfg.pop("disabled", None)
+        if name not in self._clients:
+            await self._connect_server(name, cfg)
+        self._persist_disabled(name, False)
+        return self._status_for(name)
+
+    async def disable_server(self, name: str) -> dict:
+        """Disconnect a server at runtime, drop its tools, and set its disabled flag."""
+        cfg = self._server_configs.get(name)
+        if cfg is None:
+            raise ValueError(f"Unknown MCP server '{name}'")
+        client = self._clients.pop(name, None)
+        if client is not None:
+            try:
+                await client.__aexit__(None, None, None)
+            except Exception as e:
+                log.warning(f"MCP server '{name}': error during disconnect — {e}")
+        prefix = f"{name}{self._SEP}"
+        for key in [k for k in self._specs if k.startswith(prefix)]:
+            del self._specs[key]
+        cfg["disabled"] = True
+        self._persist_disabled(name, True)
+        return self._status_for(name)
+
+    def _persist_disabled(self, name: str, disabled: bool) -> None:
+        if self._config_path is None:
+            return
+        try:
+            with open(self._config_path, encoding="utf-8") as f:
+                data = json.load(f)
+            servers = data.get("mcpServers")
+            if not isinstance(servers, dict) or name not in servers:
+                return
+            if disabled:
+                servers[name]["disabled"] = True
+            else:
+                servers[name].pop("disabled", None)
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+                f.write("\n")
+        except Exception as e:
+            log.warning(f"Failed to persist MCP config for '{name}': {e}")
 
     def get_tools_for_server(self, server_name: str) -> list[dict]:
         prefix = f"{server_name}{self._SEP}"

@@ -210,7 +210,25 @@ def mcp_cmd() -> CommandHandler:
         subcmd = parts[0].lower() if parts and parts[0] else ""
         subargs = parts[1].strip() if len(parts) > 1 else ""
 
-        if subcmd == "tools":
+        if subcmd in ("enable", "disable"):
+            if not subargs:
+                return f"Usage: /mcp {subcmd} <server>"
+            try:
+                if subcmd == "enable":
+                    status = await mcp_manager.enable_server(subargs)
+                else:
+                    status = await mcp_manager.disable_server(subargs)
+            except ValueError as e:
+                configured = [s["name"] for s in mcp_manager.get_server_status()]
+                return f"{e}. Configured: {', '.join(configured) or 'none'}"
+            if status["disabled"]:
+                state = "disabled"
+            elif status["connected"]:
+                state = f"enabled and connected ({status['tool_count']} tool(s))"
+            else:
+                state = "enabled but failed to connect (check logs)"
+            return f"MCP server '{subargs}' is now {state}."
+        elif subcmd == "tools":
             if subargs:
                 specs = mcp_manager.get_tools_for_server(subargs)
                 if not specs:
@@ -224,7 +242,6 @@ def mcp_cmd() -> CommandHandler:
                     bare = fn["name"].partition("__")[2]
                     desc = fn.get("description", "")
                     lines.append(f"  {bare}" + (f" — {desc}" if desc else ""))
-                return "\n".join(lines)
                 return "\n".join(lines)
             else:
                 specs = mcp_manager.get_tool_specs()

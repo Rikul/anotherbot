@@ -103,6 +103,8 @@ Then open `http://localhost:8765/` in a browser.
 - Dark/light theme toggle (persisted in `localStorage`)
 - Collapsible sidebar listing all conversations — click to load history
 - `+ New` button and `/new` command to start a fresh conversation
+- Slash-command palette — type `/` in the input to autocomplete any command (↑/↓ to navigate, Tab/Enter to pick)
+- Settings panel (⚙ in the header) to change the model and enable/disable MCP servers with live toggles
 - `/help`, `/status`, `/whoami`, `/stop` answered instantly without an LLM call
 - All other slash commands (`/model`, `/load`, `/fork`, `/rename`, `/export`) forwarded to the agent
 
@@ -194,6 +196,8 @@ To enable only a subset of servers, add `"disabled": true` to those you want to 
 ```
 
 Disabled servers appear in `/mcp` output with status `disabled` so you can see what is configured without connecting it.
+
+Servers can also be enabled or disabled at runtime — via `/mcp enable <server>` / `/mcp disable <server>` from any channel, or with the toggle switches in the web UI's settings panel (⚙). Changes take effect immediately (tools are added/removed from the agent) and are persisted back to `mcp_servers.json`.
 
 ### Tool namespacing
 

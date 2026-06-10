@@ -21,7 +21,7 @@ import uuid
 import uvicorn
 from pathlib import Path
 from fasthtml.common import (
-    Button, Div, Head, Html, Link, Meta, Script, Span,
+    Button, Div, Head, Html, Input, Link, Meta, Script, Span,
     Textarea, Title, Body, H1, P, fast_app,
 )
 from starlette.routing import WebSocketRoute
@@ -64,6 +64,7 @@ def _build_page() -> Html:
                             Span("Connecting…", id="status-text"),
                             id="status",
                         ),
+                        Button("⚙", id="settings-btn", title="Settings"),
                         Button("☾", id="theme-btn", title="Toggle light/dark"),
                         id="header-right",
                     ),
@@ -100,11 +101,13 @@ def _build_page() -> Html:
                             Div(Div(Span(), Span(), Span(), cls="dots"), cls="thinking-bubble"),
                             id="thinking",
                         ),
+                        # Slash-command palette — floats above the input area
+                        Div(id="cmd-palette"),
                         # Input area
                         Div(
                             Textarea(
                                 id="msg-input",
-                                placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
+                                placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline, / for commands)",
                                 autocomplete="off",
                                 rows="1",
                             ),
@@ -114,6 +117,41 @@ def _build_page() -> Html:
                         id="main",
                     ),
                     id="body-row",
+                ),
+                # ---- Settings modal ----
+                Div(
+                    Div(
+                        Div(
+                            Span("Settings"),
+                            Button("✕", id="settings-close", title="Close"),
+                            id="settings-header",
+                        ),
+                        Div(
+                            Div(
+                                Div("Model", cls="settings-section-title"),
+                                P("The LLM used for new responses.", cls="settings-section-hint"),
+                                Div(
+                                    Input(id="model-input", type="text",
+                                          placeholder="e.g. deepseek/deepseek-v4-flash",
+                                          autocomplete="off"),
+                                    Button("Save", id="model-save"),
+                                    id="model-row",
+                                ),
+                                Div(id="model-feedback"),
+                                cls="settings-section",
+                            ),
+                            Div(
+                                Div("MCP Servers", cls="settings-section-title"),
+                                P("Toggle servers on or off. Tools update immediately.",
+                                  cls="settings-section-hint"),
+                                Div(id="mcp-list"),
+                                cls="settings-section",
+                            ),
+                            id="settings-body",
+                        ),
+                        id="settings-modal",
+                    ),
+                    id="settings-overlay",
                 ),
                 id="app",
             ),
@@ -148,7 +186,12 @@ class WebChannel(Channel):
         self._connections: dict[str, WebSocket] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
         self._conn_lock = asyncio.Lock()
+        self._command_registry = None
         mq.register(self, self.send_message)
+
+    def set_command_registry(self, registry) -> None:
+        """Attach the BackgroundAgent's CommandRegistry so the UI can list slash commands."""
+        self._command_registry = registry
 
     # -- Channel ABC --------------------------------------------------------
 
@@ -220,6 +263,62 @@ class WebChannel(Channel):
             from ..core import runtime as _rt
             model = _rt.get("model", _cfg.get("model", "AI"))
             return JSONResponse({"model": model})
+
+        @rt("/api/commands")
+        def commands_api(req):
+            from starlette.responses import JSONResponse
+            commands = []
+            if self._command_registry is not None:
+                commands = [
+                    {"name": c.name, "description": c.description}
+                    for c in self._command_registry.list()
+                ]
+            # /whoami is handled inline by the channel, not the registry
+            commands.append({"name": "whoami", "description": "Show your connection ID."})
+            return JSONResponse({"commands": commands})
+
+        @rt("/api/model")
+        async def model_api(req):
+            from starlette.responses import JSONResponse
+            from .. import config as _cfg
+            from ..core import runtime as _rt
+            if req.method == "POST":
+                try:
+                    body = await req.json()
+                except Exception:
+                    return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+                model = str(body.get("model") or "").strip()
+                if not model:
+                    return JSONResponse({"error": "Model name cannot be empty"}, status_code=400)
+                _rt.set("model", model)
+                return JSONResponse({"model": model})
+            return JSONResponse({"model": _rt.get("model", _cfg.get("model", "AI"))})
+
+        @rt("/api/mcp/servers")
+        async def mcp_servers_api(req):
+            from starlette.responses import JSONResponse
+            from ..core.mcp_manager import mcp_manager
+            if req.method == "POST":
+                try:
+                    body = await req.json()
+                except Exception:
+                    return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+                name = str(body.get("name") or "").strip()
+                enabled = body.get("enabled")
+                if not name or not isinstance(enabled, bool):
+                    return JSONResponse(
+                        {"error": 'Expected {"name": "<server>", "enabled": true|false}'},
+                        status_code=400,
+                    )
+                try:
+                    if enabled:
+                        status = await mcp_manager.enable_server(name)
+                    else:
+                        status = await mcp_manager.disable_server(name)
+                except ValueError as e:
+                    return JSONResponse({"error": str(e)}, status_code=404)
+                return JSONResponse({"server": status, "servers": mcp_manager.get_server_status()})
+            return JSONResponse({"servers": mcp_manager.get_server_status()})
 
         # Starlette WebSocket route (low-level, for multi-client management)
         async def _ws_endpoint(ws: WebSocket) -> None:
