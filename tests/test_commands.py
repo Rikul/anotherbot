@@ -1,7 +1,8 @@
 import pytest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app.channels.commands import BotCommand, CommandRegistry, status_cmd, help_cmd, model_cmd
+from app.channels.commands import BotCommand, CommandRegistry, status_cmd, help_cmd, model_cmd, trace_cmd
 
 
 def make_registry(*extra: BotCommand) -> CommandRegistry:
@@ -135,3 +136,71 @@ async def test_model_cmd_sets_model():
         result = await model_cmd("new-model")
     assert "new-model" in result
     assert mock_store["model"] == "new-model"
+
+
+# --- trace_cmd ---
+
+@pytest.mark.asyncio
+async def test_trace_cmd_shows_off_when_no_args():
+    with patch("app.core.runtime._store", {"trace": False, "tracedir": Path("/tmp/traces")}):
+        result = await trace_cmd("")
+    assert "off" in result
+
+
+@pytest.mark.asyncio
+async def test_trace_cmd_shows_on_when_no_args():
+    with patch("app.core.runtime._store", {"trace": True, "tracedir": Path("/tmp/traces")}):
+        result = await trace_cmd("")
+    assert "on" in result
+
+
+@pytest.mark.asyncio
+async def test_trace_cmd_on_enables_tracing():
+    mock_store = {"trace": False, "tracedir": Path("/tmp/traces")}
+    with patch("app.core.runtime._store", mock_store):
+        result = await trace_cmd("on")
+    assert mock_store["trace"] is True
+    assert "on" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_trace_cmd_off_disables_tracing():
+    mock_store = {"trace": True, "tracedir": Path("/tmp/traces")}
+    with patch("app.core.runtime._store", mock_store):
+        result = await trace_cmd("off")
+    assert mock_store["trace"] is False
+    assert "off" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_trace_cmd_includes_tracedir_in_response():
+    with patch("app.core.runtime._store", {"trace": False, "tracedir": Path("/my/traces")}):
+        result = await trace_cmd("on")
+    assert "/my/traces" in result
+
+
+# --- status_cmd tracing line ---
+
+@pytest.mark.asyncio
+async def test_status_includes_tracing_off():
+    with patch("app.core.runtime._store", {"trace": False, "model": "m"}):
+        result = await status_cmd()
+    assert "Tracing" in result
+    assert "off" in result
+
+
+@pytest.mark.asyncio
+async def test_status_shows_tracing_on_with_filename():
+    mock_store = {"trace": True, "last_trace": "trace_06142026_103045.json", "model": "m"}
+    with patch("app.core.runtime._store", mock_store):
+        result = await status_cmd()
+    assert "on" in result
+    assert "trace_06142026_103045.json" in result
+
+
+@pytest.mark.asyncio
+async def test_status_shows_tracing_on_without_filename():
+    with patch("app.core.runtime._store", {"trace": True, "model": "m"}):
+        result = await status_cmd()
+    assert "Tracing" in result
+    assert "on" in result

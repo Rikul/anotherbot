@@ -69,6 +69,20 @@ async def model_cmd(args: str = "") -> str:
     return f"Model set to: {args.strip()}"
 
 
+async def trace_cmd(args: str = "") -> str:
+    arg = args.strip().lower()
+    tracedir = runtime.get("tracedir")
+    if arg == "on":
+        runtime.set("trace", True)
+        return f"Tracing on. Writing to {tracedir}"
+    elif arg == "off":
+        runtime.set("trace", False)
+        return "Tracing off."
+    else:
+        state = runtime.get("trace", False)
+        return f"Tracing is {'on' if state else 'off'}. Dir: {tracedir}"
+
+
 def make_status_cmd(channel_str: str = "") -> CommandHandler:
     async def _status(args: str = "") -> str:
         uptime = datetime.now() - _STARTUP_TIME
@@ -81,11 +95,15 @@ def make_status_cmd(channel_str: str = "") -> CommandHandler:
         else:
             conv_id = runtime.get("conversation_id", "—")
             conv_name = runtime.get("conversation_name", "—")
+        tracing = runtime.get("trace", False)
+        last_trace = runtime.get("last_trace")
+        trace_line = f"on ({last_trace})" if (tracing and last_trace) else ("on" if tracing else "off")
         return (
             f"Bot status:\n"
             f"  Model:        {model}\n"
             f"  Uptime:       {hours}h {minutes}m {seconds}s\n"
-            f"  Conversation: [{conv_id}] {conv_name}"
+            f"  Conversation: [{conv_id}] {conv_name}\n"
+            f"  Tracing:      {trace_line}"
         )
     return _status
 

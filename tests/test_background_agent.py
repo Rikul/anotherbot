@@ -308,6 +308,37 @@ async def test_process_incoming_sends_error_to_user_on_agent_loop_failure():
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_calls_write_trace_when_enabled(tmp_path):
+    agent, _, _ = make_agent()
+    fake_path = tmp_path / "trace_01012026_120000.json"
+    with patch("app.core.runtime._store", {"trace": True, "tracedir": tmp_path, "model": "m"}):
+        with patch("app.infra.tracer.write_trace", return_value=fake_path) as mock_write:
+            await agent.agent_loop("hello")
+    mock_write.assert_called_once()
+    assert mock_write.call_args[0][1] == tmp_path  # tracedir
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_call_write_trace_when_disabled(tmp_path):
+    agent, _, _ = make_agent()
+    with patch("app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}):
+        with patch("app.infra.tracer.write_trace") as mock_write:
+            await agent.agent_loop("hello")
+    mock_write.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sets_last_trace_on_success(tmp_path):
+    agent, _, _ = make_agent()
+    fake_path = tmp_path / "trace_01012026_120000.json"
+    mock_store = {"trace": True, "tracedir": tmp_path, "model": "m"}
+    with patch("app.core.runtime._store", mock_store):
+        with patch("app.infra.tracer.write_trace", return_value=fake_path):
+            await agent.agent_loop("hello")
+    assert mock_store.get("last_trace") == fake_path.name
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
     agent, mock_client, mq = make_agent()
 

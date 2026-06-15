@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from . import config
 from .infra.app_logging import setup_logging, log
@@ -60,6 +61,10 @@ async def load_config() -> None:
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="app")
+    parser.add_argument("--trace", action="store_true", default=False,
+                        help="Enable LLM call tracing")
+    parser.add_argument("--tracedir", default=str(config.PROJECT_HOME / "trace"), metavar="DIR",
+                        help="Trace output directory (default: ~/.crafterscode/trace)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     cli_parser = subparsers.add_parser("cli", help="Run interactive CLI")
@@ -106,7 +111,7 @@ async def run_cli(args):
         return
 
     from .channels.commands import (
-        CommandRegistry, BotCommand, make_status_cmd, help_cmd, model_cmd,
+        CommandRegistry, BotCommand, make_status_cmd, help_cmd, model_cmd, trace_cmd,
         list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
         fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
         mcp_cmd,
@@ -114,6 +119,7 @@ async def run_cli(args):
     cli_registry = CommandRegistry()
     cli_registry.register(BotCommand("status",               "Show bot status.",                        make_status_cmd()))
     cli_registry.register(BotCommand("model",                "Get or set model. Usage: /model [name]",  model_cmd))
+    cli_registry.register(BotCommand("trace",               "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd))
     cli_registry.register(BotCommand("list",   "List conversations.",                      list_conversations_cmd(agent._store, agent._channel_str)))
     cli_registry.register(BotCommand("new",    "Start a new conversation.",                new_conversation_cmd(agent)))
     cli_registry.register(BotCommand("load",   "Load a conversation. Usage: /load <id>",   load_conversation_cmd(agent)))
@@ -155,6 +161,8 @@ async def main():
 
     runtime.set("model",  config.get("model", "deepseek/deepseek-v4-flash"))
     runtime.set("max_iterations", args.max_iterations)
+    runtime.set("trace", args.trace)
+    runtime.set("tracedir", Path(args.tracedir))
 
     from .core.mcp_manager import mcp_manager
     try:

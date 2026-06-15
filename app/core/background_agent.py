@@ -45,7 +45,7 @@ class BackgroundAgent(Agent):
         # Lazy import to avoid circular: commands imports runtime which is fine,
         # but conversation commands need self reference so we build registry here.
         from ..channels.commands import (
-            CommandRegistry, BotCommand, help_cmd, make_status_cmd, model_cmd,
+            CommandRegistry, BotCommand, help_cmd, make_status_cmd, model_cmd, trace_cmd,
             list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
             fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
             mcp_cmd,
@@ -53,6 +53,7 @@ class BackgroundAgent(Agent):
         self.registry = CommandRegistry()
         ch = self._channel_str
         self.registry.register(BotCommand("model",  "Get or set model. Usage: /model [name]", model_cmd))
+        self.registry.register(BotCommand("trace",  "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd))
         self.registry.register(BotCommand("status", "Show bot status.", make_status_cmd(ch)))
         self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
         self.registry.register(BotCommand("list",   "List conversations.", list_conversations_cmd(self._store, ch)))
@@ -137,6 +138,12 @@ class BackgroundAgent(Agent):
         session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
+
+        if runtime.get("trace"):
+            from ..infra.tracer import write_trace
+            path = write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
+            if path:
+                runtime.set("last_trace", path.name)
 
         self.channel.clear_stopped()
 

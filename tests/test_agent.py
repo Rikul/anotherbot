@@ -219,6 +219,27 @@ async def test_agent_loop_breaks_on_length_finish_reason():
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_calls_write_trace_when_enabled(tmp_path):
+    agent, _ = make_agent()
+    fake_path = tmp_path / "trace_01012026_120000.json"
+    with patch("app.core.runtime._store", {"trace": True, "tracedir": tmp_path, "model": "m"}):
+        with patch("app.infra.tracer.write_trace", return_value=fake_path) as mock_write:
+            await agent.agent_loop("hello")
+    mock_write.assert_called_once()
+    args = mock_write.call_args[0]
+    assert args[1] == tmp_path  # tracedir
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_call_write_trace_when_disabled(tmp_path):
+    agent, _ = make_agent()
+    with patch("app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}):
+        with patch("app.infra.tracer.write_trace") as mock_write:
+            await agent.agent_loop("hello")
+    mock_write.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
     agent, mock_client = make_agent()
 
