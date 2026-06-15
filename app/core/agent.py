@@ -19,9 +19,6 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", "-"))[:40]
 
 
-TOOL_RESULT_HISTORY_LIMIT = 100
-
-
 def get_default_sys_prompt(context: dict | None = None) -> str:
     ctx = context or {}
     channel = ctx.get("channel", "cli")
@@ -130,7 +127,7 @@ class Agent(ABC):
         from .tool_calls import run_tool_async  # lazy — tool_calls imports scheduled_tasks which imports Agent
         tool_name = tool_call.function.name
         try:
-            tool_args = json.loads(tool_call.function.arguments)
+            tool_args = json.loads(tool_call.function.arguments or "{}")
             if not await self._check_permission(tool_name, tool_args):
                 return "User denied permission to run this tool. Ask for permission to run the tool again if you want to try running it."
             await self._on_tool_start(tool_name, tool_args)
@@ -176,7 +173,7 @@ class Agent(ABC):
                     log.info(f"{result[:250]}...")
             else:
                 await self._on_response(assistant_message.content)
-                if finish_reason == "stop":
+                if finish_reason in ("stop", "length"):
                     messages.append(self._serialize_assistant_msg(assistant_message))
                     break
 

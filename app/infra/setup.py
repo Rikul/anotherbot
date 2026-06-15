@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from ..config import get_default_config, APP_NAME, APP_DB
+from ..config import get_default_config, APP_NAME
 from .app_logging import log
 
 def ensure_home_dir() -> None:
