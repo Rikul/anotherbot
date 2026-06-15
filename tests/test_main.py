@@ -225,6 +225,47 @@ async def test_main_repl_calls_agent_loop_for_each_input():
 
 
 # ---------------------------------------------------------------------------
+# --trace / --tracedir
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_main_trace_defaults_to_false():
+    mock_store = {}
+    agent_mock = MagicMock()
+    agent_mock.agent_loop = AsyncMock()
+    with patch("sys.argv", ["prog", "cli", "-p", "hi", "--no-repl"]), \
+         patch("app.main.CliAgent", return_value=agent_mock), \
+         patch("app.core.runtime._store", mock_store):
+        await main()
+    assert mock_store.get("trace") is False
+
+
+@pytest.mark.asyncio
+async def test_main_trace_flag_sets_runtime_true(tmp_path):
+    mock_store = {}
+    agent_mock = MagicMock()
+    agent_mock.agent_loop = AsyncMock()
+    with patch("sys.argv", ["prog", "--trace", "--tracedir", str(tmp_path), "cli", "-p", "hi", "--no-repl"]), \
+         patch("app.main.CliAgent", return_value=agent_mock), \
+         patch("app.core.runtime._store", mock_store):
+        await main()
+    assert mock_store.get("trace") is True
+    assert mock_store.get("tracedir") == tmp_path
+
+
+@pytest.mark.asyncio
+async def test_main_tracedir_defaults_to_project_home_trace():
+    mock_store = {}
+    agent_mock = MagicMock()
+    agent_mock.agent_loop = AsyncMock()
+    with patch("sys.argv", ["prog", "cli", "-p", "hi", "--no-repl"]), \
+         patch("app.main.CliAgent", return_value=agent_mock), \
+         patch("app.core.runtime._store", mock_store):
+        await main()
+    assert "trace" in str(mock_store.get("tracedir"))
+
+
+# ---------------------------------------------------------------------------
 # initialize_mcp
 # ---------------------------------------------------------------------------
 

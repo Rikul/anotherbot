@@ -66,6 +66,10 @@ class CliAgent(Agent):
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
+        if runtime.get("trace"):
+            from ..infra.tracer import write_trace
+            write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
+
         self.messages.append({"role": "user", "content": message})
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
