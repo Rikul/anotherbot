@@ -225,7 +225,6 @@ def mcp_cmd() -> CommandHandler:
                     desc = fn.get("description", "")
                     lines.append(f"  {bare}" + (f" — {desc}" if desc else ""))
                 return "\n".join(lines)
-                return "\n".join(lines)
             else:
                 specs = mcp_manager.get_tool_specs()
                 if not specs:
