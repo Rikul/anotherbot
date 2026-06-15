@@ -190,7 +190,7 @@ async def test_agent_loop_runs_tool_when_auto_approve():
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_continues_when_finish_reason_not_stop():
+async def test_agent_loop_breaks_on_length_finish_reason():
     with patch("app.core.agent.Client") as MockClient:
         mock_client = MagicMock()
         MockClient.return_value.get_client.return_value = mock_client
@@ -210,23 +210,12 @@ async def test_agent_loop_continues_when_finish_reason_not_stop():
     response_partial = MagicMock()
     response_partial.choices = [choice_partial]
 
-    msg_final = MagicMock()
-    msg_final.tool_calls = None
-    msg_final.content = "final"
-    msg_final.model_dump.return_value = {"role": "assistant", "content": "final"}
-    choice_final = MagicMock()
-    choice_final.message = msg_final
-    choice_final.finish_reason = "stop"
-    response_final = MagicMock()
-    response_final.choices = [choice_final]
+    mock_client.chat.completions.create = AsyncMock(return_value=response_partial)
 
-    mock_client.chat.completions.create = AsyncMock(
-        side_effect=[response_partial, response_final]
-    )
+    result = await agent.agent_loop("continue")
 
-    await agent.agent_loop("continue")
-
-    assert mock_client.chat.completions.create.call_count == 2
+    assert mock_client.chat.completions.create.call_count == 1
+    assert result == "partial"
 
 
 @pytest.mark.asyncio
