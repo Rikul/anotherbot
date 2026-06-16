@@ -53,6 +53,8 @@ class CliAgent(Agent):
 
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         self._trim_messages()
+        attachments = self._as_list((metadata or {}).get("files"))
+        user_msg = self._build_user_message(message, metadata)
         self.history.add_message("user", message, self.conversation_id)
 
         conv = self._store.get(self.conversation_id)
@@ -62,7 +64,7 @@ class CliAgent(Agent):
             "conversation_name": conv["name"] if conv else "New Conversation",
         })
         system = [{"role": "system", "content": system_context}] if system_context else []
-        session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
+        session_messages = system + self.messages[:] + [user_msg]
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
@@ -70,7 +72,7 @@ class CliAgent(Agent):
             from ..infra.tracer import write_trace
             write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
 
-        self.messages.append({"role": "user", "content": message})
+        self.messages.append({"role": "user", "content": self._build_placeholder_content(message, attachments)})
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
         self._store.touch(self.conversation_id)
