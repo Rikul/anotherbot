@@ -55,6 +55,7 @@ class CliAgent(Agent):
         self._trim_messages()
         self.history.add_message("user", message, self.conversation_id)
 
+        attachments = self._as_list((metadata or {}).get("files"))
         conv = self._store.get(self.conversation_id)
         system_context = get_default_sys_prompt({
             "channel": self._channel_str,
@@ -68,9 +69,9 @@ class CliAgent(Agent):
 
         if runtime.get("trace"):
             from ..infra.tracer import write_trace
-            write_trace(self._redact_attachments(session_messages), runtime.get("tracedir"), runtime.get("model", "unknown"))
+            write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
 
-        self.messages.append(self._build_user_message(message, metadata))
+        self.messages.append({"role": "user", "content": self._build_placeholder_content(message, attachments)})
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
         self._store.touch(self.conversation_id)
