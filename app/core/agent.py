@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import mimetypes
 import os
 import platform
 import re
@@ -77,6 +79,87 @@ class Agent(ABC):
         if reasoning:
             d["reasoning_content"] = reasoning
         return d
+
+
+    @staticmethod
+    def _as_list(value) -> list:
+        if value is None:
+            return []
+        if isinstance(value, (str, os.PathLike)):
+            return [value]
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if not isinstance(item, (str, os.PathLike)):
+                    raise TypeError(
+                        f"metadata['files'] entries must be paths, got {type(item).__name__}"
+                    )
+            return list(value)
+        raise TypeError(f"metadata['files'] must be a path or list of paths, got {type(value).__name__}")
+
+    _MAX_COMBINED_ATTACHMENT_BYTES = 5 * 1024 * 1024  # 5 MB combined across all attachments
+
+    @classmethod
+    def _attachment_part(cls, attachment: str) -> dict:
+        path = Path(attachment).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Attachment not found: {path}")
+
+        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        try:
+            raw = path.read_bytes()
+        except PermissionError as e:
+            raise PermissionError(f"Cannot read attachment: {path}") from e
+
+        data_url = f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}"
+
+        if mime_type.startswith("image/"):
+            return {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            }
+
+        return {
+            "type": "file",
+            "file": {
+                "filename": path.name,
+                "file_data": data_url,
+            },
+        }
+
+    @classmethod
+    def _build_user_message(cls, message: str, metadata: dict | None = None) -> dict:
+        metadata = metadata or {}
+        attachments = cls._as_list(metadata.get("files"))
+        if not attachments:
+            return {"role": "user", "content": message}
+
+        # Validate every path and accumulate size before encoding anything,
+        # so a bad path always raises the same clear error regardless of order.
+        total_size = 0
+        for a in attachments:
+            p = Path(a).expanduser()
+            if not p.is_file():
+                raise FileNotFoundError(f"Attachment not found: {p}")
+            try:
+                total_size += p.stat().st_size
+            except PermissionError as e:
+                raise PermissionError(f"Cannot stat attachment: {p}") from e
+        if total_size > cls._MAX_COMBINED_ATTACHMENT_BYTES:
+            raise ValueError(
+                f"Total attachment size {total_size / 1024 / 1024:.1f} MB exceeds "
+                f"{cls._MAX_COMBINED_ATTACHMENT_BYTES / 1024 / 1024:.0f} MB combined limit"
+            )
+
+        content = [{"type": "text", "text": message}]
+        content.extend(cls._attachment_part(str(a)) for a in attachments)
+        return {"role": "user", "content": content}
+
+    @staticmethod
+    def _build_placeholder_content(message: str, attachments: list) -> str:
+        if not attachments:
+            return message
+        placeholders = " ".join(f"[Attachment: {a}]" for a in attachments)
+        return f"{message} {placeholders}"
 
     # --- hooks ---
 
