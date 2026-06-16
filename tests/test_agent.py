@@ -327,3 +327,38 @@ async def test_agent_loop_sends_multiple_metadata_images_to_llm(tmp_path):
     assert len(user_message["content"]) == 3
     assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     assert user_message["content"][2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_metadata_files_to_llm(tmp_path):
+    agent, mock_client = make_agent()
+    file_path = tmp_path / "notes.txt"
+    file_path.write_text("plain text attachment", encoding="utf-8")
+
+    await agent.agent_loop("Summarize this file", metadata={"files": [str(file_path)]})
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][0] == {"type": "text", "text": "Summarize this file"}
+    assert user_message["content"][1]["type"] == "file"
+    assert user_message["content"][1]["file"]["filename"] == "notes.txt"
+    assert user_message["content"][1]["file"]["file_data"].startswith("data:text/plain;base64,")
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_image_files_as_images(tmp_path):
+    agent, mock_client = make_agent()
+    image_path = tmp_path / "diagram.png"
+    file_path = tmp_path / "notes.txt"
+    image_path.write_bytes(b"fake image data")
+    file_path.write_text("plain text attachment", encoding="utf-8")
+
+    await agent.agent_loop(
+        "Use these attachments",
+        metadata={"files": [str(image_path), str(file_path)]},
+    )
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][1]["type"] == "image_url"
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert user_message["content"][2]["type"] == "file"
+    assert user_message["content"][2]["file"]["file_data"].startswith("data:text/plain;base64,")
