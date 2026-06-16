@@ -70,7 +70,7 @@ async def test_agent_loop_sends_system_context_to_llm():
     agent, mock_client = make_agent()
     with patch("app.cli.cli_agent.get_default_sys_prompt", return_value="system prompt"):
         await agent.agent_loop("hello")
-    call_messages = mock_client.chat.completions.create.call_args[1]["messages"]
+    call_messages = mock_client.chat.completions.create.call_args_list[0][1]["messages"]
     assert call_messages[0]["role"] == "system"
     assert call_messages[0]["content"] == "system prompt"
 
@@ -278,3 +278,52 @@ async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
 
     mock_gather.assert_called_once()
     assert len(mock_gather.call_args[0]) == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_metadata_images_to_llm(tmp_path):
+    agent, mock_client = make_agent()
+    image_path = tmp_path / "screenshot.png"
+    image_path.write_bytes(b"fake image data")
+
+    await agent.agent_loop("What is in this image?", metadata={"images": [str(image_path)]})
+
+    call_messages = mock_client.chat.completions.create.call_args_list[0][1]["messages"]
+    user_message = call_messages[1]
+    assert user_message["role"] == "user"
+    assert user_message["content"][0] == {"type": "text", "text": "What is in this image?"}
+    assert user_message["content"][1]["type"] == "image_url"
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert agent.messages[-2] == {"role": "user", "content": "What is in this image?"}
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_accepts_single_metadata_image_path(tmp_path):
+    agent, mock_client = make_agent()
+    image_path = tmp_path / "screenshot.jpg"
+    image_path.write_bytes(b"fake image data")
+
+    await agent.agent_loop("Describe this", metadata={"images": str(image_path)})
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_multiple_metadata_images_to_llm(tmp_path):
+    agent, mock_client = make_agent()
+    png_path = tmp_path / "first.png"
+    jpg_path = tmp_path / "second.jpg"
+    png_path.write_bytes(b"first fake image data")
+    jpg_path.write_bytes(b"second fake image data")
+
+    await agent.agent_loop(
+        "Compare these images",
+        metadata={"images": [str(png_path), str(jpg_path)]},
+    )
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][0] == {"type": "text", "text": "Compare these images"}
+    assert len(user_message["content"]) == 3
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert user_message["content"][2]["image_url"]["url"].startswith("data:image/jpeg;base64,")

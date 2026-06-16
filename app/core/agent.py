@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import mimetypes
 import os
 import platform
 import re
@@ -77,6 +79,30 @@ class Agent(ABC):
         if reasoning:
             d["reasoning_content"] = reasoning
         return d
+
+
+    @staticmethod
+    def _image_part(image: str) -> dict:
+        path = Path(image).expanduser()
+        media_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        data = base64.b64encode(path.read_bytes()).decode("ascii")
+        return {
+            "type": "image_url",
+            "image_url": {"url": f"data:{media_type};base64,{data}"},
+        }
+
+    @classmethod
+    def _build_user_message(cls, message: str, metadata: dict | None = None) -> dict:
+        images = (metadata or {}).get("images") or []
+        if not images:
+            return {"role": "user", "content": message}
+
+        if isinstance(images, (str, os.PathLike)):
+            images = [images]
+
+        content = [{"type": "text", "text": message}]
+        content.extend(cls._image_part(str(image)) for image in images)
+        return {"role": "user", "content": content}
 
     # --- hooks ---
 

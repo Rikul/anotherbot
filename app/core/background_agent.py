@@ -135,7 +135,7 @@ class BackgroundAgent(Agent):
             "conversation_name": conv["name"] if conv else "New Conversation",
         })
         system = [{"role": "system", "content": system_context}] if system_context else []
-        session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
+        session_messages = system + self.messages[:] + [self._build_user_message(message, metadata)]
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
