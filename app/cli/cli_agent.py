@@ -53,9 +53,10 @@ class CliAgent(Agent):
 
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         self._trim_messages()
+        attachments = self._as_list((metadata or {}).get("files"))
+        user_msg = self._build_user_message(message, metadata)
         self.history.add_message("user", message, self.conversation_id)
 
-        attachments = self._as_list((metadata or {}).get("files"))
         conv = self._store.get(self.conversation_id)
         system_context = get_default_sys_prompt({
             "channel": self._channel_str,
@@ -63,7 +64,7 @@ class CliAgent(Agent):
             "conversation_name": conv["name"] if conv else "New Conversation",
         })
         system = [{"role": "system", "content": system_context}] if system_context else []
-        session_messages = system + self.messages[:] + [self._build_user_message(message, metadata)]
+        session_messages = system + self.messages[:] + [user_msg]
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
 

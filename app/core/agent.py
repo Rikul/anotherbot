@@ -83,7 +83,7 @@ class Agent(ABC):
 
     @staticmethod
     def _as_list(value) -> list:
-        if not value:
+        if value is None:
             return []
         if isinstance(value, (str, os.PathLike)):
             return [value]
@@ -133,11 +133,17 @@ class Agent(ABC):
         if not attachments:
             return {"role": "user", "content": message}
 
-        total_size = sum(
-            Path(a).expanduser().stat().st_size
-            for a in attachments
-            if Path(a).expanduser().is_file()
-        )
+        # Validate every path and accumulate size before encoding anything,
+        # so a bad path always raises the same clear error regardless of order.
+        total_size = 0
+        for a in attachments:
+            p = Path(a).expanduser()
+            if not p.is_file():
+                raise FileNotFoundError(f"Attachment not found: {p}")
+            try:
+                total_size += p.stat().st_size
+            except PermissionError as e:
+                raise PermissionError(f"Cannot stat attachment: {p}") from e
         if total_size > cls._MAX_COMBINED_ATTACHMENT_BYTES:
             raise ValueError(
                 f"Total attachment size {total_size / 1024 / 1024:.1f} MB exceeds "

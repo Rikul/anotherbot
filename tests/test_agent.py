@@ -376,6 +376,12 @@ def test_as_list_rejects_non_path_entries():
     assert Agent._as_list(None) == []
 
 
+def test_as_list_does_not_silently_drop_empty_string():
+    # Only None means "no attachments"; an empty string path must surface
+    # as a loud failure downstream rather than being dropped.
+    assert Agent._as_list("") == [""]
+
+
 def test_build_user_message_rejects_combined_oversized(tmp_path, monkeypatch):
     f1 = tmp_path / "a.txt"
     f2 = tmp_path / "b.txt"
@@ -386,7 +392,30 @@ def test_build_user_message_rejects_combined_oversized(tmp_path, monkeypatch):
         Agent._build_user_message("hi", {"files": [str(f1), str(f2)]})
 
 
+def test_build_user_message_does_not_skip_size_check_for_missing_file(tmp_path, monkeypatch):
+    ok = tmp_path / "ok.txt"
+    ok.write_bytes(b"x" * 60)
+    missing = tmp_path / "missing.txt"
+    monkeypatch.setattr(Agent, "_MAX_COMBINED_ATTACHMENT_BYTES", 100)
+    # A missing path must raise FileNotFoundError, not be silently skipped
+    # from the size accounting and fail later with a different error.
+    with pytest.raises(FileNotFoundError):
+        Agent._build_user_message("hi", {"files": [str(ok), str(missing)]})
+
+
 def test_build_placeholder_content():
     assert Agent._build_placeholder_content("hello", []) == "hello"
     assert Agent._build_placeholder_content("look", ["/tmp/a.png"]) == "look [Attachment: /tmp/a.png]"
     assert Agent._build_placeholder_content("check", ["/a.pdf", "/b.png"]) == "check [Attachment: /a.pdf] [Attachment: /b.png]"
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_persist_history_when_attachment_invalid(tmp_path):
+    agent, mock_client = make_agent()
+    missing = tmp_path / "missing.png"
+
+    with pytest.raises(FileNotFoundError):
+        await agent.agent_loop("look at this", metadata={"files": [str(missing)]})
+
+    agent.history.add_message.assert_not_called()
+    assert agent.messages == []
