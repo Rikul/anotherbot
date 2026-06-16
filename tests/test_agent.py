@@ -294,7 +294,10 @@ async def test_agent_loop_sends_image_file_to_llm(tmp_path):
     assert user_message["content"][0] == {"type": "text", "text": "What is in this image?"}
     assert user_message["content"][1]["type"] == "image_url"
     assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
-    assert agent.messages[-2] == {"role": "user", "content": "What is in this image?"}
+    stored_user_msg = agent.messages[-2]
+    assert stored_user_msg["role"] == "user"
+    assert stored_user_msg["content"][0] == {"type": "text", "text": "What is in this image?"}
+    assert stored_user_msg["content"][1]["type"] == "image_url"
 
 
 @pytest.mark.asyncio

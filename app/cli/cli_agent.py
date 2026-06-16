@@ -70,7 +70,7 @@ class CliAgent(Agent):
             from ..infra.tracer import write_trace
             write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
 
-        self.messages.append({"role": "user", "content": message})
+        self.messages.append(self._build_user_message(message, metadata))
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
         self._store.touch(self.conversation_id)

@@ -87,15 +87,24 @@ class Agent(ABC):
             return []
         if isinstance(value, (str, os.PathLike)):
             return [value]
-        if isinstance(value, (list, tuple, set)):
+        if isinstance(value, (list, tuple)):
             return list(value)
-        return [value]
+        raise TypeError(f"metadata['files'] must be a path or list of paths, got {type(value).__name__}")
+
+    _MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20 MB
 
     @staticmethod
     def _attachment_part(attachment: str) -> dict:
         path = Path(attachment).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"Attachment not found: {path}")
+
+        size = path.stat().st_size
+        if size > Agent._MAX_ATTACHMENT_BYTES:
+            raise ValueError(
+                f"Attachment too large ({size / 1024 / 1024:.1f} MB > "
+                f"{Agent._MAX_ATTACHMENT_BYTES / 1024 / 1024:.0f} MB limit): {path}"
+            )
 
         mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
         try:
