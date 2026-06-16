@@ -88,22 +88,27 @@ class Agent(ABC):
         if isinstance(value, (str, os.PathLike)):
             return [value]
         if isinstance(value, (list, tuple)):
+            for item in value:
+                if not isinstance(item, (str, os.PathLike)):
+                    raise TypeError(
+                        f"metadata['files'] entries must be paths, got {type(item).__name__}"
+                    )
             return list(value)
         raise TypeError(f"metadata['files'] must be a path or list of paths, got {type(value).__name__}")
 
     _MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20 MB
 
-    @staticmethod
-    def _attachment_part(attachment: str) -> dict:
+    @classmethod
+    def _attachment_part(cls, attachment: str) -> dict:
         path = Path(attachment).expanduser()
         if not path.is_file():
             raise FileNotFoundError(f"Attachment not found: {path}")
 
         size = path.stat().st_size
-        if size > Agent._MAX_ATTACHMENT_BYTES:
+        if size > cls._MAX_ATTACHMENT_BYTES:
             raise ValueError(
                 f"Attachment too large ({size / 1024 / 1024:.1f} MB > "
-                f"{Agent._MAX_ATTACHMENT_BYTES / 1024 / 1024:.0f} MB limit): {path}"
+                f"{cls._MAX_ATTACHMENT_BYTES / 1024 / 1024:.0f} MB limit): {path}"
             )
 
         mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
@@ -139,6 +144,47 @@ class Agent(ABC):
         content.extend(cls._attachment_part(str(attachment)) for attachment in attachments)
         return {"role": "user", "content": content}
 
+    @staticmethod
+    def _content_to_text(content) -> str:
+        """Flatten message content (str or structured parts) to plain text,
+        dropping attachment parts. Used for naming/logging."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                part["text"] for part in content
+                if isinstance(part, dict) and part.get("type") == "text" and part.get("text")
+            )
+        return str(content)
+
+    @staticmethod
+    def _redact_attachments(messages: list[dict]) -> list[dict]:
+        """Return a copy of messages with attachment data URLs replaced by
+        short placeholders, so traces stay small and don't persist file data."""
+        redacted = []
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                redacted.append(msg)
+                continue
+            parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    parts.append({"type": "image_url", "image_url": {"url": "<image data redacted>"}})
+                elif isinstance(part, dict) and part.get("type") == "file":
+                    file_info = part.get("file", {})
+                    parts.append({
+                        "type": "file",
+                        "file": {
+                            "filename": file_info.get("filename", ""),
+                            "file_data": "<file data redacted>",
+                        },
+                    })
+                else:
+                    parts.append(part)
+            redacted.append({**msg, "content": parts})
+        return redacted
+
     # --- hooks ---
 
     async def _on_thinking(self, content: str | None) -> None:
@@ -165,7 +211,7 @@ class Agent(ABC):
     async def _auto_name(self, store, conv_id: int, messages: list[dict], name_runtime_key: str) -> None:
         from .helper_agent import HelperAgent  # lazy — helper_agent imports Agent
         transcript = "\n".join(
-            f"{m['role']}: {m['content'][:200]}" for m in messages[:4]
+            f"{m['role']}: {self._content_to_text(m['content'])[:200]}" for m in messages[:4]
         )
         prompt = (
             "Summarize this conversation in 4-6 words as a title. "

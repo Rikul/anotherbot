@@ -68,7 +68,7 @@ class CliAgent(Agent):
 
         if runtime.get("trace"):
             from ..infra.tracer import write_trace
-            write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
+            write_trace(self._redact_attachments(session_messages), runtime.get("tracedir"), runtime.get("model", "unknown"))
 
         self.messages.append(self._build_user_message(message, metadata))
         self.messages.append({"role": "assistant", "content": final_content})

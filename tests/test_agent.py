@@ -365,3 +365,49 @@ async def test_agent_loop_sends_image_files_as_images(tmp_path):
     assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     assert user_message["content"][2]["type"] == "file"
     assert user_message["content"][2]["file"]["file_data"].startswith("data:application/pdf;base64,")
+
+
+def test_as_list_rejects_non_path_entries():
+    with pytest.raises(TypeError):
+        Agent._as_list([123])
+    with pytest.raises(TypeError):
+        Agent._as_list(123)
+    assert Agent._as_list(["a", "b"]) == ["a", "b"]
+    assert Agent._as_list("a") == ["a"]
+    assert Agent._as_list(None) == []
+
+
+def test_attachment_part_rejects_oversized_file(tmp_path, monkeypatch):
+    big = tmp_path / "big.bin"
+    big.write_bytes(b"x" * 100)
+    monkeypatch.setattr(Agent, "_MAX_ATTACHMENT_BYTES", 10)
+    with pytest.raises(ValueError, match="too large"):
+        Agent._attachment_part(str(big))
+
+
+def test_content_to_text_drops_attachment_parts():
+    content = [
+        {"type": "text", "text": "describe this"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]
+    assert Agent._content_to_text(content) == "describe this"
+    assert Agent._content_to_text("plain") == "plain"
+
+
+def test_redact_attachments_strips_data_urls():
+    messages = [
+        {"role": "user", "content": [
+            {"type": "text", "text": "look"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            {"type": "file", "file": {"filename": "n.txt", "file_data": "data:text/plain;base64,BBBB"}},
+        ]},
+        {"role": "assistant", "content": "ok"},
+    ]
+    redacted = Agent._redact_attachments(messages)
+    assert redacted[0]["content"][1]["image_url"]["url"] == "<image data redacted>"
+    assert redacted[0]["content"][2]["file"]["file_data"] == "<file data redacted>"
+    assert redacted[0]["content"][2]["file"]["filename"] == "n.txt"
+    assert redacted[0]["content"][0] == {"type": "text", "text": "look"}
+    assert redacted[1] == {"role": "assistant", "content": "ok"}
+    # original messages are left untouched
+    assert messages[0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
