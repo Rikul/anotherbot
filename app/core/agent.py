@@ -87,13 +87,23 @@ class Agent(ABC):
             return []
         if isinstance(value, (str, os.PathLike)):
             return [value]
-        return list(value)
+        if isinstance(value, (list, tuple, set)):
+            return list(value)
+        return [value]
 
     @staticmethod
     def _attachment_part(attachment: str) -> dict:
         path = Path(attachment).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Attachment not found: {path}")
+
         mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-        data_url = f"data:{mime_type};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+        try:
+            raw = path.read_bytes()
+        except PermissionError as e:
+            raise PermissionError(f"Cannot read attachment: {path}") from e
+
+        data_url = f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}"
 
         if mime_type.startswith("image/"):
             return {
