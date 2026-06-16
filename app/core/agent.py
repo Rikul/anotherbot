@@ -72,10 +72,10 @@ class Agent(ABC):
         d = {"role": msg.role, "content": msg.content}
         if msg.tool_calls:
             d["tool_calls"] = [tc.model_dump() for tc in msg.tool_calls]
-            raw = msg.model_dump()
-            reasoning = raw.get("reasoning_content") or raw.get("reasoning")
-            if reasoning:
-                d["reasoning_content"] = reasoning
+        raw = msg.model_dump()
+        reasoning = raw.get("reasoning_content") or raw.get("reasoning")
+        if reasoning:
+            d["reasoning_content"] = reasoning
         return d
 
     # --- hooks ---
@@ -127,7 +127,7 @@ class Agent(ABC):
         from .tool_calls import run_tool_async  # lazy — tool_calls imports scheduled_tasks which imports Agent
         tool_name = tool_call.function.name
         try:
-            tool_args = json.loads(tool_call.function.arguments or "{}")
+            tool_args = json.loads((tool_call.function.arguments or "").strip() or "{}")
             if not await self._check_permission(tool_name, tool_args):
                 return "User denied permission to run this tool. Ask for permission to run the tool again if you want to try running it."
             await self._on_tool_start(tool_name, tool_args)
@@ -172,10 +172,11 @@ class Agent(ABC):
                     messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": result})
                     log.info(f"{result[:250]}...")
             else:
+                messages.append(self._serialize_assistant_msg(assistant_message))
                 await self._on_response(assistant_message.content)
-                if finish_reason in ("stop", "length"):
-                    messages.append(self._serialize_assistant_msg(assistant_message))
-                    break
+                if finish_reason not in ("stop", "length") and finish_reason is not None:
+                    log.warning(f"Unexpected finish_reason={finish_reason!r}, treating as terminal")
+                break
 
             if self._should_stop():
                 break
