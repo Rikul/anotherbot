@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import mimetypes
 import os
 import platform
 import re
@@ -77,6 +79,46 @@ class Agent(ABC):
         if reasoning:
             d["reasoning_content"] = reasoning
         return d
+
+
+    @staticmethod
+    def _as_list(value) -> list:
+        if not value:
+            return []
+        if isinstance(value, (str, os.PathLike)):
+            return [value]
+        return list(value)
+
+    @staticmethod
+    def _attachment_part(attachment: str) -> dict:
+        path = Path(attachment).expanduser()
+        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        data_url = f"data:{mime_type};base64,{base64.b64encode(path.read_bytes()).decode('ascii')}"
+
+        if mime_type.startswith("image/"):
+            return {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            }
+
+        return {
+            "type": "file",
+            "file": {
+                "filename": path.name,
+                "file_data": data_url,
+            },
+        }
+
+    @classmethod
+    def _build_user_message(cls, message: str, metadata: dict | None = None) -> dict:
+        metadata = metadata or {}
+        attachments = cls._as_list(metadata.get("files"))
+        if not attachments:
+            return {"role": "user", "content": message}
+
+        content = [{"type": "text", "text": message}]
+        content.extend(cls._attachment_part(str(attachment)) for attachment in attachments)
+        return {"role": "user", "content": content}
 
     # --- hooks ---
 
