@@ -38,6 +38,10 @@ log = logging.getLogger(__name__)
 # FastHTML page builder                                                        #
 # --------------------------------------------------------------------------- #
 
+# Bump when web_channel.css / web_channel.js change, so browsers (Edge caches
+# static assets aggressively) fetch the new copy instead of a stale one.
+_ASSET_VERSION = "3"
+
 # Paperclip icon for the attach button (inline so it inherits theme colors).
 _PAPERCLIP_SVG = (
     '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" '
@@ -57,7 +61,7 @@ def _build_page() -> Html:
             Link(rel="preconnect", href="https://fonts.googleapis.com"),
             Link(rel="stylesheet",
                  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"),
-            Link(rel="stylesheet", href="/static/web_channel.css"),
+            Link(rel="stylesheet", href=f"/static/web_channel.css?v={_ASSET_VERSION}"),
         ),
         Body(
             Div(
@@ -118,14 +122,21 @@ def _build_page() -> Html:
                             # click) opens it — native label activation works
                             # consistently across browsers (Edge included),
                             # whereas calling input.click() on a display:none
-                            # input is unreliable in Edge. The input is visually
-                            # hidden (not display:none) so its `change` event
-                            # still fires reliably when opened via the label.
+                            # input is unreliable in Edge. Hide it with an inline
+                            # visually-hidden style (not display:none, and not an
+                            # external CSS class): display:none suppresses the
+                            # `change` event in Edge, and an inline style can't be
+                            # defeated by a stale cached stylesheet.
                             Input(
                                 type="file",
                                 id="file-input",
                                 multiple=True,
                                 cls="visually-hidden",
+                                style=(
+                                    "position:absolute;width:1px;height:1px;"
+                                    "padding:0;margin:-1px;overflow:hidden;"
+                                    "clip:rect(0,0,0,0);white-space:nowrap;border:0"
+                                ),
                             ),
                             Label(
                                 NotStr(_PAPERCLIP_SVG),
@@ -148,7 +159,7 @@ def _build_page() -> Html:
                 ),
                 id="app",
             ),
-            Script(src="/static/web_channel.js"),
+            Script(src=f"/static/web_channel.js?v={_ASSET_VERSION}"),
         ),
         lang="en",
     )
