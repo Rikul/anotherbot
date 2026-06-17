@@ -286,7 +286,7 @@
     async function send() {
         const text = inputEl.value.trim();
         const files = selectedFiles.slice();
-        if ((!text && !files.length) || !ws || ws.readyState !== WebSocket.OPEN) return;
+        if (sendBtn.disabled) return;
 
         let uploaded = [];
         if (files.length) {

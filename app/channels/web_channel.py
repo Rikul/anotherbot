@@ -289,19 +289,29 @@ class WebChannel(Channel):
             total = 0
             try:
                 for uf in uploads:
-                    data = await uf.read()
-                    total += len(data)
-                    if total > self._MAX_UPLOAD_BYTES:
+                    name = Path(uf.filename).name
+                    stored = f"{uuid.uuid4().hex}_{name}"
+                    out_path = self._upload_dir / stored
+                    too_large = False
+                    with out_path.open("wb") as out:
+                        while True:
+                            chunk = await uf.read(64 * 1024)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > self._MAX_UPLOAD_BYTES:
+                                too_large = True
+                                break
+                            out.write(chunk)
+                    if too_large:
+                        out_path.unlink(missing_ok=True)
                         for s in saved:
                             (self._upload_dir / s["path"]).unlink(missing_ok=True)
-                        limit_mb = self._MAX_UPLOAD_BYTES // (1024 * 1024)
+                        limit_mb = max(1, self._MAX_UPLOAD_BYTES // (1024 * 1024))
                         return JSONResponse(
                             {"error": f"Upload exceeds {limit_mb} MB limit"},
                             status_code=413,
                         )
-                    name = Path(uf.filename).name
-                    stored = f"{uuid.uuid4().hex}_{name}"
-                    (self._upload_dir / stored).write_bytes(data)
                     saved.append({"path": stored, "name": name})
             finally:
                 for uf in uploads:
@@ -433,17 +443,21 @@ class WebChannel(Channel):
         ``/api/upload``; each is resolved against the upload dir and dropped
         if it escapes that dir or no longer exists.
         """
-        content = self._extract_content(raw)
-        files: list[str] = []
         stripped = raw.strip()
-        if stripped:
-            try:
-                data = json.loads(stripped)
-            except (json.JSONDecodeError, TypeError):
-                data = None
-            if isinstance(data, dict) and data.get("type") == "message":
-                files = self._resolve_upload_paths(data.get("files"))
-        return content, files
+        if not stripped:
+            return None, []
+
+        try:
+            data = json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            return stripped, []
+
+        if isinstance(data, dict) and data.get("type") == "message":
+            content = str(data.get("content") or "").strip() or None
+            files = self._resolve_upload_paths(data.get("files"))
+            return content, files
+
+        return stripped, []
 
     def _resolve_upload_paths(self, names: object) -> list[str]:
         """Map client-supplied upload basenames to validated absolute paths.
