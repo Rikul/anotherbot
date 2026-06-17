@@ -21,7 +21,7 @@ import uuid
 import uvicorn
 from pathlib import Path
 from fasthtml.common import (
-    Button, Div, Head, Html, Input, Link, Meta, NotStr, Script, Span,
+    Button, Div, Head, Html, Input, Label, Link, Meta, NotStr, Script, Span,
     Textarea, Title, Body, H1, P, fast_app,
 )
 from starlette.routing import WebSocketRoute
@@ -114,18 +114,22 @@ def _build_page() -> Html:
                         Div(id="attachments"),
                         # Input area
                         Div(
-                            # Hidden native file picker — triggered by the attach button
+                            # Hidden native file picker. A <label for> (not a JS
+                            # click) opens it — native label activation works
+                            # consistently across browsers (Edge included),
+                            # whereas calling input.click() on a display:none
+                            # input is unreliable in Edge.
                             Input(
                                 type="file",
                                 id="file-input",
                                 multiple=True,
                                 style="display:none",
                             ),
-                            Button(
+                            Label(
                                 NotStr(_PAPERCLIP_SVG),
                                 id="attach-btn",
                                 title="Attach files",
-                                type="button",
+                                **{"for": "file-input"},
                             ),
                             Textarea(
                                 id="msg-input",

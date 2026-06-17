@@ -319,7 +319,7 @@ body {
 #send-btn:active  { transform: scale(.97); }
 #send-btn:disabled { background: var(--border); cursor: not-allowed; }
 
-/* ---- attach button ---- */
+/* ---- attach button (a <label for="file-input">) ---- */
 #attach-btn {
     background: var(--surface2);
     border: 1px solid var(--border);
@@ -329,14 +329,20 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
     height: 42px;
     width: 42px;
+    padding: 0;
+    margin: 0;
+    line-height: 0;          /* kill inline baseline gap (Edge alignment) */
     flex-shrink: 0;
+    user-select: none;
+    -webkit-user-select: none;
     transition: border-color .15s, color .15s, background .15s;
 }
 #attach-btn:hover { border-color: var(--accent); color: var(--accent); }
 #attach-btn:active { transform: scale(.97); }
-#attach-btn svg { display: block; }
+#attach-btn svg { display: block; width: 20px; height: 20px; }
 
 /* ---- attachment chips ---- */
 #attachments {

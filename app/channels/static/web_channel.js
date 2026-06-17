@@ -18,7 +18,6 @@
     const toggleBtn   = document.getElementById('sidebar-toggle');
     const convListEl  = document.getElementById('conv-list');
     const newConvBtn  = document.getElementById('new-conv-btn');
-    const attachBtn   = document.getElementById('attach-btn');
     const fileInput   = document.getElementById('file-input');
     const attachEl    = document.getElementById('attachments');
 
@@ -258,7 +257,8 @@
         sendBtn.disabled = !connected || !hasInput;
     }
 
-    attachBtn.addEventListener('click', () => fileInput.click());
+    // The attach control is a <label for="file-input">, so clicking it opens
+    // the picker natively — no JS click needed (and avoids a double-open).
     fileInput.addEventListener('change', () => {
         for (const file of fileInput.files) selectedFiles.push(file);
         fileInput.value = '';   // allow re-selecting the same file later
