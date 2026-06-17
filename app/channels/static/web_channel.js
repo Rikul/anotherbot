@@ -300,11 +300,17 @@
             }
         }
 
-        appendMessage(renderUserContent(text, files), 'user');
         const payload = { type: 'message', content: text };
         if (uploaded.length) payload.files = uploaded.map(f => f.path);
-        ws.send(JSON.stringify(payload));
+        try {
+            ws.send(JSON.stringify(payload));
+        } catch (err) {
+            appendMessage('Send failed: disconnected (please retry).', 'system');
+            refreshSendState();
+            return;
+        }
 
+        appendMessage(renderUserContent(text, files), 'user');
         selectedFiles = [];
         renderAttachments();
         inputEl.value = '';

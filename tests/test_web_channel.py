@@ -198,7 +198,7 @@ def test_build_page_has_attach_controls():
         assert tok in html, f"Missing {tok}"
 
 
-def test_start_registers_upload_route(tmp_path):
+def test_start_registers_upload_route():
     ch, _ = make_web_channel()
     ch.start()
     paths = [getattr(r, "path", None) for r in ch._fasthtml_app.router.routes]
