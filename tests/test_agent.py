@@ -297,6 +297,9 @@ async def test_agent_loop_sends_image_file_to_llm(tmp_path):
     stored_user_msg = agent.messages[-2]
     assert stored_user_msg["role"] == "user"
     assert stored_user_msg["content"] == f"What is in this image? [Attachment: {image_path}]"
+    agent.history.add_message.assert_any_call(
+        "user", f"What is in this image? [Attachment: {image_path}]", agent.conversation_id
+    )
 
 
 @pytest.mark.asyncio

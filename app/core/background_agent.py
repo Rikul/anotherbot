@@ -128,7 +128,8 @@ class BackgroundAgent(Agent):
         self._reply_metadata = metadata or {}
         attachments = self._as_list((metadata or {}).get("files"))
         user_msg = self._build_user_message(message, metadata)
-        self.history.add_message("user", message, self.conversation_id)
+        placeholder_content = self._build_placeholder_content(message, attachments)
+        self.history.add_message("user", placeholder_content, self.conversation_id)
 
         conv = self._store.get(self.conversation_id)
         system_context = get_default_sys_prompt({
@@ -149,7 +150,7 @@ class BackgroundAgent(Agent):
 
         self.channel.clear_stopped()
 
-        self.messages.append({"role": "user", "content": self._build_placeholder_content(message, attachments)})
+        self.messages.append({"role": "user", "content": placeholder_content})
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
         self._store.touch(self.conversation_id)
