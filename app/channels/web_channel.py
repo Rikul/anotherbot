@@ -118,12 +118,14 @@ def _build_page() -> Html:
                             # click) opens it — native label activation works
                             # consistently across browsers (Edge included),
                             # whereas calling input.click() on a display:none
-                            # input is unreliable in Edge.
+                            # input is unreliable in Edge. The input is visually
+                            # hidden (not display:none) so its `change` event
+                            # still fires reliably when opened via the label.
                             Input(
                                 type="file",
                                 id="file-input",
                                 multiple=True,
-                                style="display:none",
+                                cls="visually-hidden",
                             ),
                             Label(
                                 NotStr(_PAPERCLIP_SVG),

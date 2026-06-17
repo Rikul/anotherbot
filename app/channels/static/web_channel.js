@@ -259,8 +259,11 @@
 
     // The attach control is a <label for="file-input">, so clicking it opens
     // the picker natively — no JS click needed (and avoids a double-open).
+    // Copy the FileList into a real array before clearing .value: Edge can
+    // invalidate the live FileList once .value is reset mid-handler.
     fileInput.addEventListener('change', () => {
-        for (const file of fileInput.files) selectedFiles.push(file);
+        const picked = Array.from(fileInput.files || []);
+        for (const file of picked) selectedFiles.push(file);
         fileInput.value = '';   // allow re-selecting the same file later
         renderAttachments();
         refreshSendState();

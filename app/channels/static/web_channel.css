@@ -319,6 +319,20 @@ body {
 #send-btn:active  { transform: scale(.97); }
 #send-btn:disabled { background: var(--border); cursor: not-allowed; }
 
+/* Hide the file input without display:none — keeps it in the layout/event
+   tree so its `change` event fires reliably (Edge) when opened via the label. */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* ---- attach button (a <label for="file-input">) ---- */
 #attach-btn {
     background: var(--surface2);
