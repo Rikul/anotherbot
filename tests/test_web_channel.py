@@ -93,6 +93,118 @@ def test_extract_json_empty_content_returns_none():
     assert WebChannel._extract_content(raw) is None
 
 
+# --- _extract_message: text + attachments ---
+
+def test_extract_message_plain_text_no_files():
+    ch, _ = make_web_channel()
+    content, files = ch._extract_message("hello")
+    assert content == "hello"
+    assert files == []
+
+
+def test_extract_message_ignores_non_list_files():
+    ch, _ = make_web_channel()
+    raw = json.dumps({"type": "message", "content": "hi", "files": "nope"})
+    content, files = ch._extract_message(raw)
+    assert content == "hi"
+    assert files == []
+
+
+# --- _resolve_upload_paths: traversal protection ---
+
+def test_resolve_upload_paths_rejects_traversal(tmp_path):
+    ch, _ = make_web_channel()
+    ch._upload_dir = tmp_path
+    (tmp_path / "ok.txt").write_text("x")
+    # basename-only join means traversal segments are stripped → file not found
+    assert ch._resolve_upload_paths(["../secret", "/etc/passwd"]) == []
+
+
+def test_resolve_upload_paths_accepts_known_file(tmp_path):
+    ch, _ = make_web_channel()
+    ch._upload_dir = tmp_path
+    (tmp_path / "good.txt").write_text("x")
+    resolved = ch._resolve_upload_paths(["good.txt"])
+    assert resolved == [str((tmp_path / "good.txt").resolve())]
+
+
+def test_resolve_upload_paths_skips_missing(tmp_path):
+    ch, _ = make_web_channel()
+    ch._upload_dir = tmp_path
+    assert ch._resolve_upload_paths(["ghost.txt"]) == []
+
+
+def test_resolve_upload_paths_ignores_non_strings(tmp_path):
+    ch, _ = make_web_channel()
+    ch._upload_dir = tmp_path
+    assert ch._resolve_upload_paths([1, None, ""]) == []
+
+
+# --- /api/upload endpoint ---
+
+def test_upload_saves_files_and_returns_names(tmp_path):
+    ch, _ = make_web_channel()
+    ch._upload_dir = tmp_path / "uploads"
+    ch.start()
+
+    from starlette.testclient import TestClient
+    client = TestClient(ch._fasthtml_app, raise_server_exceptions=True)
+    resp = client.post(
+        "/api/upload",
+        files=[
+            ("files", ("a.txt", b"hello", "text/plain")),
+            ("files", ("b.png", b"\x89PNG", "image/png")),
+        ],
+    )
+    assert resp.status_code == 200
+    saved = resp.json()["files"]
+    assert [s["name"] for s in saved] == ["a.txt", "b.png"]
+    # files were actually written and resolvable
+    resolved = ch._resolve_upload_paths([s["path"] for s in saved])
+    assert len(resolved) == 2
+
+
+def test_upload_rejects_empty_request(tmp_path):
+    ch, _ = make_web_channel()
+    ch._upload_dir = tmp_path / "uploads"
+    ch.start()
+
+    from starlette.testclient import TestClient
+    client = TestClient(ch._fasthtml_app, raise_server_exceptions=True)
+    resp = client.post("/api/upload")
+    assert resp.status_code == 400
+
+
+def test_upload_rejects_oversized(tmp_path):
+    ch, _ = make_web_channel()
+    ch._upload_dir = tmp_path / "uploads"
+    ch._MAX_UPLOAD_BYTES = 10
+    ch.start()
+
+    from starlette.testclient import TestClient
+    client = TestClient(ch._fasthtml_app, raise_server_exceptions=True)
+    resp = client.post(
+        "/api/upload",
+        files=[("files", ("big.bin", b"x" * 50, "application/octet-stream"))],
+    )
+    assert resp.status_code == 413
+
+
+# --- _build_page: attachment UI ---
+
+def test_build_page_has_attach_controls():
+    html = str(_build_page())
+    for tok in ('id="attach-btn"', 'id="file-input"', 'id="attachments"', "<svg"):
+        assert tok in html, f"Missing {tok}"
+
+
+def test_start_registers_upload_route(tmp_path):
+    ch, _ = make_web_channel()
+    ch.start()
+    paths = [getattr(r, "path", None) for r in ch._fasthtml_app.router.routes]
+    assert "/api/upload" in paths
+
+
 # --- _build_page: static file references ---
 
 def test_build_page_references_static_css():

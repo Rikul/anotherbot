@@ -318,3 +318,62 @@ body {
 #send-btn:hover   { background: var(--accent-h); }
 #send-btn:active  { transform: scale(.97); }
 #send-btn:disabled { background: var(--border); cursor: not-allowed; }
+
+/* ---- attach button ---- */
+#attach-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 42px;
+    width: 42px;
+    flex-shrink: 0;
+    transition: border-color .15s, color .15s, background .15s;
+}
+#attach-btn:hover { border-color: var(--accent); color: var(--accent); }
+#attach-btn:active { transform: scale(.97); }
+#attach-btn svg { display: block; }
+
+/* ---- attachment chips ---- */
+#attachments {
+    display: none;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 20px 0;
+    background: var(--surface);
+    flex-shrink: 0;
+}
+#attachments.has-files { display: flex; }
+
+.attach-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 240px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 5px 8px 5px 10px;
+    font-size: 0.8rem;
+}
+.attach-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+}
+.attach-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 2px;
+    transition: color .12s;
+}
+.attach-remove:hover { color: #ef4444; }
