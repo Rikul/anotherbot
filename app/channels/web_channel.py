@@ -21,7 +21,7 @@ import uuid
 import uvicorn
 from pathlib import Path
 from fasthtml.common import (
-    Button, Div, Head, Html, Link, Meta, Script, Span,
+    Button, Div, Head, Html, Input, Label, Link, Meta, NotStr, Script, Span,
     Textarea, Title, Body, H1, P, fast_app,
 )
 from starlette.routing import WebSocketRoute
@@ -38,6 +38,20 @@ log = logging.getLogger(__name__)
 # FastHTML page builder                                                        #
 # --------------------------------------------------------------------------- #
 
+# Bump when web_channel.css / web_channel.js change, so browsers (Edge caches
+# static assets aggressively) fetch the new copy instead of a stale one.
+_ASSET_VERSION = "3"
+
+# Paperclip icon for the attach button (inline so it inherits theme colors).
+_PAPERCLIP_SVG = (
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" '
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+    'stroke-linejoin="round" aria-hidden="true">'
+    '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 '
+    '5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>'
+)
+
+
 def _build_page() -> Html:
     return Html(
         Head(
@@ -47,7 +61,7 @@ def _build_page() -> Html:
             Link(rel="preconnect", href="https://fonts.googleapis.com"),
             Link(rel="stylesheet",
                  href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"),
-            Link(rel="stylesheet", href="/static/web_channel.css"),
+            Link(rel="stylesheet", href=f"/static/web_channel.css?v={_ASSET_VERSION}"),
         ),
         Body(
             Div(
@@ -100,8 +114,36 @@ def _build_page() -> Html:
                             Div(Div(Span(), Span(), Span(), cls="dots"), cls="thinking-bubble"),
                             id="thinking",
                         ),
+                        # Selected-attachment preview chips (populated by JS)
+                        Div(id="attachments"),
                         # Input area
                         Div(
+                            # Hidden native file picker. A <label for> (not a JS
+                            # click) opens it — native label activation works
+                            # consistently across browsers (Edge included),
+                            # whereas calling input.click() on a display:none
+                            # input is unreliable in Edge. Hide it with an inline
+                            # visually-hidden style (not display:none, and not an
+                            # external CSS class): display:none suppresses the
+                            # `change` event in Edge, and an inline style can't be
+                            # defeated by a stale cached stylesheet.
+                            Input(
+                                type="file",
+                                id="file-input",
+                                multiple=True,
+                                cls="visually-hidden",
+                                style=(
+                                    "position:absolute;width:1px;height:1px;"
+                                    "padding:0;margin:-1px;overflow:hidden;"
+                                    "clip:rect(0,0,0,0);white-space:nowrap;border:0"
+                                ),
+                            ),
+                            Label(
+                                NotStr(_PAPERCLIP_SVG),
+                                id="attach-btn",
+                                title="Attach files",
+                                **{"for": "file-input"},
+                            ),
                             Textarea(
                                 id="msg-input",
                                 placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
@@ -117,7 +159,7 @@ def _build_page() -> Html:
                 ),
                 id="app",
             ),
-            Script(src="/static/web_channel.js"),
+            Script(src=f"/static/web_channel.js?v={_ASSET_VERSION}"),
         ),
         lang="en",
     )
@@ -148,7 +190,13 @@ class WebChannel(Channel):
         self._connections: dict[str, WebSocket] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
         self._conn_lock = asyncio.Lock()
+        from .. import config as _cfg
+        self._upload_dir = _cfg.PROJECT_HOME / "uploads"
         mq.register(self, self.send_message)
+
+    # Cap on a single multipart upload request (combined across files). The
+    # agent enforces its own per-message limit when building the LLM payload.
+    _MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
 
     # -- Channel ABC --------------------------------------------------------
 
@@ -221,6 +269,58 @@ class WebChannel(Channel):
             model = _rt.get("model", _cfg.get("model", "AI"))
             return JSONResponse({"model": model})
 
+        @rt("/api/upload", methods=["POST"])
+        async def upload_api(req):
+            """Accept one or more multipart files and store them on disk.
+
+            Returns the server-side basenames the browser then references in
+            its WebSocket ``message`` frame via the ``files`` field.  Files are
+            written under ``$ANOTHERBOT_HOME/uploads`` with a UUID prefix so
+            concurrent clients never collide.
+            """
+            from starlette.responses import JSONResponse, Response
+            form = await req.form()
+            uploads = [f for f in form.getlist("files") if getattr(f, "filename", None)]
+            if not uploads:
+                return Response("No files provided", status_code=400)
+
+            self._upload_dir.mkdir(parents=True, exist_ok=True)
+            saved: list[dict] = []
+            total = 0
+            try:
+                for uf in uploads:
+                    name = Path(uf.filename).name
+                    stored = f"{uuid.uuid4().hex}_{name}"
+                    out_path = self._upload_dir / stored
+                    too_large = False
+                    with out_path.open("wb") as out:
+                        while True:
+                            chunk = await uf.read(64 * 1024)
+                            if not chunk:
+                                break
+                            total += len(chunk)
+                            if total > self._MAX_UPLOAD_BYTES:
+                                too_large = True
+                                break
+                            out.write(chunk)
+                    if too_large:
+                        out_path.unlink(missing_ok=True)
+                        for s in saved:
+                            (self._upload_dir / s["path"]).unlink(missing_ok=True)
+                        limit_mb = max(1, self._MAX_UPLOAD_BYTES // (1024 * 1024))
+                        return JSONResponse(
+                            {"error": f"Upload exceeds {limit_mb} MB limit"},
+                            status_code=413,
+                        )
+                    saved.append({"path": stored, "name": name})
+            finally:
+                for uf in uploads:
+                    close = getattr(uf, "close", None)
+                    if close:
+                        await close()
+
+            return JSONResponse({"files": saved})
+
         # Starlette WebSocket route (low-level, for multi-client management)
         async def _ws_endpoint(ws: WebSocket) -> None:
             await ws.accept()
@@ -237,15 +337,14 @@ class WebChannel(Channel):
                     if len(raw) > 65_536:
                         await ws.close(code=1009, reason="Message too large")
                         return
-                    content = self._extract_content(raw)
-                    if not content:
+                    content, files = self._extract_message(raw)
+                    if not content and not files:
                         continue
 
-                    if content.startswith("/"):
+                    is_command = bool(content and content.startswith("/"))
+                    if is_command:
                         cmd = content[1:].split(maxsplit=1)
-                        if not cmd:
-                            continue
-                        name = cmd[0].lower()
+                        name = cmd[0].lower() if cmd else ""
                         # /whoami is handled inline — it needs the per-connection client_id.
                         # All other commands (/help, /status, /stop, /new, /load, …) are
                         # forwarded to BackgroundAgent's CommandRegistry for consistency
@@ -257,14 +356,18 @@ class WebChannel(Channel):
                             )
                             continue
 
+                    metadata = {
+                        "websocket_id": client_id,
+                        "is_command": is_command,
+                    }
+                    if files:
+                        metadata["files"] = files
+
                     await self.mq.incoming.put(
                         IncomingMessage(
-                            content=content,
+                            content=content or "",
                             channel=ChannelType.WEB,
-                            metadata={
-                                "websocket_id": client_id,
-                                "is_command": content.startswith("/"),
-                            },
+                            metadata=metadata,
                         )
                     )
             except WebSocketDisconnect:
@@ -332,6 +435,47 @@ class WebChannel(Channel):
         if isinstance(data, dict) and data.get("type") == "message":
             return str(data.get("content") or "").strip() or None
         return raw
+
+    def _extract_message(self, raw: str) -> tuple[str | None, list[str]]:
+        """Parse a raw WebSocket frame into (text, attachment_paths).
+
+        ``files`` is a list of basenames the browser received from
+        ``/api/upload``; each is resolved against the upload dir and dropped
+        if it escapes that dir or no longer exists.
+        """
+        stripped = raw.strip()
+        if not stripped:
+            return None, []
+
+        try:
+            data = json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            return stripped, []
+
+        if isinstance(data, dict) and data.get("type") == "message":
+            content = str(data.get("content") or "").strip() or None
+            files = self._resolve_upload_paths(data.get("files"))
+            return content, files
+
+        return stripped, []
+
+    def _resolve_upload_paths(self, names: object) -> list[str]:
+        """Map client-supplied upload basenames to validated absolute paths.
+
+        Only the basename is honoured (joined to the upload dir), so a client
+        can never reference files outside ``self._upload_dir``.
+        """
+        if not isinstance(names, list):
+            return []
+        upload_dir = self._upload_dir.resolve()
+        resolved: list[str] = []
+        for name in names:
+            if not isinstance(name, str) or not name:
+                continue
+            candidate = (upload_dir / Path(name).name).resolve()
+            if candidate.parent == upload_dir and candidate.is_file():
+                resolved.append(str(candidate))
+        return resolved
 
     async def _safe_send_json(self, client_id: str, payload: dict) -> None:
         async with self._conn_lock:

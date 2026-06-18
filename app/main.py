@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import logging
 import os
+from pathlib import Path
 
 from . import config
 from .infra.app_logging import setup_logging, log
@@ -15,6 +16,38 @@ from .core import runtime
 
 from dotenv import load_dotenv
 load_dotenv()
+
+async def initialize_mcp() -> None:
+    import json
+    from pathlib import Path
+    mcp_config_path = Path(config.PROJECT_HOME) / "mcp_servers.json"
+    if not mcp_config_path.exists():
+        return
+    try:
+        with open(mcp_config_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        log.error(f"Failed to load mcp_servers.json: {e}")
+        return
+
+    if not isinstance(data, dict):
+        log.error("mcp_servers.json must contain a JSON object at the top level.")
+        return
+
+    mcp_servers = data.get("mcpServers")
+    if not mcp_servers:
+        return
+    if not isinstance(mcp_servers, dict):
+        log.error("mcp_servers.json: 'mcpServers' must be a JSON object mapping server names to configs.")
+        return
+
+    from .core.mcp_manager import mcp_manager
+    log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
+    try:
+        await mcp_manager.initialize(mcp_servers)
+    except Exception as e:
+        log.error(f"Failed to initialize MCP servers: {e}")
+
 
 async def load_config() -> None:
     try:
@@ -28,6 +61,10 @@ async def load_config() -> None:
 
 def parse_args():
     parser = argparse.ArgumentParser(prog="app")
+    parser.add_argument("--trace", action="store_true", default=False,
+                        help="Enable LLM call tracing")
+    parser.add_argument("--tracedir", default=str(config.PROJECT_HOME / "trace"), metavar="DIR",
+                        help="Trace output directory (default: ~/.crafterscode/trace)")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     cli_parser = subparsers.add_parser("cli", help="Run interactive CLI")
@@ -74,19 +111,22 @@ async def run_cli(args):
         return
 
     from .channels.commands import (
-        CommandRegistry, BotCommand, make_status_cmd, help_cmd, model_cmd,
+        CommandRegistry, BotCommand, make_status_cmd, help_cmd, model_cmd, trace_cmd,
         list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
         fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
+        mcp_cmd,
     )
     cli_registry = CommandRegistry()
     cli_registry.register(BotCommand("status",               "Show bot status.",                        make_status_cmd()))
     cli_registry.register(BotCommand("model",                "Get or set model. Usage: /model [name]",  model_cmd))
+    cli_registry.register(BotCommand("trace",               "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd))
     cli_registry.register(BotCommand("list",   "List conversations.",                      list_conversations_cmd(agent._store, agent._channel_str)))
     cli_registry.register(BotCommand("new",    "Start a new conversation.",                new_conversation_cmd(agent)))
     cli_registry.register(BotCommand("load",   "Load a conversation. Usage: /load <id>",   load_conversation_cmd(agent)))
     cli_registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]",   fork_conversation_cmd(agent)))
     cli_registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(agent._store, agent._channel_str)))
     cli_registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(agent._store, agent._channel_str)))
+    cli_registry.register(BotCommand("mcp",  "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()))
     cli_registry.register(BotCommand("help",                 "Show available commands.",                 help_cmd(cli_registry)))
 
     try:
@@ -113,7 +153,7 @@ async def run_background_agent(args):
 async def main():
     
     ensure_home_dir()
-    
+
     await load_config()
     setup_logging(level=logging.INFO)
 
@@ -121,13 +161,20 @@ async def main():
 
     runtime.set("model",  config.get("model", "deepseek/deepseek-v4-flash"))
     runtime.set("max_iterations", args.max_iterations)
+    runtime.set("trace", args.trace)
+    runtime.set("tracedir", Path(args.tracedir))
 
-    if args.command == "cli":
-        await run_cli(args)
-    elif args.command == "background":
-        await run_background_agent(args)
-    else:
-        raise ValueError(f"Unknown command: {args.command}")
+    from .core.mcp_manager import mcp_manager
+    try:
+        await initialize_mcp()
+        if args.command == "cli":
+            await run_cli(args)
+        elif args.command == "background":
+            await run_background_agent(args)
+        else:
+            raise ValueError(f"Unknown command: {args.command}")
+    finally:
+        await mcp_manager.shutdown()
     
     
 if __name__ == "__main__":

@@ -12,7 +12,11 @@ dependencies = [
     "discord-py>=2.7.1",
     "python-fasthtml>=0.14.2",
     "uvicorn[standard]>=0.48.0",
+<<<<<<< HEAD
     "slack-bolt>=1.18.0",
+=======
+    "fastmcp>=2.0",
+>>>>>>> origin/main
 ]
 
 [dependency-groups]

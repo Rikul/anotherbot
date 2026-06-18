@@ -1,5 +1,7 @@
 import asyncio
+import base64
 import json
+import mimetypes
 import os
 import platform
 import re
@@ -17,9 +19,6 @@ MAX_CONTEXT_MESSAGES = 1000
 
 def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", "-"))[:40]
-
-
-TOOL_RESULT_HISTORY_LIMIT = 100
 
 
 def get_default_sys_prompt(context: dict | None = None) -> str:
@@ -75,11 +74,92 @@ class Agent(ABC):
         d = {"role": msg.role, "content": msg.content}
         if msg.tool_calls:
             d["tool_calls"] = [tc.model_dump() for tc in msg.tool_calls]
-            raw = msg.model_dump()
-            reasoning = raw.get("reasoning_content") or raw.get("reasoning")
-            if reasoning:
-                d["reasoning_content"] = reasoning
+        raw = msg.model_dump()
+        reasoning = raw.get("reasoning_content") or raw.get("reasoning")
+        if reasoning:
+            d["reasoning_content"] = reasoning
         return d
+
+
+    @staticmethod
+    def _as_list(value) -> list:
+        if value is None:
+            return []
+        if isinstance(value, (str, os.PathLike)):
+            return [value]
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                if not isinstance(item, (str, os.PathLike)):
+                    raise TypeError(
+                        f"metadata['files'] entries must be paths, got {type(item).__name__}"
+                    )
+            return list(value)
+        raise TypeError(f"metadata['files'] must be a path or list of paths, got {type(value).__name__}")
+
+    _MAX_COMBINED_ATTACHMENT_BYTES = 5 * 1024 * 1024  # 5 MB combined across all attachments
+
+    @classmethod
+    def _attachment_part(cls, attachment: str) -> dict:
+        path = Path(attachment).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Attachment not found: {path}")
+
+        mime_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        try:
+            raw = path.read_bytes()
+        except PermissionError as e:
+            raise PermissionError(f"Cannot read attachment: {path}") from e
+
+        data_url = f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}"
+
+        if mime_type.startswith("image/"):
+            return {
+                "type": "image_url",
+                "image_url": {"url": data_url},
+            }
+
+        return {
+            "type": "file",
+            "file": {
+                "filename": path.name,
+                "file_data": data_url,
+            },
+        }
+
+    @classmethod
+    def _build_user_message(cls, message: str, metadata: dict | None = None) -> dict:
+        metadata = metadata or {}
+        attachments = cls._as_list(metadata.get("files"))
+        if not attachments:
+            return {"role": "user", "content": message}
+
+        # Validate every path and accumulate size before encoding anything,
+        # so a bad path always raises the same clear error regardless of order.
+        total_size = 0
+        for a in attachments:
+            p = Path(a).expanduser()
+            if not p.is_file():
+                raise FileNotFoundError(f"Attachment not found: {p}")
+            try:
+                total_size += p.stat().st_size
+            except PermissionError as e:
+                raise PermissionError(f"Cannot stat attachment: {p}") from e
+        if total_size > cls._MAX_COMBINED_ATTACHMENT_BYTES:
+            raise ValueError(
+                f"Total attachment size {total_size / 1024 / 1024:.1f} MB exceeds "
+                f"{cls._MAX_COMBINED_ATTACHMENT_BYTES / 1024 / 1024:.0f} MB combined limit"
+            )
+
+        content = [{"type": "text", "text": message}]
+        content.extend(cls._attachment_part(str(a)) for a in attachments)
+        return {"role": "user", "content": content}
+
+    @staticmethod
+    def _build_placeholder_content(message: str, attachments: list) -> str:
+        if not attachments:
+            return message
+        placeholders = " ".join(f"[Attachment: {a}]" for a in attachments)
+        return f"{message} {placeholders}"
 
     # --- hooks ---
 
@@ -127,14 +207,14 @@ class Agent(ABC):
     # --- shared tool dispatch ---
 
     async def handle_tool_call(self, tool_call) -> str:
-        from .tool_calls import run_tool  # lazy — tool_calls imports scheduled_tasks which imports Agent
+        from .tool_calls import run_tool_async  # lazy — tool_calls imports scheduled_tasks which imports Agent
         tool_name = tool_call.function.name
         try:
-            tool_args = json.loads(tool_call.function.arguments)
+            tool_args = json.loads((tool_call.function.arguments or "").strip() or "{}")
             if not await self._check_permission(tool_name, tool_args):
                 return "User denied permission to run this tool. Ask for permission to run the tool again if you want to try running it."
             await self._on_tool_start(tool_name, tool_args)
-            return run_tool(tool_name=tool_name, tool_args=tool_args)
+            return await run_tool_async(tool_name=tool_name, tool_args=tool_args)
         except Exception as e:
             error_msg = f"Error running tool {tool_name}: {str(e)}"
             log.error(error_msg)
@@ -175,10 +255,11 @@ class Agent(ABC):
                     messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": result})
                     log.info(f"{result[:250]}...")
             else:
+                messages.append(self._serialize_assistant_msg(assistant_message))
                 await self._on_response(assistant_message.content)
-                if finish_reason == "stop":
-                    messages.append(self._serialize_assistant_msg(assistant_message))
-                    break
+                if finish_reason not in ("stop", "length") and finish_reason is not None:
+                    log.warning(f"Unexpected finish_reason={finish_reason!r}, treating as terminal")
+                break
 
             if self._should_stop():
                 break
