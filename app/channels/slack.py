@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import re
 
@@ -163,15 +162,14 @@ class SlackChannel(Channel):
         pass  # handled by slack bolt event handlers
 
     def error_handler(self, update, context) -> None:
-        log.error(f"Slack error: {context}")
+        pass  # Slack-side errors are handled by _slack_error_handler registered via self.app.error()
 
     def start(self) -> None:
         log.info("Starting Slack channel...")
 
     async def run_polling(self) -> None:
         handler = AsyncSocketModeHandler(self.app, self.app_token)
-        await handler.start_async()
         try:
-            await asyncio.Event().wait()
+            await handler.start_async()
         finally:
             await handler.close_async()
