@@ -315,7 +315,10 @@ async def test_agent_loop_calls_write_trace_when_enabled(tmp_path):
         with patch("app.infra.tracer.write_trace", return_value=fake_path) as mock_write:
             await agent.agent_loop("hello")
     mock_write.assert_called_once()
-    assert mock_write.call_args[0][1] == tmp_path  # tracedir
+    # write_trace now only receives messages (1 positional arg); tracedir/model come from runtime
+    args = mock_write.call_args[0]
+    assert len(args) == 1
+    assert isinstance(args[0], list)
 
 
 @pytest.mark.asyncio

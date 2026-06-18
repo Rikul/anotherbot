@@ -110,6 +110,8 @@ class Agent(ABC):
         except PermissionError as e:
             raise PermissionError(f"Cannot read attachment: {path}") from e
 
+        log.info(f"Encoding attachment {path} ({mime_type}, {len(raw)} bytes)")
+        
         data_url = f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}"
 
         if mime_type.startswith("image/"):
@@ -158,7 +160,7 @@ class Agent(ABC):
     def _build_placeholder_content(message: str, attachments: list) -> str:
         if not attachments:
             return message
-        placeholders = " ".join(f"[Attachment: {a}]" for a in attachments)
+        placeholders = " ".join(f"[Attachment: {Path(a).name}]" for a in attachments)
         return f"{message} {placeholders}"
 
     # --- hooks ---

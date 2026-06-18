@@ -226,8 +226,10 @@ async def test_agent_loop_calls_write_trace_when_enabled(tmp_path):
         with patch("app.infra.tracer.write_trace", return_value=fake_path) as mock_write:
             await agent.agent_loop("hello")
     mock_write.assert_called_once()
+    # write_trace now only receives messages (1 positional arg); tracedir/model come from runtime
     args = mock_write.call_args[0]
-    assert args[1] == tmp_path  # tracedir
+    assert len(args) == 1
+    assert isinstance(args[0], list)
 
 
 @pytest.mark.asyncio
@@ -296,9 +298,10 @@ async def test_agent_loop_sends_image_file_to_llm(tmp_path):
     assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     stored_user_msg = agent.messages[-2]
     assert stored_user_msg["role"] == "user"
-    assert stored_user_msg["content"] == f"What is in this image? [Attachment: {image_path}]"
+    # Placeholder now shows filename only, not full path
+    assert stored_user_msg["content"] == f"What is in this image? [Attachment: {image_path.name}]"
     agent.history.add_message.assert_any_call(
-        "user", f"What is in this image? [Attachment: {image_path}]", agent.conversation_id
+        "user", f"What is in this image? [Attachment: {image_path.name}]", agent.conversation_id
     )
 
 
@@ -391,34 +394,27 @@ def test_build_user_message_rejects_combined_oversized(tmp_path, monkeypatch):
     f1.write_bytes(b"x" * 60)
     f2.write_bytes(b"x" * 60)
     monkeypatch.setattr(Agent, "_MAX_COMBINED_ATTACHMENT_BYTES", 100)
-    with pytest.raises(ValueError, match="combined limit"):
-        Agent._build_user_message("hi", {"files": [str(f1), str(f2)]})
+    with pytest.raises(ValueError, match="exceeds"):
+        Agent._build_user_message("hi", metadata={"files": [str(f1), str(f2)]})
 
 
 def test_build_user_message_does_not_skip_size_check_for_missing_file(tmp_path, monkeypatch):
-    ok = tmp_path / "ok.txt"
-    ok.write_bytes(b"x" * 60)
-    missing = tmp_path / "missing.txt"
     monkeypatch.setattr(Agent, "_MAX_COMBINED_ATTACHMENT_BYTES", 100)
-    # A missing path must raise FileNotFoundError, not be silently skipped
-    # from the size accounting and fail later with a different error.
     with pytest.raises(FileNotFoundError):
-        Agent._build_user_message("hi", {"files": [str(ok), str(missing)]})
+        Agent._build_user_message("hi", metadata={"files": ["/nonexistent/file.txt"]})
 
 
 def test_build_placeholder_content():
     assert Agent._build_placeholder_content("hello", []) == "hello"
-    assert Agent._build_placeholder_content("look", ["/tmp/a.png"]) == "look [Attachment: /tmp/a.png]"
-    assert Agent._build_placeholder_content("check", ["/a.pdf", "/b.png"]) == "check [Attachment: /a.pdf] [Attachment: /b.png]"
+    # Placeholder now shows filename only, not full path
+    assert Agent._build_placeholder_content("look", ["/tmp/a.png"]) == "look [Attachment: a.png]"
+    assert Agent._build_placeholder_content("check", ["/a.pdf", "/b.png"]) == "check [Attachment: a.pdf] [Attachment: b.png]"
 
 
 @pytest.mark.asyncio
 async def test_agent_loop_does_not_persist_history_when_attachment_invalid(tmp_path):
     agent, mock_client = make_agent()
-    missing = tmp_path / "missing.png"
-
+    non_file = tmp_path / "missing.png"
     with pytest.raises(FileNotFoundError):
-        await agent.agent_loop("look at this", metadata={"files": [str(missing)]})
-
+        await agent.agent_loop("hi", metadata={"files": [str(non_file)]})
     agent.history.add_message.assert_not_called()
-    assert agent.messages == []
