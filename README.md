@@ -345,11 +345,6 @@ The `/data` volume persists the SQLite database and workspace across restarts. T
 ## Roadmap
 
 - **Email Support**: IMAP/SMTP integration for reading and sending emails, attachment handling, and mailbox management
-<<<<<<< HEAD
-- **MCP Support**: Integration with Model Context Protocol for external data sources, tools, and state management
-=======
-- **Slack Integration**: Slack app with interactive messages, modals, and workspace management
->>>>>>> origin/main
 - **WhatsApp Support**: WhatsApp Business API integration via providers like Twilio or MessageBird
 - **Anthropic OAuth**: Direct integration with Claude API using OAuth 2.0
 - **Codex OAuth**: OpenAI Codex API authentication
