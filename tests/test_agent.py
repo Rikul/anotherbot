@@ -70,7 +70,7 @@ async def test_agent_loop_sends_system_context_to_llm():
     agent, mock_client = make_agent()
     with patch("app.cli.cli_agent.get_default_sys_prompt", return_value="system prompt"):
         await agent.agent_loop("hello")
-    call_messages = mock_client.chat.completions.create.call_args[1]["messages"]
+    call_messages = mock_client.chat.completions.create.call_args_list[0][1]["messages"]
     assert call_messages[0]["role"] == "system"
     assert call_messages[0]["content"] == "system prompt"
 
@@ -190,7 +190,7 @@ async def test_agent_loop_runs_tool_when_auto_approve():
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_continues_when_finish_reason_not_stop():
+async def test_agent_loop_breaks_on_length_finish_reason():
     with patch("app.core.agent.Client") as MockClient:
         mock_client = MagicMock()
         MockClient.return_value.get_client.return_value = mock_client
@@ -210,23 +210,33 @@ async def test_agent_loop_continues_when_finish_reason_not_stop():
     response_partial = MagicMock()
     response_partial.choices = [choice_partial]
 
-    msg_final = MagicMock()
-    msg_final.tool_calls = None
-    msg_final.content = "final"
-    msg_final.model_dump.return_value = {"role": "assistant", "content": "final"}
-    choice_final = MagicMock()
-    choice_final.message = msg_final
-    choice_final.finish_reason = "stop"
-    response_final = MagicMock()
-    response_final.choices = [choice_final]
+    mock_client.chat.completions.create = AsyncMock(return_value=response_partial)
 
-    mock_client.chat.completions.create = AsyncMock(
-        side_effect=[response_partial, response_final]
-    )
+    result = await agent.agent_loop("continue")
 
-    await agent.agent_loop("continue")
+    assert mock_client.chat.completions.create.call_count == 1
+    assert result == "partial"
 
-    assert mock_client.chat.completions.create.call_count == 2
+
+@pytest.mark.asyncio
+async def test_agent_loop_calls_write_trace_when_enabled(tmp_path):
+    agent, _ = make_agent()
+    fake_path = tmp_path / "trace_01012026_120000.json"
+    with patch("app.core.runtime._store", {"trace": True, "tracedir": tmp_path, "model": "m"}):
+        with patch("app.infra.tracer.write_trace", return_value=fake_path) as mock_write:
+            await agent.agent_loop("hello")
+    mock_write.assert_called_once()
+    args = mock_write.call_args[0]
+    assert args[1] == tmp_path  # tracedir
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_call_write_trace_when_disabled(tmp_path):
+    agent, _ = make_agent()
+    with patch("app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}):
+        with patch("app.infra.tracer.write_trace") as mock_write:
+            await agent.agent_loop("hello")
+    mock_write.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -268,3 +278,147 @@ async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
 
     mock_gather.assert_called_once()
     assert len(mock_gather.call_args[0]) == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_image_file_to_llm(tmp_path):
+    agent, mock_client = make_agent()
+    image_path = tmp_path / "screenshot.png"
+    image_path.write_bytes(b"fake image data")
+
+    await agent.agent_loop("What is in this image?", metadata={"files": [str(image_path)]})
+
+    call_messages = mock_client.chat.completions.create.call_args_list[0][1]["messages"]
+    user_message = call_messages[1]
+    assert user_message["role"] == "user"
+    assert user_message["content"][0] == {"type": "text", "text": "What is in this image?"}
+    assert user_message["content"][1]["type"] == "image_url"
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    stored_user_msg = agent.messages[-2]
+    assert stored_user_msg["role"] == "user"
+    assert stored_user_msg["content"] == f"What is in this image? [Attachment: {image_path}]"
+    agent.history.add_message.assert_any_call(
+        "user", f"What is in this image? [Attachment: {image_path}]", agent.conversation_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_accepts_single_metadata_file_path(tmp_path):
+    agent, mock_client = make_agent()
+    image_path = tmp_path / "screenshot.jpg"
+    image_path.write_bytes(b"fake image data")
+
+    await agent.agent_loop("Describe this", metadata={"files": str(image_path)})
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_multiple_image_files_to_llm(tmp_path):
+    agent, mock_client = make_agent()
+    png_path = tmp_path / "first.png"
+    jpg_path = tmp_path / "second.jpg"
+    png_path.write_bytes(b"first fake image data")
+    jpg_path.write_bytes(b"second fake image data")
+
+    await agent.agent_loop(
+        "Compare these images",
+        metadata={"files": [str(png_path), str(jpg_path)]},
+    )
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][0] == {"type": "text", "text": "Compare these images"}
+    assert len(user_message["content"]) == 3
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert user_message["content"][2]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_metadata_files_to_llm(tmp_path):
+    agent, mock_client = make_agent()
+    file_path = tmp_path / "notes.txt"
+    file_path.write_text("plain text attachment", encoding="utf-8")
+
+    await agent.agent_loop("Summarize this file", metadata={"files": [str(file_path)]})
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][0] == {"type": "text", "text": "Summarize this file"}
+    assert user_message["content"][1]["type"] == "file"
+    assert user_message["content"][1]["file"]["filename"] == "notes.txt"
+    assert user_message["content"][1]["file"]["file_data"].startswith("data:text/plain;base64,")
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_sends_image_files_as_images(tmp_path):
+    agent, mock_client = make_agent()
+    image_path = tmp_path / "diagram.png"
+    file_path = tmp_path / "report.pdf"
+    image_path.write_bytes(b"fake image data")
+    file_path.write_bytes(b"%PDF-1.4 fake pdf data")
+
+    await agent.agent_loop(
+        "Use these attachments",
+        metadata={"files": [str(image_path), str(file_path)]},
+    )
+
+    user_message = mock_client.chat.completions.create.call_args_list[0][1]["messages"][1]
+    assert user_message["content"][1]["type"] == "image_url"
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert user_message["content"][2]["type"] == "file"
+    assert user_message["content"][2]["file"]["file_data"].startswith("data:application/pdf;base64,")
+
+
+def test_as_list_rejects_non_path_entries():
+    with pytest.raises(TypeError):
+        Agent._as_list([123])
+    with pytest.raises(TypeError):
+        Agent._as_list(123)
+    assert Agent._as_list(["a", "b"]) == ["a", "b"]
+    assert Agent._as_list("a") == ["a"]
+    assert Agent._as_list(None) == []
+
+
+def test_as_list_does_not_silently_drop_empty_string():
+    # Only None means "no attachments"; an empty string path must surface
+    # as a loud failure downstream rather than being dropped.
+    assert Agent._as_list("") == [""]
+
+
+def test_build_user_message_rejects_combined_oversized(tmp_path, monkeypatch):
+    f1 = tmp_path / "a.txt"
+    f2 = tmp_path / "b.txt"
+    f1.write_bytes(b"x" * 60)
+    f2.write_bytes(b"x" * 60)
+    monkeypatch.setattr(Agent, "_MAX_COMBINED_ATTACHMENT_BYTES", 100)
+    with pytest.raises(ValueError, match="combined limit"):
+        Agent._build_user_message("hi", {"files": [str(f1), str(f2)]})
+
+
+def test_build_user_message_does_not_skip_size_check_for_missing_file(tmp_path, monkeypatch):
+    ok = tmp_path / "ok.txt"
+    ok.write_bytes(b"x" * 60)
+    missing = tmp_path / "missing.txt"
+    monkeypatch.setattr(Agent, "_MAX_COMBINED_ATTACHMENT_BYTES", 100)
+    # A missing path must raise FileNotFoundError, not be silently skipped
+    # from the size accounting and fail later with a different error.
+    with pytest.raises(FileNotFoundError):
+        Agent._build_user_message("hi", {"files": [str(ok), str(missing)]})
+
+
+def test_build_placeholder_content():
+    assert Agent._build_placeholder_content("hello", []) == "hello"
+    assert Agent._build_placeholder_content("look", ["/tmp/a.png"]) == "look [Attachment: /tmp/a.png]"
+    assert Agent._build_placeholder_content("check", ["/a.pdf", "/b.png"]) == "check [Attachment: /a.pdf] [Attachment: /b.png]"
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_persist_history_when_attachment_invalid(tmp_path):
+    agent, mock_client = make_agent()
+    missing = tmp_path / "missing.png"
+
+    with pytest.raises(FileNotFoundError):
+        await agent.agent_loop("look at this", metadata={"files": [str(missing)]})
+
+    agent.history.add_message.assert_not_called()
+    assert agent.messages == []

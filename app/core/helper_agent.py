@@ -17,5 +17,5 @@ class HelperAgent(Agent):
 
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         from .tool_calls import helper_tool_specs  # lazy — avoids circular import via scheduled_tasks
-        self.messages.append({"role": "user", "content": message})
+        self.messages.append(self._build_user_message(message, metadata))
         return await self._loop(self.messages, helper_tool_specs)

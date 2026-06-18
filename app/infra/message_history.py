@@ -68,5 +68,4 @@ class MessageHistory:
                                     ORDER BY id DESC LIMIT ?""", (self.channel, limit)).fetchall()
             return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
 
-    def prune_old_messages(self, older_than_days: int) -> None:
-        pass
+

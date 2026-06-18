@@ -13,6 +13,7 @@ dependencies = [
     "python-fasthtml>=0.14.2",
     "uvicorn[standard]>=0.48.0",
     "slack-bolt>=1.18.0",
+    "fastmcp>=2.0",
 ]
 
 [dependency-groups]

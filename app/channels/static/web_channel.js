@@ -18,6 +18,11 @@
     const toggleBtn   = document.getElementById('sidebar-toggle');
     const convListEl  = document.getElementById('conv-list');
     const newConvBtn  = document.getElementById('new-conv-btn');
+    const fileInput   = document.getElementById('file-input');
+    const attachEl    = document.getElementById('attachments');
+
+    // Files staged for the next send (cleared after a successful upload).
+    let selectedFiles = [];
 
     // ---- theme ----
     const savedTheme = localStorage.getItem('ab-theme') || 'dark';
@@ -141,7 +146,7 @@
         ws.onopen = () => {
             reconnectDelay = 1000;
             setStatus('connected', 'Connected');
-            sendBtn.disabled = false;
+            refreshSendState();
             clearMessages();       // always reset DOM before reloading — prevents duplicates on reconnect
             loadConversations(true);
         };
@@ -213,14 +218,105 @@
     }
     function scrollBottom() { scrollEl.scrollTop = scrollEl.scrollHeight; }
 
+    // ---- attachments ----
+    function renderAttachments() {
+        attachEl.innerHTML = '';
+        attachEl.classList.toggle('has-files', selectedFiles.length > 0);
+        selectedFiles.forEach((file, idx) => {
+            const chip = document.createElement('div');
+            chip.className = 'attach-chip';
+            const label = document.createElement('span');
+            label.className = 'attach-name';
+            label.textContent = file.name;
+            label.title = `${file.name} (${fmtSize(file.size)})`;
+            const remove = document.createElement('button');
+            remove.className = 'attach-remove';
+            remove.type = 'button';
+            remove.textContent = '×';
+            remove.title = 'Remove attachment';
+            remove.addEventListener('click', () => {
+                selectedFiles.splice(idx, 1);
+                renderAttachments();
+                refreshSendState();
+            });
+            chip.appendChild(label);
+            chip.appendChild(remove);
+            attachEl.appendChild(chip);
+        });
+    }
+
+    function fmtSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(0) + ' KB';
+        return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+    }
+
+    function refreshSendState() {
+        const connected = ws && ws.readyState === WebSocket.OPEN;
+        const hasInput = inputEl.value.trim().length > 0 || selectedFiles.length > 0;
+        sendBtn.disabled = !connected || !hasInput;
+    }
+
+    // The attach control is a <label for="file-input">, so clicking it opens
+    // the picker natively — no JS click needed (and avoids a double-open).
+    // Copy the FileList into a real array before clearing .value: Edge can
+    // invalidate the live FileList once .value is reset mid-handler.
+    fileInput.addEventListener('change', () => {
+        const picked = Array.from(fileInput.files || []);
+        for (const file of picked) selectedFiles.push(file);
+        fileInput.value = '';   // allow re-selecting the same file later
+        renderAttachments();
+        refreshSendState();
+    });
+
+    async function uploadFiles(files) {
+        const form = new FormData();
+        files.forEach(f => form.append('files', f, f.name));
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        if (!res.ok) {
+            let detail = '';
+            try { detail = (await res.json()).error || ''; } catch (e) { /* ignore */ }
+            throw new Error(detail || `Upload failed (${res.status})`);
+        }
+        const { files: saved } = await res.json();
+        return saved;   // [{path, name}, ...]
+    }
+
     // ---- send ----
-    function send() {
+    async function send() {
         const text = inputEl.value.trim();
-        if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
-        appendMessage(text, 'user');
-        ws.send(JSON.stringify({ type: 'message', content: text }));
+        const files = selectedFiles.slice();
+        if (sendBtn.disabled) return;
+
+        let uploaded = [];
+        if (files.length) {
+            sendBtn.disabled = true;
+            try {
+                uploaded = await uploadFiles(files);
+            } catch (e) {
+                appendMessage('Attachment upload failed: ' + e.message, 'system');
+                refreshSendState();
+                return;
+            }
+        }
+
+        const payload = { type: 'message', content: text };
+        if (uploaded.length) payload.files = uploaded.map(f => f.path);
+        try {
+            ws.send(JSON.stringify(payload));
+        } catch (err) {
+            appendMessage('Send failed: disconnected (please retry).', 'system');
+            refreshSendState();
+            return;
+        }
+
+        appendMessage(renderUserContent(text, files), 'user');
+        selectedFiles = [];
+        renderAttachments();
         inputEl.value = '';
         inputEl.style.height = '42px';
+        refreshSendState();
+
         if (text === '/new') {
             clearMessages();
         } else if (/^\/load\s+\d+/.test(text)) {
@@ -232,6 +328,12 @@
         }
     }
 
+    function renderUserContent(text, files) {
+        if (!files.length) return text;
+        const tags = files.map(f => `📎 ${f.name}`).join('  ');
+        return text ? `${text}\n\n${tags}` : tags;
+    }
+
     sendBtn.addEventListener('click', send);
     inputEl.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -239,6 +341,7 @@
     inputEl.addEventListener('input', () => {
         inputEl.style.height = 'auto';
         inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
+        refreshSendState();
     });
 
     // sidebar pre-populate (messages already loaded via ws.onopen → loadConversations(true))

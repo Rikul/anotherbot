@@ -69,6 +69,20 @@ async def model_cmd(args: str = "") -> str:
     return f"Model set to: {args.strip()}"
 
 
+async def trace_cmd(args: str = "") -> str:
+    arg = args.strip().lower()
+    tracedir = runtime.get("tracedir")
+    if arg == "on":
+        runtime.set("trace", True)
+        return f"Tracing on. Writing to {tracedir}"
+    elif arg == "off":
+        runtime.set("trace", False)
+        return "Tracing off."
+    else:
+        state = runtime.get("trace", False)
+        return f"Tracing is {'on' if state else 'off'}. Dir: {tracedir}"
+
+
 def make_status_cmd(channel_str: str = "") -> CommandHandler:
     async def _status(args: str = "") -> str:
         uptime = datetime.now() - _STARTUP_TIME
@@ -81,11 +95,15 @@ def make_status_cmd(channel_str: str = "") -> CommandHandler:
         else:
             conv_id = runtime.get("conversation_id", "—")
             conv_name = runtime.get("conversation_name", "—")
+        tracing = runtime.get("trace", False)
+        last_trace = runtime.get("last_trace")
+        trace_line = f"on ({last_trace})" if (tracing and last_trace) else ("on" if tracing else "off")
         return (
             f"Bot status:\n"
             f"  Model:        {model}\n"
             f"  Uptime:       {hours}h {minutes}m {seconds}s\n"
-            f"  Conversation: [{conv_id}] {conv_name}"
+            f"  Conversation: [{conv_id}] {conv_name}\n"
+            f"  Tracing:      {trace_line}"
         )
     return _status
 
@@ -200,3 +218,56 @@ def export_conversation_cmd(store: ConversationStore, channel: str) -> CommandHa
             return str(e)
         return f"Exported to {path}"
     return _export
+
+
+def mcp_cmd() -> CommandHandler:
+    async def _mcp(args: str = "") -> str:
+        from ..core.mcp_manager import mcp_manager
+
+        parts = args.strip().split(maxsplit=1)
+        subcmd = parts[0].lower() if parts and parts[0] else ""
+        subargs = parts[1].strip() if len(parts) > 1 else ""
+
+        if subcmd == "tools":
+            if subargs:
+                specs = mcp_manager.get_tools_for_server(subargs)
+                if not specs:
+                    configured = [s["name"] for s in mcp_manager.get_server_status()]
+                    if subargs not in configured:
+                        return f"Server '{subargs}' not found. Configured: {', '.join(configured) or 'none'}"
+                    return f"Server '{subargs}' has no tools."
+                lines = [f"Tools for '{subargs}' ({len(specs)}):"]
+                for spec in specs:
+                    fn = spec["function"]
+                    bare = fn["name"].partition("__")[2]
+                    desc = fn.get("description", "")
+                    lines.append(f"  {bare}" + (f" — {desc}" if desc else ""))
+                return "\n".join(lines)
+            else:
+                specs = mcp_manager.get_tool_specs()
+                if not specs:
+                    return "No MCP tools available."
+                lines = [f"MCP tools ({len(specs)}):"]
+                for spec in specs:
+                    fn = spec["function"]
+                    desc = fn.get("description", "")
+                    lines.append(f"  {fn['name']}" + (f" — {desc}" if desc else ""))
+                return "\n".join(lines)
+        else:
+            statuses = mcp_manager.get_server_status()
+            if not statuses:
+                return "No MCP servers configured.\nCreate ~/.crafterscode/mcp_servers.json to add servers."
+            lines = [f"MCP servers ({len(statuses)}):"]
+            for s in statuses:
+                if s["disabled"]:
+                    status = "disabled"
+                elif s["connected"]:
+                    status = "connected"
+                else:
+                    status = "disconnected"
+                lines.append(
+                    f"  {s['name']} — {status}, {s['transport']} ({s['target']}), {s['tool_count']} tool(s)"
+                )
+            return "\n".join(lines)
+
+    return _mcp

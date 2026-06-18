@@ -9,6 +9,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 - **Discord Integration**: Discord bot — same agent loop, per-channel message isolation, owner DM fallback for scheduled tasks
 - **Slack Integration**: Slack bot via Socket Mode — no public webhook required
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
+- **MCP Servers**: Connect any [Model Context Protocol](https://modelcontextprotocol.io) server via `mcp_servers.json` — tools are auto-discovered and available alongside built-ins
 - **Tool Calling**: File I/O, shell commands, web fetch, web search (text/images/video/news/books), calculator, Hacker News, todo list
 - **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing)
 - **Persistent History**: Per-channel SQLite message history at `~/.crafterscode/app.db` (shared with scheduled tasks)
@@ -151,6 +152,83 @@ remove the HN task
 
 Tasks persist in `~/.crafterscode/app.db` (shared with message history) and survive restarts.
 
+## MCP Servers
+
+External [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers extend the agent with additional tools. Configured servers are initialized at startup; their tools appear alongside the built-in ones in the agent's tool list.
+
+### Setup
+
+Create `~/.crafterscode/mcp_servers.json` (same directory as `config.toml`). The format matches Claude Desktop's `mcpServers` config, so existing Claude Desktop configs can be copied directly:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-memory"]
+    },
+    "time": {
+      "command": "uvx",
+      "args": ["mcp-server-time"]
+    },
+    "weather": {
+      "url": "https://weather-mcp.example.com/sse"
+    },
+    "custom": {
+      "command": "python",
+      "args": ["./my_server.py"],
+      "env": {"MY_API_KEY": "secret"}
+    }
+  }
+}
+```
+
+Each server entry supports one of two transport types:
+
+| Field | Required | Description |
+|---|---|---|
+| `command` | one of | Executable to spawn (stdio transport) |
+| `args` | no | Argument list for the command |
+| `env` | no | Extra environment variables for the subprocess |
+| `url` | one of | SSE/HTTP endpoint URL (remote transport) |
+| `disabled` | no | Set to `true` to skip this server at startup |
+
+To enable only a subset of servers, add `"disabled": true` to those you want to skip:
+
+```json
+{
+  "mcpServers": {
+    "memory": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-memory"] },
+    "time":   { "command": "uvx", "args": ["mcp-server-time"], "disabled": true }
+  }
+}
+```
+
+Disabled servers appear in `/mcp` output with status `disabled` so you can see what is configured without connecting it.
+
+### Tool namespacing
+
+MCP tool names are prefixed with their server name using `__` as a separator: `servername__toolname`. This prevents collisions between built-in tools and between different servers.
+
+> **Note:** Server names must not contain `__` — it is reserved as the tool namespace separator.
+
+### Startup behaviour
+
+- All servers connect concurrently at startup.
+- Failed connections are logged and skipped — the agent starts normally with whichever servers connected successfully.
+- All connections are gracefully shut down when the process exits.
+
+### Docker
+
+Mount `mcp_servers.json` into the container's data directory:
+
+```bash
+docker run ... \
+  -v /path/to/mcp_servers.json:/data/mcp_servers.json \
+  -v anotherbot-data:/data \
+  anotherbot
+```
+
 ## Docker
 
 ### Build
@@ -267,7 +345,6 @@ The `/data` volume persists the SQLite database and workspace across restarts. T
 ## Roadmap
 
 - **Email Support**: IMAP/SMTP integration for reading and sending emails, attachment handling, and mailbox management
-- **MCP Support**: Integration with Model Context Protocol for external data sources, tools, and state management
 - **WhatsApp Support**: WhatsApp Business API integration via providers like Twilio or MessageBird
 - **Anthropic OAuth**: Direct integration with Claude API using OAuth 2.0
 - **Codex OAuth**: OpenAI Codex API authentication

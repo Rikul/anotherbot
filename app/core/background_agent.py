@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from .tool_calls import all_tool_specs
+from .tool_calls import get_all_tool_specs
 from ..infra.app_logging import log
 from ..channels.channel import Channel
 from ..channels.message import OutgoingMessage
@@ -45,13 +45,15 @@ class BackgroundAgent(Agent):
         # Lazy import to avoid circular: commands imports runtime which is fine,
         # but conversation commands need self reference so we build registry here.
         from ..channels.commands import (
-            CommandRegistry, BotCommand, help_cmd, make_status_cmd, model_cmd,
+            CommandRegistry, BotCommand, help_cmd, make_status_cmd, model_cmd, trace_cmd,
             list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
             fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
+            mcp_cmd,
         )
         self.registry = CommandRegistry()
         ch = self._channel_str
         self.registry.register(BotCommand("model",  "Get or set model. Usage: /model [name]", model_cmd))
+        self.registry.register(BotCommand("trace",  "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd))
         self.registry.register(BotCommand("status", "Show bot status.", make_status_cmd(ch)))
         self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
         self.registry.register(BotCommand("list",   "List conversations.", list_conversations_cmd(self._store, ch)))
@@ -60,6 +62,7 @@ class BackgroundAgent(Agent):
         self.registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]", fork_conversation_cmd(self)))
         self.registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(self._store, ch)))
         self.registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(self._store, ch)))
+        self.registry.register(BotCommand("mcp",  "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()))
         self.registry.register(BotCommand("help", "Show available commands.", help_cmd(self.registry)))
 
     async def _stop_cmd(self, args: str = "") -> str:
@@ -123,7 +126,10 @@ class BackgroundAgent(Agent):
         self._trim_messages()
         self._empty_retries = 0
         self._reply_metadata = metadata or {}
-        self.history.add_message("user", message, self.conversation_id)
+        attachments = self._as_list((metadata or {}).get("files"))
+        user_msg = self._build_user_message(message, metadata)
+        placeholder_content = self._build_placeholder_content(message, attachments)
+        self.history.add_message("user", placeholder_content, self.conversation_id)
 
         conv = self._store.get(self.conversation_id)
         system_context = get_default_sys_prompt({
@@ -132,13 +138,19 @@ class BackgroundAgent(Agent):
             "conversation_name": conv["name"] if conv else "New Conversation",
         })
         system = [{"role": "system", "content": system_context}] if system_context else []
-        session_messages = system + self.messages[:] + [{"role": "user", "content": message}]
+        session_messages = system + self.messages[:] + [user_msg]
 
-        final_content = await self._loop(session_messages, all_tool_specs)
+        final_content = await self._loop(session_messages, get_all_tool_specs())
+
+        if runtime.get("trace"):
+            from ..infra.tracer import write_trace
+            path = write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
+            if path:
+                runtime.set("last_trace", path.name)
 
         self.channel.clear_stopped()
 
-        self.messages.append({"role": "user", "content": message})
+        self.messages.append({"role": "user", "content": placeholder_content})
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
         self._store.touch(self.conversation_id)

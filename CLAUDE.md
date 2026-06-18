@@ -55,6 +55,8 @@ Environment variables (all override config file values):
 - `WEBSOCKET_PORT` — port for web UI + WebSocket (default: `8765`)
 - `ANOTHERBOT_HOME` — overrides the data directory (default: `~/.crafterscode`)
 
+MCP servers are configured separately in `~/.crafterscode/mcp_servers.json` (same dir, same format as Claude Desktop's `mcpServers` key). No env-var equivalent — in Docker, mount the file at `$ANOTHERBOT_HOME/mcp_servers.json`.
+
 For Docker, no config file is needed — pass everything as env vars. See `Dockerfile` and the Docker section in README.
 
 ## Architecture
@@ -72,15 +74,23 @@ The shared loop lives in `Agent._loop()` (`app/core/agent.py`). Subclasses overr
 | `_on_no_choices` | raise | exponential backoff | raise |
 | `_should_stop` | — | `channel.has_stopped` | — |
 
-Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gather`. After each turn, the full message chain (assistant tool-call message + tool results + final response) is saved to `self.messages` with tool results truncated to `TOOL_RESULT_HISTORY_LIMIT` chars to keep context lean. `MessageHistory` (SQLite) stores only user + final assistant text for cross-session persistence.
+Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gather`. After each turn, the full message chain (assistant tool-call message + tool results + final response) is saved to `self.messages` at full length. `MessageHistory` (SQLite) stores only user + final assistant text for cross-session persistence.
 
 ### Tool System
 
-Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` method. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` dispatches by name and restores `os.getcwd()` after each call. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars).
+Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` method. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` is asynchronous and dispatches by name, awaiting the tool's `call` if it is a coroutine function, and restores `os.getcwd()` after execution. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars).
 
-Current tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`.
+Current built-in tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`, `helper_agent`.
 
 `_HELPER_AGENT_TOOLS` in `tool_calls.py` is an explicit allowlist of tools available to `HelperAgent` (used internally by scheduled tasks). Scheduled task mutation tools (`add/update/remove_scheduled_task`) are excluded to prevent recursion.
+
+`get_all_tool_specs()` merges built-in specs with any MCP tool specs at call time (not module load). `run_tool_async()` is the async dispatcher used by `handle_tool_call` — it routes to `MCPManager.call_tool()` for MCP tools or falls through to the synchronous `run_tool()` for built-ins.
+
+### MCP Servers
+
+`MCPManager` (`app/core/mcp_manager.py`) owns persistent FastMCP client connections and their tool catalogs. It is a module-level singleton (`mcp_manager`). `initialize_mcp()` in `main.py` reads `mcp_servers.json`, then calls `mcp_manager.initialize()` which connects all servers concurrently via `asyncio.gather`. Each server's tools are discovered via `list_tools()` and registered under the namespace `servername__toolname` (`_SEP = "__"`). `rpartition` is used when routing calls so tool names may contain underscores freely; only the server name must not contain `__`.
+
+The singleton is shut down via `mcp_manager.shutdown()` in a `try/finally` block in `main()`. `HelperAgent` does not receive MCP tools — it uses the static `helper_tool_specs` allowlist to prevent recursion.
 
 ### System Context
 
@@ -94,7 +104,7 @@ On startup, `load_system_context()` (`app/infra/startup.py`) loads `app/core/sys
 
 **Channel types** are defined in `ChannelType` enum (`app/channels/channel.py`): `CLI`, `TELEGRAM`, `DISCORD`, `WEB`. Each channel implements the `Channel` ABC and owns a `MessageQueue` instance. `bg_server.py` wires up enabled channels — each gets its own `MessageQueue`, `BackgroundAgent`, and set of coroutines (`run_polling`, `process_incoming`, `process_outgoing`) gathered into the event loop.
 
-**WebChannel** (`app/channels/web_channel.py`) uses `python-fasthtml` + uvicorn to serve both a browser chat UI (`GET /`) and a JSON WebSocket endpoint (`WS /ws`) on the same port. Multiple concurrent browser tabs are supported — each connection gets a UUID tracked in `_connections`. A per-connection `asyncio.Lock` in `_send_locks` serializes writes to each WebSocket. The channel also exposes `GET /api/conversations`, `GET /api/messages` (scoped to web channel only), and `GET /api/status` REST endpoints. Only `/whoami` is handled inline (it needs the per-connection client ID); all other slash commands — including `/help`, `/status`, `/stop` — are forwarded to `BackgroundAgent`'s `CommandRegistry` via the message queue with `is_command=True` in metadata so `send_message()` emits `{"type":"system"}` responses, enabling the sidebar to refresh after conversation-mutating commands.
+**WebChannel** (`app/channels/web_channel.py`) uses `python-fasthtml` + uvicorn to serve both a browser chat UI (`GET /`) and a JSON WebSocket endpoint (`WS /ws`) on the same port. Multiple concurrent browser tabs are supported — each connection gets a UUID tracked in `_connections`. A per-connection `asyncio.Lock` in `_send_locks` serializes writes to each WebSocket. The channel also exposes `GET /api/conversations`, `GET /api/messages` (scoped to web channel only), `GET /api/status`, and `POST /api/upload` REST endpoints. `POST /api/upload` accepts multipart `files` (one or more), writes each under `$ANOTHERBOT_HOME/uploads` with a UUID prefix, and returns the stored basenames; the browser (paperclip button next to the input) sends those basenames back in the WebSocket `message` frame's `files` field. `_resolve_upload_paths()` joins each basename to the upload dir (basename-only, so client paths can't traverse out) and the resolved absolute paths reach the agent via `metadata["files"]`, which `Agent._build_user_message()` encodes as image/file parts. Only `/whoami` is handled inline (it needs the per-connection client ID); all other slash commands — including `/help`, `/status`, `/stop` — are forwarded to `BackgroundAgent`'s `CommandRegistry` via the message queue with `is_command=True` in metadata so `send_message()` emits `{"type":"system"}` responses, enabling the sidebar to refresh after conversation-mutating commands.
 
 **Slash commands** are handled entirely by `BackgroundAgent`. Channel handlers (`command_handler` in Telegram, `on_message` in Discord) intercept only `/whoami` (resolved inline using the platform user object) and enqueue everything else as a plain `IncomingMessage`. `BackgroundAgent.process_incoming()` detects the leading `/` and dispatches via its own `CommandRegistry`. That registry owns the full command set: `/model`, `/status`, `/stop`, `/help`, `/list`, `/new`, `/load`, `/fork`, `/rename`, `/export`.
 
