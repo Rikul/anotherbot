@@ -144,7 +144,7 @@ class BackgroundAgent(Agent):
 
         if runtime.get("trace"):
             from ..infra.tracer import write_trace
-            path = write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
+            path = write_trace(session_messages)
             if path:
                 runtime.set("last_trace", path.name)
 

@@ -71,7 +71,7 @@ class CliAgent(Agent):
 
         if runtime.get("trace"):
             from ..infra.tracer import write_trace
-            write_trace(session_messages, runtime.get("tracedir"), runtime.get("model", "unknown"))
+            write_trace(session_messages)
 
         self.messages.append({"role": "user", "content": placeholder_content})
         self.messages.append({"role": "assistant", "content": final_content})
