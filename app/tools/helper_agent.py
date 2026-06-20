@@ -29,7 +29,7 @@ class HelperAgentTool(Tool):
 
     @staticmethod
     async def call(prompt: str, system_prompt: str = None) -> str:
-        log.info(f"helper_agent tool called with prompt: {prompt}")
+        log.info(f"helper_agent tool called, prompt length: {len(prompt)}")
         from ..core.helper_agent import HelperAgent
         agent = HelperAgent(system_prompt=system_prompt)
         return await agent.run(prompt)
