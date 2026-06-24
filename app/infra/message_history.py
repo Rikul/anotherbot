@@ -44,6 +44,7 @@ class MessageHistory:
                     ON messages(conversation_id)
                 """)
                 conn.commit()
+            conn.close()
 
         except sqlite3.Error as e:
             log.error(f"Error creating message history database: {str(e)}")
@@ -59,6 +60,7 @@ class MessageHistory:
                 (self.channel, role, content, timestamp, est, conversation_id),
             )
             conn.commit()
+        conn.close()
         log.info(f"Added message to history: role={role}, est_tokens={est}, content={content[:30]}...")
 
     def get_history(self, limit: int = 100) -> list[dict]:
@@ -66,6 +68,7 @@ class MessageHistory:
             rows = conn.execute("""SELECT role, content FROM messages
                                     WHERE channel = ?
                                     ORDER BY id DESC LIMIT ?""", (self.channel, limit)).fetchall()
-            return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
+        conn.close()
+        return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
 
 
