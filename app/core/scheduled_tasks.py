@@ -57,9 +57,11 @@ class ScheduledTasks:
         query = """SELECT name, prompt, enabled, repeat, interval_mins,
                           last_run, next_run, delivery_channel, run_count, created_at
                    FROM tasks"""
-        with sqlite3.connect(APP_DB) as conn:
+        conn = sqlite3.connect(APP_DB)
+        try:
             rows = conn.execute(query).fetchall()
-        conn.close()
+        finally:
+            conn.close()
 
         return [{"name": n, "prompt": p, "enabled": e, "repeat": rpt,
                  "interval_mins": i, "last_run": lr, "next_run": nr,
@@ -70,16 +72,16 @@ class ScheduledTasks:
     def add_task(self, name: str, prompt: str, next_run: str, interval_mins: int = 1,
                  repeat: int = 0, delivery_channel: str = "telegram", enabled: int = 1):
         now = datetime.now().isoformat()
+        conn = sqlite3.connect(APP_DB)
         try:
-            with sqlite3.connect(APP_DB) as conn:
-                try:
+            try:
+                with conn:
                     conn.execute("""
                         INSERT INTO tasks (name, prompt, interval_mins, repeat, next_run, delivery_channel, enabled, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, (name, prompt, interval_mins, repeat, next_run or now, delivery_channel, enabled, now))
-                    conn.commit()
-                except sqlite3.IntegrityError:
-                    raise ValueError(f"Task '{name}' already exists")
+            except sqlite3.IntegrityError:
+                raise ValueError(f"Task '{name}' already exists")
         finally:
             conn.close()
 
@@ -94,12 +96,12 @@ class ScheduledTasks:
             return
         set_clause = ", ".join(f"{col} = ?" for col in fields)
         values = list(fields.values()) + [name]
+        conn = sqlite3.connect(APP_DB)
         try:
-            with sqlite3.connect(APP_DB) as conn:
+            with conn:
                 if not conn.execute("SELECT name FROM tasks WHERE name = ?", (name,)).fetchone():
                     raise ValueError(f"Task '{name}' not found")
                 conn.execute(f"UPDATE tasks SET {set_clause} WHERE name = ?", values)
-                conn.commit()
         finally:
             conn.close()
 

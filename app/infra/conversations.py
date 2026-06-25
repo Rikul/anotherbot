@@ -15,8 +15,8 @@ from .app_logging import log
 def _fk_conn(db_path: Path):
     """sqlite3 connection with FK constraints enforced."""
     conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON")
     try:
+        conn.execute("PRAGMA foreign_keys = ON")
         with conn:
             yield conn
     finally:
