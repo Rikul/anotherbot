@@ -50,14 +50,18 @@ class ScheduledTasks:
             """)
 
             conn.commit()
+        conn.close()
 
 
     def load_tasks(self) -> list[dict]:
         query = """SELECT name, prompt, enabled, repeat, interval_mins,
                           last_run, next_run, delivery_channel, run_count, created_at
                    FROM tasks"""
-        with sqlite3.connect(APP_DB) as conn:
+        conn = sqlite3.connect(APP_DB)
+        try:
             rows = conn.execute(query).fetchall()
+        finally:
+            conn.close()
 
         return [{"name": n, "prompt": p, "enabled": e, "repeat": rpt,
                  "interval_mins": i, "last_run": lr, "next_run": nr,
@@ -68,31 +72,38 @@ class ScheduledTasks:
     def add_task(self, name: str, prompt: str, next_run: str, interval_mins: int = 1,
                  repeat: int = 0, delivery_channel: str = "telegram", enabled: int = 1):
         now = datetime.now().isoformat()
-        with sqlite3.connect(APP_DB) as conn:
+        conn = sqlite3.connect(APP_DB)
+        try:
             try:
-                conn.execute("""
-                    INSERT INTO tasks (name, prompt, interval_mins, repeat, next_run, delivery_channel, enabled, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (name, prompt, interval_mins, repeat, next_run or now, delivery_channel, enabled, now))
-                conn.commit()
+                with conn:
+                    conn.execute("""
+                        INSERT INTO tasks (name, prompt, interval_mins, repeat, next_run, delivery_channel, enabled, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (name, prompt, interval_mins, repeat, next_run or now, delivery_channel, enabled, now))
             except sqlite3.IntegrityError:
                 raise ValueError(f"Task '{name}' already exists")
+        finally:
+            conn.close()
 
     def remove_task(self, name: str):
         with sqlite3.connect(APP_DB) as conn:
             conn.execute("DELETE FROM tasks WHERE name = ?", (name,))
             conn.commit()
+        conn.close()
 
     def update_task(self, name: str, **fields):
         if not fields:
             return
         set_clause = ", ".join(f"{col} = ?" for col in fields)
         values = list(fields.values()) + [name]
-        with sqlite3.connect(APP_DB) as conn:
-            if not conn.execute("SELECT name FROM tasks WHERE name = ?", (name,)).fetchone():
-                raise ValueError(f"Task '{name}' not found")
-            conn.execute(f"UPDATE tasks SET {set_clause} WHERE name = ?", values)
-            conn.commit()
+        conn = sqlite3.connect(APP_DB)
+        try:
+            with conn:
+                if not conn.execute("SELECT name FROM tasks WHERE name = ?", (name,)).fetchone():
+                    raise ValueError(f"Task '{name}' not found")
+                conn.execute(f"UPDATE tasks SET {set_clause} WHERE name = ?", values)
+        finally:
+            conn.close()
 
     def save_output(self, name: str, prompt: str, output: str,
                     status: str = "success", duration_secs: float = None):
@@ -102,6 +113,7 @@ class ScheduledTasks:
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (name, prompt, output, status, duration_secs, datetime.now().isoformat()))
             conn.commit()
+        conn.close()
 
     def get_output(self, name: str, num_entries: int = 5) -> list[dict]:
         with sqlite3.connect(APP_DB) as conn:
@@ -110,6 +122,7 @@ class ScheduledTasks:
                 WHERE name = ?
                 ORDER BY id DESC LIMIT ?
             """, (name, num_entries)).fetchall()
+        conn.close()
         return [{"prompt": p, "output": o, "status": s, "duration_secs": d, "timestamp": t}
                 for p, o, s, d, t in reversed(rows)]
 
@@ -149,6 +162,7 @@ class ScheduledTasks:
                 conn.execute("""UPDATE tasks SET last_run = ?, next_run = ?, run_count = run_count + 1
                                 WHERE name = ?""", (now.isoformat(), next_run, name))
                 conn.commit()
+            conn.close()
         else:
             self.remove_task(name)
 
