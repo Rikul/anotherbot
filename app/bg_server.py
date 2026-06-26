@@ -15,6 +15,10 @@ async def start_server() -> None:
     telegram_agent = None
     discord_channel = None
     discord_agent = None
+    web_channel = None
+    web_agent = None
+    slack_channel = None
+    slack_agent = None
 
     # Change CWD to PROJECT_HOME/workspace to ensure all file operations are relative to this directory
     # This is important for the agent to read/write files in the workspace
@@ -44,8 +48,6 @@ async def start_server() -> None:
             discord_channel.start()
             discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel, max_iterations=runtime.get("max_iterations", 250))
 
-    web_channel = None
-    web_agent = None
     if config.get("websocket"):
         from .channels.web_channel import WebChannel
         ws_config = config.get("websocket")
@@ -57,7 +59,19 @@ async def start_server() -> None:
         web_channel.start()
         web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
 
-    if not telegram_channel and not discord_channel and not web_channel:
+    if config.get("slack"):
+        slack_bot_token = config.slack.get("BOT_TOKEN")
+        slack_app_token = config.slack.get("APP_TOKEN")
+        if not slack_bot_token or not slack_app_token:
+            log.error("Slack BOT_TOKEN and APP_TOKEN are required, skipping Slack channel")
+        else:
+            from .channels.slack import SlackChannel
+            slack_mq = MessageQueue()
+            slack_channel = SlackChannel(slack_mq, bot_token=slack_bot_token, app_token=slack_app_token, allow_from=config.slack.get("ALLOW_FROM", []))
+            slack_channel.start()
+            slack_agent = BackgroundAgent(mq=slack_mq, channel=slack_channel, max_iterations=runtime.get("max_iterations", 250))
+
+    if not telegram_channel and not discord_channel and not web_channel and not slack_channel:
         log.error("No channels configured, exiting...")
         return
 
@@ -73,6 +87,9 @@ async def start_server() -> None:
         from .channels.channel import ChannelType
         channels[ChannelType.WEB.value] = web_channel
         mqs[ChannelType.WEB.value] = web_mq
+    if slack_channel:
+        channels["slack"] = slack_channel
+        mqs["slack"] = slack_mq
 
     tasks = ScheduledTasks(mqs=mqs, channels=channels)
 
@@ -83,5 +100,7 @@ async def start_server() -> None:
         coros.extend([discord_channel.run_polling(), discord_agent.process_incoming(), discord_mq.process_outgoing()])
     if web_channel:
         coros.extend([web_channel.run_polling(), web_agent.process_incoming(), web_mq.process_outgoing()])
+    if slack_channel:
+        coros.extend([slack_channel.run_polling(), slack_agent.process_incoming(), slack_mq.process_outgoing()])
 
     await asyncio.gather(*coros)

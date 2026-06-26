@@ -84,11 +84,11 @@ Current built-in tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_ski
 
 `_HELPER_AGENT_TOOLS` in `tool_calls.py` is an explicit allowlist of tools available to `HelperAgent` (used internally by scheduled tasks). Scheduled task mutation tools (`add/update/remove_scheduled_task`) are excluded to prevent recursion.
 
-`get_all_tool_specs()` merges built-in specs with any MCP tool specs at call time (not module load). `run_tool_async()` is the async dispatcher used by `handle_tool_call` — it routes to `MCPManager.call_tool()` for MCP tools or falls through to the synchronous `run_tool()` for built-ins.
+`get_all_tool_specs()` merges built-in specs with any MCP tool specs at call time (not module load). `run_tool_async()` is the async dispatcher used by `handle_tool_call` — it routes to `MCPManager.call_tool()` for MCP tools or falls through to `run_tool()` for built-ins.
 
 ### MCP Servers
 
-`MCPManager` (`app/core/mcp_manager.py`) owns persistent FastMCP client connections and their tool catalogs. It is a module-level singleton (`mcp_manager`). `initialize_mcp()` in `main.py` reads `mcp_servers.json`, then calls `mcp_manager.initialize()` which connects all servers concurrently via `asyncio.gather`. Each server's tools are discovered via `list_tools()` and registered under the namespace `servername__toolname` (`_SEP = "__"`). `rpartition` is used when routing calls so tool names may contain underscores freely; only the server name must not contain `__`.
+`MCPManager` (`app/core/mcp_manager.py`) owns persistent FastMCP client connections and their tool catalogs. It is a module-level singleton (`mcp_manager`). `initialize_mcp()` in `main.py` reads `mcp_servers.json`, then calls `mcp_manager.initialize()` which connects all servers concurrently via `asyncio.gather`. Each server's tools are discovered via `list_tools()` and registered under the namespace `servername__toolname` (`_SEP = "__"`). `partition` is used when routing calls so tool names may contain underscores freely; only the server name must not contain `__`.
 
 The singleton is shut down via `mcp_manager.shutdown()` in a `try/finally` block in `main()`. `HelperAgent` does not receive MCP tools — it uses the static `helper_tool_specs` allowlist to prevent recursion.
 
