@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 from .app_logging import log
-from ..config import APP_DB
+from ..config import APP_DB, get_db_connection
 
 def _est_tokens(content: str) -> int:
     return max(1, len(content) // 4)
@@ -18,7 +18,7 @@ class MessageHistory:
     def _ensure_db(self):
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            with sqlite3.connect(self.db_path) as conn:
+            with get_db_connection(self.db_path) as conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS messages (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,7 +53,7 @@ class MessageHistory:
     def add_message(self, role: str, content: str, conversation_id: int = None):
         timestamp = datetime.now().isoformat()
         est = _est_tokens(content)
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_connection(self.db_path) as conn:
             conn.execute(
                 "INSERT INTO messages (channel, role, content, timestamp, est_tokens, conversation_id) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
@@ -64,7 +64,7 @@ class MessageHistory:
         log.info(f"Added message to history: role={role}, est_tokens={est}, content={content[:30]}...")
 
     def get_history(self, limit: int = 100) -> list[dict]:
-        with sqlite3.connect(self.db_path) as conn:
+        with get_db_connection(self.db_path) as conn:
             rows = conn.execute("""SELECT role, content FROM messages
                                     WHERE channel = ?
                                     ORDER BY id DESC LIMIT ?""", (self.channel, limit)).fetchall()

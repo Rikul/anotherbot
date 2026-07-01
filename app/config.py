@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import tomllib
 from pathlib import Path
 
@@ -10,6 +11,21 @@ APP_NAME = "crafterscode"
 PROJECT_HOME = Path(os.environ.get("ANOTHERBOT_HOME", Path.home() / f".{APP_NAME}"))
 HOME_CONFIG_PATH = PROJECT_HOME / "config.toml"
 APP_DB = PROJECT_HOME / "app.db"
+
+
+def get_db_connection(db_path: Path = APP_DB, *, timeout: float = 30.0,
+                       isolation_level: str | None = "") -> sqlite3.Connection:
+    """Open a connection to a shared SQLite db (e.g. APP_DB) with settings safe
+    for concurrent access from multiple asyncio tasks/channels.
+
+    WAL mode lets readers proceed without blocking the writer, and the longer
+    busy_timeout makes writers retry instead of immediately raising
+    "database is locked" when another connection briefly holds the write lock.
+    """
+    conn = sqlite3.connect(db_path, timeout=timeout, isolation_level=isolation_level)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
+    return conn
 
 
 def load(path: Path | str = HOME_CONFIG_PATH) -> None:

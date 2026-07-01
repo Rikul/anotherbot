@@ -7,14 +7,14 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from ..config import APP_DB, PROJECT_HOME
+from ..config import APP_DB, PROJECT_HOME, get_db_connection
 from .app_logging import log
 
 
 @contextlib.contextmanager
 def _fk_conn(db_path: Path):
     """sqlite3 connection with FK constraints enforced."""
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection(db_path)
     try:
         conn.execute("PRAGMA foreign_keys = ON")
         with conn:
@@ -79,7 +79,7 @@ class ConversationStore:
 
             # Phase 2: Migration — BEGIN IMMEDIATE for concurrency safety.
             # The WHERE conversation_id IS NULL guard makes this re-entrant.
-            mconn = sqlite3.connect(self.db_path, isolation_level=None)
+            mconn = get_db_connection(self.db_path, isolation_level=None)
             try:
                 mconn.execute("PRAGMA foreign_keys = ON")
                 mconn.execute("BEGIN IMMEDIATE")
