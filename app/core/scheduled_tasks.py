@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from ..infra.app_logging import log
-from ..config import APP_DB
+from ..config import APP_DB, get_db_connection
 import sqlite3
 import asyncio
 from .helper_agent import HelperAgent
@@ -19,45 +19,46 @@ class ScheduledTasks:
         self._init_tasks_db()
 
     def _init_tasks_db(self):
-        with sqlite3.connect(APP_DB) as conn:
+        conn = get_db_connection()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            with conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tasks (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name            TEXT    NOT NULL UNIQUE,
+                        prompt          TEXT    NOT NULL,
+                        enabled         INTEGER NOT NULL DEFAULT 1,
+                        repeat          INTEGER NOT NULL DEFAULT 0,
+                        interval_mins   INTEGER NOT NULL DEFAULT 1,
+                        last_run        TEXT,
+                        next_run        TEXT    NOT NULL,
+                        delivery_channel   TEXT    NOT NULL DEFAULT 'telegram',
+                        run_count       INTEGER NOT NULL DEFAULT 0,
+                        created_at      TEXT    NOT NULL
+                    )
+                """)
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name            TEXT    NOT NULL UNIQUE,
-                    prompt          TEXT    NOT NULL,
-                    enabled         INTEGER NOT NULL DEFAULT 1,
-                    repeat          INTEGER NOT NULL DEFAULT 0,
-                    interval_mins   INTEGER NOT NULL DEFAULT 1,
-                    last_run        TEXT,
-                    next_run        TEXT    NOT NULL,
-                    delivery_channel   TEXT    NOT NULL DEFAULT 'telegram',
-                    run_count       INTEGER NOT NULL DEFAULT 0,
-                    created_at      TEXT    NOT NULL
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS task_outputs (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name         TEXT    NOT NULL,
-                    prompt       TEXT    NOT NULL,
-                    output       TEXT    NOT NULL,
-                    status      TEXT    NOT NULL DEFAULT 'success',
-                    duration_secs REAL,
-                    timestamp    TEXT    NOT NULL
-                )
-            """)
-
-            conn.commit()
-        conn.close()
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS task_outputs (
+                        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name         TEXT    NOT NULL,
+                        prompt       TEXT    NOT NULL,
+                        output       TEXT    NOT NULL,
+                        status      TEXT    NOT NULL DEFAULT 'success',
+                        duration_secs REAL,
+                        timestamp    TEXT    NOT NULL
+                    )
+                """)
+        finally:
+            conn.close()
 
 
     def load_tasks(self) -> list[dict]:
         query = """SELECT name, prompt, enabled, repeat, interval_mins,
                           last_run, next_run, delivery_channel, run_count, created_at
                    FROM tasks"""
-        conn = sqlite3.connect(APP_DB)
+        conn = get_db_connection()
         try:
             rows = conn.execute(query).fetchall()
         finally:
@@ -72,7 +73,7 @@ class ScheduledTasks:
     def add_task(self, name: str, prompt: str, next_run: str, interval_mins: int = 1,
                  repeat: int = 0, delivery_channel: str = "telegram", enabled: int = 1):
         now = datetime.now().isoformat()
-        conn = sqlite3.connect(APP_DB)
+        conn = get_db_connection()
         try:
             try:
                 with conn:
@@ -86,17 +87,19 @@ class ScheduledTasks:
             conn.close()
 
     def remove_task(self, name: str):
-        with sqlite3.connect(APP_DB) as conn:
-            conn.execute("DELETE FROM tasks WHERE name = ?", (name,))
-            conn.commit()
-        conn.close()
+        conn = get_db_connection()
+        try:
+            with conn:
+                conn.execute("DELETE FROM tasks WHERE name = ?", (name,))
+        finally:
+            conn.close()
 
     def update_task(self, name: str, **fields):
         if not fields:
             return
         set_clause = ", ".join(f"{col} = ?" for col in fields)
         values = list(fields.values()) + [name]
-        conn = sqlite3.connect(APP_DB)
+        conn = get_db_connection()
         try:
             with conn:
                 if not conn.execute("SELECT name FROM tasks WHERE name = ?", (name,)).fetchone():
@@ -107,22 +110,26 @@ class ScheduledTasks:
 
     def save_output(self, name: str, prompt: str, output: str,
                     status: str = "success", duration_secs: float = None):
-        with sqlite3.connect(APP_DB) as conn:
-            conn.execute("""
-                INSERT INTO task_outputs (name, prompt, output, status, duration_secs, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (name, prompt, output, status, duration_secs, datetime.now().isoformat()))
-            conn.commit()
-        conn.close()
+        conn = get_db_connection()
+        try:
+            with conn:
+                conn.execute("""
+                    INSERT INTO task_outputs (name, prompt, output, status, duration_secs, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (name, prompt, output, status, duration_secs, datetime.now().isoformat()))
+        finally:
+            conn.close()
 
     def get_output(self, name: str, num_entries: int = 5) -> list[dict]:
-        with sqlite3.connect(APP_DB) as conn:
+        conn = get_db_connection()
+        try:
             rows = conn.execute("""
                 SELECT prompt, output, status, duration_secs, timestamp FROM task_outputs
                 WHERE name = ?
                 ORDER BY id DESC LIMIT ?
             """, (name, num_entries)).fetchall()
-        conn.close()
+        finally:
+            conn.close()
         return [{"prompt": p, "output": o, "status": s, "duration_secs": d, "timestamp": t}
                 for p, o, s, d, t in reversed(rows)]
 
@@ -158,11 +165,13 @@ class ScheduledTasks:
                 intervals_passed = int(elapsed_secs // interval.total_seconds())
                 next_due = original_next + (intervals_passed + 1) * interval
             next_run = next_due.isoformat()
-            with sqlite3.connect(APP_DB) as conn:
-                conn.execute("""UPDATE tasks SET last_run = ?, next_run = ?, run_count = run_count + 1
-                                WHERE name = ?""", (now.isoformat(), next_run, name))
-                conn.commit()
-            conn.close()
+            conn = get_db_connection()
+            try:
+                with conn:
+                    conn.execute("""UPDATE tasks SET last_run = ?, next_run = ?, run_count = run_count + 1
+                                    WHERE name = ?""", (now.isoformat(), next_run, name))
+            finally:
+                conn.close()
         else:
             self.remove_task(name)
 
