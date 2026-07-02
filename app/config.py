@@ -18,14 +18,14 @@ def get_db_connection(db_path: Path = APP_DB, *, timeout: float = 30.0,
     """Open a connection to a shared SQLite db (e.g. APP_DB) with settings safe
     for concurrent access from multiple asyncio tasks/channels.
 
-    WAL mode lets readers proceed without blocking the writer, and the longer
-    busy_timeout makes writers retry instead of immediately raising
+    The timeout is passed straight to sqlite3.connect, which sets the
+    connection's busy timeout so writers retry instead of immediately raising
     "database is locked" when another connection briefly holds the write lock.
+    WAL mode (readers don't block the writer) is persisted in the db file
+    itself, so it only needs to be enabled once by each store's schema-init
+    step rather than on every connection.
     """
-    conn = sqlite3.connect(db_path, timeout=timeout, isolation_level=isolation_level)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
-    return conn
+    return sqlite3.connect(db_path, timeout=timeout, isolation_level=isolation_level)
 
 
 def load(path: Path | str = HOME_CONFIG_PATH) -> None:

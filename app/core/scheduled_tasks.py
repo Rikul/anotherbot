@@ -19,38 +19,39 @@ class ScheduledTasks:
         self._init_tasks_db()
 
     def _init_tasks_db(self):
-        with get_db_connection() as conn:
+        conn = get_db_connection()
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            with conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS tasks (
+                        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name            TEXT    NOT NULL UNIQUE,
+                        prompt          TEXT    NOT NULL,
+                        enabled         INTEGER NOT NULL DEFAULT 1,
+                        repeat          INTEGER NOT NULL DEFAULT 0,
+                        interval_mins   INTEGER NOT NULL DEFAULT 1,
+                        last_run        TEXT,
+                        next_run        TEXT    NOT NULL,
+                        delivery_channel   TEXT    NOT NULL DEFAULT 'telegram',
+                        run_count       INTEGER NOT NULL DEFAULT 0,
+                        created_at      TEXT    NOT NULL
+                    )
+                """)
 
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS tasks (
-                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name            TEXT    NOT NULL UNIQUE,
-                    prompt          TEXT    NOT NULL,
-                    enabled         INTEGER NOT NULL DEFAULT 1,
-                    repeat          INTEGER NOT NULL DEFAULT 0,
-                    interval_mins   INTEGER NOT NULL DEFAULT 1,
-                    last_run        TEXT,
-                    next_run        TEXT    NOT NULL,
-                    delivery_channel   TEXT    NOT NULL DEFAULT 'telegram',
-                    run_count       INTEGER NOT NULL DEFAULT 0,
-                    created_at      TEXT    NOT NULL
-                )
-            """)
-
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS task_outputs (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name         TEXT    NOT NULL,
-                    prompt       TEXT    NOT NULL,
-                    output       TEXT    NOT NULL,
-                    status      TEXT    NOT NULL DEFAULT 'success',
-                    duration_secs REAL,
-                    timestamp    TEXT    NOT NULL
-                )
-            """)
-
-            conn.commit()
-        conn.close()
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS task_outputs (
+                        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name         TEXT    NOT NULL,
+                        prompt       TEXT    NOT NULL,
+                        output       TEXT    NOT NULL,
+                        status      TEXT    NOT NULL DEFAULT 'success',
+                        duration_secs REAL,
+                        timestamp    TEXT    NOT NULL
+                    )
+                """)
+        finally:
+            conn.close()
 
 
     def load_tasks(self) -> list[dict]:
@@ -86,10 +87,12 @@ class ScheduledTasks:
             conn.close()
 
     def remove_task(self, name: str):
-        with get_db_connection() as conn:
-            conn.execute("DELETE FROM tasks WHERE name = ?", (name,))
-            conn.commit()
-        conn.close()
+        conn = get_db_connection()
+        try:
+            with conn:
+                conn.execute("DELETE FROM tasks WHERE name = ?", (name,))
+        finally:
+            conn.close()
 
     def update_task(self, name: str, **fields):
         if not fields:
@@ -107,22 +110,26 @@ class ScheduledTasks:
 
     def save_output(self, name: str, prompt: str, output: str,
                     status: str = "success", duration_secs: float = None):
-        with get_db_connection() as conn:
-            conn.execute("""
-                INSERT INTO task_outputs (name, prompt, output, status, duration_secs, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (name, prompt, output, status, duration_secs, datetime.now().isoformat()))
-            conn.commit()
-        conn.close()
+        conn = get_db_connection()
+        try:
+            with conn:
+                conn.execute("""
+                    INSERT INTO task_outputs (name, prompt, output, status, duration_secs, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (name, prompt, output, status, duration_secs, datetime.now().isoformat()))
+        finally:
+            conn.close()
 
     def get_output(self, name: str, num_entries: int = 5) -> list[dict]:
-        with get_db_connection() as conn:
+        conn = get_db_connection()
+        try:
             rows = conn.execute("""
                 SELECT prompt, output, status, duration_secs, timestamp FROM task_outputs
                 WHERE name = ?
                 ORDER BY id DESC LIMIT ?
             """, (name, num_entries)).fetchall()
-        conn.close()
+        finally:
+            conn.close()
         return [{"prompt": p, "output": o, "status": s, "duration_secs": d, "timestamp": t}
                 for p, o, s, d, t in reversed(rows)]
 
@@ -158,11 +165,13 @@ class ScheduledTasks:
                 intervals_passed = int(elapsed_secs // interval.total_seconds())
                 next_due = original_next + (intervals_passed + 1) * interval
             next_run = next_due.isoformat()
-            with get_db_connection() as conn:
-                conn.execute("""UPDATE tasks SET last_run = ?, next_run = ?, run_count = run_count + 1
-                                WHERE name = ?""", (now.isoformat(), next_run, name))
-                conn.commit()
-            conn.close()
+            conn = get_db_connection()
+            try:
+                with conn:
+                    conn.execute("""UPDATE tasks SET last_run = ?, next_run = ?, run_count = run_count + 1
+                                    WHERE name = ?""", (now.isoformat(), next_run, name))
+            finally:
+                conn.close()
         else:
             self.remove_task(name)
 

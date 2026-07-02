@@ -35,6 +35,7 @@ class ConversationStore:
 
             # Phase 1: DDL — idempotent CREATE TABLE/INDEX and optional ALTER TABLE
             with _fk_conn(self.db_path) as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS conversations (
                         id         INTEGER PRIMARY KEY AUTOINCREMENT,
