@@ -379,3 +379,7 @@ class MyTool(Tool):
     def call(param: str) -> str:
         return "result"
 ```
+
+## Author
+
+Rikul Patel <rikulpatel@gmail.com>
