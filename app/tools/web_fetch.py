@@ -2,6 +2,11 @@ import subprocess
 from ..infra.app_logging import log
 from ..core.tool import Tool
 
+
+_CURL_CONNECT_TIMEOUT_SECS = 5
+_SUBPROCESS_TIMEOUT_SECS = 10
+
+
 class WebFetchTool(Tool):
 
     @staticmethod
@@ -30,11 +35,20 @@ class WebFetchTool(Tool):
 
         try:
             result = subprocess.run(
-                ["curl", "-sL", url],
+                [
+                    "curl",
+                    "--silent",
+                    "--show-error",
+                    "--fail",
+                    "--location",
+                    "--connect-timeout",
+                    str(_CURL_CONNECT_TIMEOUT_SECS),
+                    url,
+                ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=10
+                timeout=_SUBPROCESS_TIMEOUT_SECS
             )
             if result.returncode != 0:
                 return f"Error fetching URL {url}: {result.stderr.strip()}"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 
 from fastmcp import Client
 from fastmcp.client import StdioTransport
@@ -60,10 +61,26 @@ class MCPManager:
     def _build_client(self, cfg: dict) -> Client:
         if "url" in cfg:
             return Client(cfg["url"])
-        command = cfg["command"]
+        command = cfg.get("command")
+        if not isinstance(command, str) or not command.strip():
+            raise ValueError("stdio config requires a non-empty 'command' string")
+
         args = cfg.get("args", [])
+        if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+            raise ValueError("stdio config 'args' must be a list of strings")
+
         env = cfg.get("env")
+        if env is not None:
+            if not isinstance(env, Mapping) or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in env.items()
+            ):
+                raise ValueError("stdio config 'env' must be a mapping of strings to strings")
+
         cwd = cfg.get("cwd")
+        if cwd is not None and (not isinstance(cwd, str) or not cwd.strip()):
+            raise ValueError("stdio config 'cwd' must be a non-empty string")
+
         return Client(StdioTransport(command=command, args=args, env=env, cwd=cwd))
 
     def _to_openai_spec(self, namespaced_name: str, tool) -> dict:
@@ -103,8 +120,19 @@ class MCPManager:
     def is_mcp_tool(self, tool_name: str) -> bool:
         return tool_name in self._specs
 
+    def _split_tool_name(self, tool_name: str) -> tuple[str, str, str]:
+        server_name, sep, bare_name = tool_name.rpartition(self._SEP)
+        if sep and (server_name in self._clients or server_name in self._server_configs):
+            return server_name, sep, bare_name
+
+        fallback_server, fallback_sep, fallback_bare = tool_name.partition(self._SEP)
+        if fallback_sep:
+            return fallback_server, fallback_sep, fallback_bare
+
+        return server_name, sep, bare_name
+
     async def call_tool(self, tool_name: str, tool_args: dict) -> str:
-        server_name, sep, bare_name = tool_name.partition(self._SEP)
+        server_name, sep, bare_name = self._split_tool_name(tool_name)
         if not sep:
             return f"Error: MCP tool '{tool_name}' is not namespaced with '{self._SEP}'."
         client = self._clients.get(server_name)

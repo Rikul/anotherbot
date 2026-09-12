@@ -1,6 +1,6 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-from app.tools.bash import BashTool
+from app.tools.bash import BashTool, _summarize_command_for_logs
 bash = BashTool.call
 
 
@@ -47,3 +47,41 @@ def test_bash_returns_combined_stderr():
         result = bash("echo out && echo err >&2")
     assert "out" in result
     assert "err" in result
+
+
+def test_summarize_command_for_logs_redacts_obvious_secrets():
+    url_with_credentials = "'https://" + "user" + ":" + "userpass" + "@example.com'"
+    command = " ".join((
+        "API_KEY=supersecret",
+        "curl",
+        "-H",
+        "'Authorization: bearer_value'",
+        "'https://example.com?token=xyz'",
+        url_with_credentials,
+    ))
+    summary = _summarize_command_for_logs(command)
+    assert "API_KEY=[REDACTED]" in summary
+    assert "Authorization: [REDACTED]" in summary
+    assert "?token=[REDACTED]" in summary
+    assert "https://[REDACTED]@example.com" in summary
+
+
+def test_summarize_command_for_logs_truncates_long_commands():
+    summary = _summarize_command_for_logs("x" * 250, max_length=40)
+    assert summary.endswith("...")
+    assert len(summary) == 40
+
+
+def test_bash_logs_redacted_command_on_error():
+    command = "TOKEN=topsecret echo hello"
+    with patch("app.tools.bash.log.info") as info_log, \
+         patch("app.tools.bash.log.error") as error_log, \
+         patch("app.tools.bash.subprocess.run", side_effect=Exception("timed out")):
+        bash(command)
+
+    logged_command = info_log.call_args.args[0]
+    logged_error = error_log.call_args.args[0]
+    assert "topsecret" not in logged_command
+    assert "topsecret" not in logged_error
+    assert "[REDACTED]" in logged_command
+    assert "[REDACTED]" in logged_error

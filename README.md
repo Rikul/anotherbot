@@ -42,10 +42,9 @@ LLM_BASE_URL=https://openrouter.ai/api/v1  # optional override
 Config lives at `~/.crafterscode/config.toml` and is created automatically on first run with defaults:
 
 ```toml
-model = "deepseek/deepseek-v3.2"
+model = "deepseek/deepseek-v4-flash"
 max_iterations = 100
 base_url = "https://openrouter.ai/api/v1"
-api_key = ""  # fallback if LLM_API_KEY env var is not set
 
 [telegram]
 BOT_TOKEN = ""
@@ -60,7 +59,7 @@ HOST = "127.0.0.1"   # use 0.0.0.0 to expose on all interfaces (required for Doc
 PORT = 8765
 ```
 
-Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
+Message history is stored in `~/.crafterscode/app.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
 
 ## Usage
 
@@ -312,7 +311,7 @@ docker run -d \
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
 | `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
 | `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
-| `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
+| `MODEL` | no | Model string (default: `deepseek/deepseek-v4-flash`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
 
 At least one channel (`WEBSOCKET_HOST`, `TELEGRAM_BOT_TOKEN`, or `DISCORD_BOT_TOKEN`) must be set or the server will exit.

@@ -1,5 +1,6 @@
 import json
 import pytest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -47,3 +48,23 @@ def test_write_trace_returns_none_on_error(tmp_path):
     with patch("app.core.runtime._store", {"tracedir": blocker / "subdir", "model": "m"}):
         result = write_trace([])
     assert result is None
+
+
+def test_write_trace_avoids_filename_collisions_within_same_second(tmp_path):
+    fixed_now = datetime(2026, 1, 2, 3, 4, 5, 678901)
+
+    class FixedDateTime:
+        @classmethod
+        def now(cls):
+            return fixed_now
+
+    with patch("app.core.runtime._store", {"tracedir": tmp_path, "model": "test-model"}), \
+         patch("app.infra.tracer.datetime", FixedDateTime):
+        first = write_trace([{"role": "user", "content": "one"}])
+        second = write_trace([{"role": "user", "content": "two"}])
+
+    assert first is not None
+    assert second is not None
+    assert first != second
+    assert first.exists()
+    assert second.exists()

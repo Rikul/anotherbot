@@ -28,14 +28,16 @@ class MessageQueue:
     async def process_outgoing(self):
         while True:
             message = await self.outgoing.get()
-            log.info(f"Processing outgoing message for channel {message.channel}: {message.content}")
-            fn = self._delivery.get(message.channel)
-            if not fn:
-                log.error(f"No delivery function registered for channel {message.channel}, dropping message")
-                continue
-
             try:
-                await fn(message)
-            except Exception as e:
-                log.error(f"Failed to deliver message to channel {message.channel}: {e}")
-            
+                log.info(f"Processing outgoing message for channel {message.channel}: {message.content}")
+                fn = self._delivery.get(message.channel)
+                if not fn:
+                    log.error(f"No delivery function registered for channel {message.channel}, dropping message")
+                    continue
+
+                try:
+                    await fn(message)
+                except Exception as e:
+                    log.error(f"Failed to deliver message to channel {message.channel}: {e}")
+            finally:
+                self.outgoing.task_done()

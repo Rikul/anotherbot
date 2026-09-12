@@ -16,10 +16,15 @@ def write_trace(messages: list) -> Path | None:
 
     try:
         tracedir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%m%d%Y_%H%M%S")
+        now = datetime.now()
+        ts = now.strftime("%m%d%Y_%H%M%S_%f")
         path = tracedir / f"trace_{ts}.json"
+        suffix = 1
+        while path.exists():
+            path = tracedir / f"trace_{ts}_{suffix}.json"
+            suffix += 1
         data = {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": now.isoformat(),
             "model": model,
             "messages": messages,
         }
