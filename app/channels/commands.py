@@ -151,10 +151,10 @@ def load_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
         except ValueError:
             return "Invalid id: must be an integer."
         conv = agent._store.get(conv_id)
-        if conv is None or conv["channel"] != agent._channel_str:
-            return "Conversation not found or access denied."
+        if conv is None:
+            return "Conversation not found"
         agent._switch_conversation(conv)
-        convs = agent._store.list(agent._channel_str)
+        convs = agent._store.list()
         msg_count = next((c["message_count"] for c in convs if c["id"] == conv_id), 0)
         return f"Loaded conversation [{conv['id']}] {conv['name']} ({msg_count} messages)"
     return _load

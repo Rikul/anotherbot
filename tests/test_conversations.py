@@ -106,6 +106,13 @@ def test_list_returns_all_for_channel(store):
     assert names == {"A", "B"}
 
 
+def test_list_without_channel_returns_all_with_channel_field(store):
+    store.create("cli", "A")
+    store.create("telegram", "T")
+    convs = store.list()
+    assert {(c["name"], c["channel"]) for c in convs} == {("A", "cli"), ("T", "telegram")}
+
+
 def test_list_includes_message_count(store, db):
     cid = store.create("cli", "With messages")
     with sqlite3.connect(db) as conn:
@@ -131,12 +138,6 @@ def test_rename_updates_name(store):
     cid = store.create("cli", "Old Name")
     store.rename(cid, "New Name", "cli")
     assert store.get(cid)["name"] == "New Name"
-
-
-def test_rename_rejects_cross_channel(store):
-    cid = store.create("cli", "My Conv")
-    with pytest.raises(ValueError, match="does not belong"):
-        store.rename(cid, "Other", "telegram")
 
 
 def test_rename_rejects_missing_conversation(store):
@@ -184,12 +185,6 @@ def test_fork_copies_messages_with_new_channel(store, db):
             "SELECT channel FROM messages WHERE conversation_id=?", (new_id,)
         ).fetchall()
     assert all(r[0] == "cli" for r in rows)
-
-
-def test_fork_rejects_cross_channel(store):
-    cid = store.create("cli")
-    with pytest.raises(ValueError, match="does not belong"):
-        store.fork(cid, "telegram")
 
 
 def test_fork_rejects_missing_conversation(store):
@@ -345,9 +340,3 @@ def test_export_writes_json(store, db, tmp_path):
     data = json.loads(path.read_text())
     assert data["name"] == "Test Export"
     assert data["channel"] == "cli"
-
-
-def test_export_rejects_cross_channel(store):
-    cid = store.create("cli")
-    with pytest.raises(ValueError, match="does not belong"):
-        store.export(cid, "telegram")

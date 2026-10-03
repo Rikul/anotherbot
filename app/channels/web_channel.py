@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 
 # Bump when web_channel.css / web_channel.js change, so browsers (Edge caches
 # static assets aggressively) fetch the new copy instead of a stale one.
-_ASSET_VERSION = "3"
+_ASSET_VERSION = "4"
 
 # Paperclip icon for the attach button (inline so it inherits theme colors).
 _PAPERCLIP_SVG = (
@@ -240,7 +240,7 @@ class WebChannel(Channel):
             from ..core import runtime as _rt
             store = ConversationStore()
             ch = ChannelType.WEB.value
-            convs = store.list(ch)
+            convs = store.list()
             active_id = _rt.get(f"conversation_id:{ch}")
             return JSONResponse({"conversations": convs, "active_id": active_id})
 
@@ -256,7 +256,8 @@ class WebChannel(Channel):
                 return Response(status_code=400)
             store = ConversationStore()
             conv = store.get(conv_id)
-            if conv is None or conv.get("channel") != ChannelType.WEB.value:
+            if not conv:
+                from starlette.responses import Response
                 return Response(status_code=404)
             msgs = store.load_messages(conv_id)
             return JSONResponse({"messages": msgs})

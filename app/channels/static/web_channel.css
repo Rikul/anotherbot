@@ -136,6 +136,22 @@ body {
     font-size: 0.74rem;
     color: var(--text-muted);
 }
+.conv-channel {
+    display: inline-block;
+    margin-right: 6px;
+    padding: 0 5px;
+    border-radius: 4px;
+    font-size: 0.66rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: var(--surface2);
+    color: var(--text-muted);
+}
+.conv-channel-telegram { background: #229ed9; color: #fff; }
+.conv-channel-discord  { background: #5865f2; color: #fff; }
+.conv-channel-cli      { background: #6b7280; color: #fff; }
+.conv-channel-web      { background: var(--accent); color: #fff; }
 
 /* ---- header (full-width, top of page) ---- */
 #header {

@@ -22,7 +22,6 @@ def _fk_conn(db_path: Path):
     finally:
         conn.close()
 
-
 class ConversationStore:
     def __init__(self, db_path: Path = APP_DB):
         self.db_path = db_path
@@ -156,21 +155,21 @@ class ConversationStore:
             "parent_id": row[3], "created_at": row[4], "updated_at": row[5],
         }
 
-    def list(self, channel: str) -> list[dict]:
+    def list(self, channel: str | None = None) -> list[dict]:
         with _fk_conn(self.db_path) as conn:
-            rows = conn.execute(
-                """SELECT c.id, c.name, c.parent_id, c.created_at, c.updated_at,
-                          COUNT(m.id) as message_count
-                   FROM conversations c
-                   LEFT JOIN messages m ON m.conversation_id = c.id
-                   WHERE c.channel=?
-                   GROUP BY c.id
-                   ORDER BY c.updated_at DESC, c.id DESC""",
-                (channel,),
-            ).fetchall()
+            where, params = ("WHERE c.channel=?", (channel,)) if channel else ("", ())
+            q = f"""SELECT c.id, c.name, c.parent_id, c.created_at, c.updated_at,
+                COUNT(m.id) AS message_count, c.channel
+                FROM conversations c
+                LEFT JOIN messages m ON m.conversation_id = c.id
+                {where}
+                GROUP BY c.id
+                ORDER BY c.updated_at DESC, c.id DESC"""
+            rows = conn.execute(q, params).fetchall()
         return [
             {"id": r[0], "name": r[1], "parent_id": r[2],
-             "created_at": r[3], "updated_at": r[4], "message_count": r[5]}
+             "created_at": r[3], "updated_at": r[4], "message_count": r[5],
+             "channel": r[6]}
             for r in rows
         ]
 
@@ -178,10 +177,7 @@ class ConversationStore:
         conv = self.get(conversation_id)
         if conv is None:
             raise ValueError(f"Conversation {conversation_id} not found")
-        if conv["channel"] != channel:
-            raise ValueError(
-                f"Conversation {conversation_id} does not belong to channel {channel!r}"
-            )
+     
         clean = name.strip()[:80] or "New Conversation"
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
@@ -202,10 +198,7 @@ class ConversationStore:
         conv = self.get(conversation_id)
         if conv is None:
             raise ValueError(f"Conversation {conversation_id} not found")
-        if conv["channel"] != channel:
-            raise ValueError(
-                f"Conversation {conversation_id} does not belong to channel {channel!r}"
-            )
+
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
             new_id = conn.execute(
@@ -243,10 +236,7 @@ class ConversationStore:
         conv = self.get(conversation_id)
         if conv is None:
             raise ValueError(f"Conversation {conversation_id} not found")
-        if conv["channel"] != channel:
-            raise ValueError(
-                f"Conversation {conversation_id} does not belong to channel {channel!r}"
-            )
+
         messages = self.load_messages(conversation_id)
         payload = {**conv, "messages": messages}
 

@@ -94,7 +94,9 @@
             item.className = 'conv-item' + (conv.id === activeId ? ' active' : '');
             item.dataset.id = conv.id;
             item.innerHTML = `<span class="conv-name">${escapeHtml(conv.name || 'Untitled')}</span>` +
-                             `<span class="conv-meta">${fmtDate(conv.updated_at)} · ${conv.message_count || 0} msgs</span>`;
+                             `<span class="conv-meta">` +
+                             (conv.channel ? `<span class="conv-channel conv-channel-${escapeHtml(conv.channel)}">${escapeHtml(conv.channel)}</span>` : '') +
+                             `${fmtDate(conv.updated_at)} · ${conv.message_count || 0} msgs</span>`;
             item.addEventListener('click', () => loadConv(conv.id));
             convListEl.appendChild(item);
         });
