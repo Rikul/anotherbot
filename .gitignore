@@ -179,3 +179,7 @@ AGENTS.md
 PLAN.md
 .workspace
 .claude
+
+.mcp.json
+.repowise
+.vscode
