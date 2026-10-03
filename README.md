@@ -42,7 +42,7 @@ LLM_BASE_URL=https://openrouter.ai/api/v1  # optional override
 Config lives at `~/.crafterscode/config.toml` and is created automatically on first run with defaults:
 
 ```toml
-model = "deepseek/deepseek-v3.2"
+model = "deepseek/deepseek-v4.1-flash"
 max_iterations = 100
 base_url = "https://openrouter.ai/api/v1"
 api_key = ""  # fallback if LLM_API_KEY env var is not set
@@ -101,7 +101,7 @@ Then open `http://localhost:8765/` in a browser.
 
 **Features:**
 - Dark/light theme toggle (persisted in `localStorage`)
-- Collapsible sidebar listing all conversations — click to load history
+- Collapsible sidebar listing conversations from **all** channels (web, Telegram, Discord, CLI), each tagged with a channel badge — click to load history. The web UI is intended as an admin interface; put auth in front of it (e.g. a reverse proxy) if it is reachable by others
 - `+ New` button and `/new` command to start a fresh conversation
 - `/help`, `/status`, `/whoami`, `/stop` answered instantly without an LLM call
 - All other slash commands (`/model`, `/load`, `/fork`, `/rename`, `/export`) forwarded to the agent
@@ -126,7 +126,7 @@ ALLOW_FROM = []  # restrict by user ID; empty = allow all
 
 Each channel gets its own message queue and agent. Scheduled task results are delivered to the channel the task was created from; if no context is available, the Discord bot owner is DM'd.
 
-**Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — pause the bot; `/whoami` — show your user ID (Telegram only); `/list`, `/new`, `/load <id>`, `/fork [id]`, `/rename <id> <name>`, `/export [id]` — manage conversation history.
+**Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — pause the bot; `/whoami` — show your user ID (Telegram only); `/list`, `/new`, `/load <id>`, `/fork [id]`, `/rename <id> <name>`, `/export [id]` — manage conversation history. `/list` shows only the current channel's conversations; `/load`, `/fork`, `/rename` and `/export` accept any conversation ID, including ones from other channels.
 
 ### Scheduled Tasks
 
@@ -312,7 +312,7 @@ docker run -d \
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
 | `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
 | `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
-| `MODEL` | no | Model string (default: `deepseek/deepseek-v3.2`) |
+| `MODEL` | no | Model string (default: `deepseek/deepseek-v4.1-flash`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
 
 At least one channel (`WEBSOCKET_HOST`, `TELEGRAM_BOT_TOKEN`, or `DISCORD_BOT_TOKEN`) must be set or the server will exit.

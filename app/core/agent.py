@@ -232,7 +232,7 @@ class Agent(ABC):
             iteration += 1
             log.info("chat.completions.create...")
             chat = await self.client.chat.completions.create(
-                model = runtime.get("model", "deepseek/deepseek-v4-flash"),
+                model = runtime.get("model", "deepseek/deepseek-v4.1-flash"),
                 messages = messages,
                 tools = tool_specs,
             )

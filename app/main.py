@@ -159,7 +159,7 @@ async def main():
 
     args = parse_args()
 
-    runtime.set("model",  config.get("model", "deepseek/deepseek-v4-flash"))
+    runtime.set("model",  config.get("model", "deepseek/deepseek-v4.1-flash"))
     runtime.set("max_iterations", args.max_iterations)
     runtime.set("trace", args.trace)
     runtime.set("tracedir", Path(args.tracedir))
