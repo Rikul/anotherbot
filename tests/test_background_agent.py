@@ -198,7 +198,7 @@ async def test_agent_loop_runs_tool_and_sends_final_reply():
     mock_run_tool.assert_called_once_with(tool_name="bash", tool_args={"command": "echo hi"})
 
     msg = await mq.outgoing.get()
-    assert "running bash" in msg.content
+    assert "> bash" in msg.content
     assert msg.metadata == {"chat_id": 42}
 
 
