@@ -84,7 +84,7 @@ class BackgroundAgent(Agent):
     async def _on_tool_start(self, tool_name: str, tool_args: dict) -> None:
         if self.mq:
             first_arg = str(next(iter(tool_args.values()), ""))[:50] if tool_args else ""
-            status = f"running {tool_name} [{first_arg}]..."
+            status = f"> {tool_name} [{first_arg}]..."
             await self.mq.outgoing_msg(OutgoingMessage(content=status, channel=self.channel, metadata=self._reply_metadata))
 
     async def _on_response(self, content: str | None) -> None:
