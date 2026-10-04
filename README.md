@@ -68,10 +68,9 @@ Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel
 ./run.sh cli -p "your prompt here"
 
 # Flags
--p, --prompt          Initial prompt (required)
+-p, --prompt          Run this prompt once and exit (omit to start the REPL)
 -y, --auto-approve    Skip tool permission prompts
--x, --no-repl         Exit after initial prompt (no REPL)
--s, --silent          Suppress output, implies -y -x
+-q, --quiet           Don't print log messages to the console (still written to the log file)
 -i, --max-iterations  Max agentic loop iterations (default: 100)
 ```
 
@@ -79,13 +78,13 @@ Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel
 
 ```bash
 # Interactive REPL session
-./run.sh cli -p "List all Python files in the current directory"
+./run.sh cli
 
 # Single-shot, auto-approved
-./run.sh cli -p "Create a hello world script" -y -x
+./run.sh cli -p "Create a hello world script" -y
 
-# Silent mode
-./run.sh cli -p "Summarize this repo" -s
+# Quiet, auto-approved (only the agent's output on the console)
+./run.sh cli -p "Summarize this repo" -y -q
 ```
 
 ### Web UI

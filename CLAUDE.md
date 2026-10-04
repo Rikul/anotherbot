@@ -4,19 +4,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Python-based AI agent ("crafterscode") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, silent/non-interactive mode, and a background server architecture with Telegram, Discord, and a FastHTML web UI channel.
+This is a Python-based AI agent ("crafterscode") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, single-prompt (`-p`) mode with optional `--quiet` console logging, and a background server architecture with Telegram, Discord, and a FastHTML web UI channel.
 
 ## Running & Development
 
 ```bash
-# Run the CLI agent
+# Run the CLI agent (interactive REPL)
+./run.sh cli
+
+# Run a single prompt and exit (-p always exits after the response)
 ./run.sh cli -p "your prompt here"
 
-# Run with auto-approve (no permission prompts) and exit after response
-./run.sh cli -p "your prompt" -y -x
+# Run with auto-approve (no permission prompts)
+./run.sh cli -p "your prompt" -y
 
-# Run in silent mode (suppresses output, implies --auto-approve --no-repl)
-./run.sh cli -p "your prompt" -s
+# Quiet mode: no log messages on the console (still written to the log file)
+./run.sh cli -p "your prompt" -y -q
 
 # Run tests
 uv run pytest
@@ -67,7 +70,7 @@ The shared loop lives in `Agent._loop()` (`app/core/agent.py`). Subclasses overr
 
 | Hook | CliAgent | BackgroundAgent | HelperAgent |
 |---|---|---|---|
-| `_on_thinking` | print if not silent | send via mq | — |
+| `_on_thinking` | print | send via mq | — |
 | `_check_permission` | ask stdin | — (always allow) | — |
 | `_on_tool_start` | — | send status via mq | — |
 | `_on_response` | print | send via mq | — |

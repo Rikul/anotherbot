@@ -32,12 +32,16 @@ class PlainFormatter(logging.Formatter):
         )
     
 
-def setup_logging(level: int = logging.INFO):
+def setup_logging(level: int = logging.INFO, console: bool = True):
+    """Log to the rotating file, and also to the console unless ``console`` is False."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    handlers: list[logging.Handler] = []
 
     # console handler — ANSI colors
-    console = logging.StreamHandler()
-    console.setFormatter(AnsiFormatter())
+    if console:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(AnsiFormatter())
+        handlers.append(console_handler)
 
     # file handler — plain text, rotates at 5MB, keeps 3 backups
     file_handler = logging.handlers.RotatingFileHandler(
@@ -47,8 +51,9 @@ def setup_logging(level: int = logging.INFO):
         encoding="utf-8"
     )
     file_handler.setFormatter(PlainFormatter())
+    handlers.append(file_handler)
 
-    logging.basicConfig(level=level, handlers=[console, file_handler])
+    logging.basicConfig(level=level, handlers=handlers)
 
     # silence noisy libraries
     for lib in ("httpx", "httpcore", "openai", "urllib3"):

@@ -35,19 +35,19 @@ def _make_llm_response(content: str) -> MagicMock:
 async def test_cli_with_simple_prompt(capsys):
     """Running the CLI with a simple prompt produces the expected response.
 
-    The test uses ``--silent`` so that the final answer is written to stdout
-    via ``print()``, making it straightforward to capture and assert on.
+    The test uses ``--quiet`` so log lines stay off the console; the final
+    answer is still written to stdout via ``print()`` for easy assertion.
     It mocks only the OpenAI client; all other layers (argparse, Agent,
     agent_loop, config, …) run for real.
     """
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=_make_llm_response("Hello, world!"))
 
-    # --silent sets the module-level log level; restore it after the test so
+    # Restore the module-level log level after the test so
     # other tests that check the default level are not affected.
     original_log_level = app_log.level
     try:
-        with patch("sys.argv", ["prog", "cli", "-p", "say hello", "--silent"]), \
+        with patch("sys.argv", ["prog", "cli", "-p", "say hello", "--quiet"]), \
              patch("app.core.agent.Client") as MockClient, \
              patch("app.cli.cli_agent.get_default_sys_prompt", return_value=""), \
              patch("app.cli.cli_agent.MessageHistory") as MockHistory, \
