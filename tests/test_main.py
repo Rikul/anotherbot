@@ -365,3 +365,24 @@ async def test_initialize_mcp_handles_malformed_json(tmp_path):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()  # must not raise
     mock_mgr.initialize.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_main_fails_fast_on_invalid_env(monkeypatch):
+    """Invalid config env vars abort startup instead of running with partial config"""
+    monkeypatch.setenv("MAX_ITERATIONS", "lots")
+    run_cli_mock = AsyncMock()
+    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
+         patch("app.main.run_cli", run_cli_mock), \
+         pytest.raises(ValueError, match="MAX_ITERATIONS"):
+        await main()
+    run_cli_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_main_max_iterations_defaults_from_env(monkeypatch):
+    monkeypatch.setenv("MAX_ITERATIONS", "12")
+    run_cli_mock = AsyncMock()
+    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
+         patch("app.main.run_cli", run_cli_mock):
+        await main()
+    assert run_cli_mock.call_args.kwargs["max_iterations"] == 12

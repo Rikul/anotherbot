@@ -7,3 +7,5 @@ tests/
 *.md
 run.bat
 .claude/
+.env
+**/.env

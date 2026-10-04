@@ -14,25 +14,12 @@ from .bg_server import start_server
 from .core import runtime
 from .core.mcp_manager import initialize_mcp
 
-from dotenv import load_dotenv
-load_dotenv()
-
-async def load_config() -> None:
-    try:
-        config.load()
-    except FileNotFoundError:
-        log.error("Configuration file not found. Please create config.toml")
-        return
-    except Exception as e:
-        log.error(f"Failed to load configuration: {e}")
-        return
-
 def parse_args():
     parser = argparse.ArgumentParser(prog="app")
     parser.add_argument("--trace", action="store_true", default=False,
                         help="Enable LLM call tracing")
     parser.add_argument("--tracedir", default=str(config.PROJECT_HOME / "trace"), metavar="DIR",
-                        help="Trace output directory (default: ~/.crafterscode/trace)")
+                        help="Trace output directory (default: %(default)s)")
     
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("background", help="Run in background")
@@ -44,7 +31,7 @@ def parse_args():
     cli_parser.add_argument("-y", "--auto-approve", dest="auto_approve", action="store_true", 
                    help="Allow the agent to call tools without asking for permission")
     cli_parser.add_argument("-i", "--max-iterations", metavar="N", dest="max_iterations", type=int, 
-                   help="The maximum number of iterations the agent will run before stopping (default: 100)")
+                   help="The maximum number of iterations the agent will run before stopping (default: 250)")
     cli_parser.add_argument("-q", "--quiet", dest="quiet", action="store_true",
                    help="Don't print log messages to the console (they still go to the log file)")
 
@@ -52,7 +39,7 @@ def parse_args():
     args = parser.parse_args()
 
     if not hasattr(args, "max_iterations") or args.max_iterations is None:
-        args.max_iterations = config.get("max_iterations", 100)
+        args.max_iterations = config.get("max_iterations")
         
     return args
 
@@ -63,7 +50,7 @@ async def main():
     
     ensure_home_dir()
 
-    await load_config()
+    config.load()  # env vars only; raises on invalid values so bad config fails fast
     args = parse_args()
     setup_logging(level=logging.INFO, console=not getattr(args, "quiet", False))
 

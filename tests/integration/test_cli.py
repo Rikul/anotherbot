@@ -10,9 +10,7 @@ production.
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-import app.config as config_module
 from app.main import main
-from app.infra.app_logging import log as app_log
 
 
 def _make_llm_response(content: str) -> MagicMock:
@@ -32,33 +30,29 @@ def _make_llm_response(content: str) -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_cli_with_simple_prompt(capsys):
+async def test_cli_with_simple_prompt(capsys, monkeypatch):
     """Running the CLI with a simple prompt produces the expected response.
 
     The test uses ``--quiet`` so log lines stay off the console; the final
     answer is still written to stdout via ``print()`` for easy assertion.
     It mocks only the OpenAI client; all other layers (argparse, Agent,
-    agent_loop, config, …) run for real.
+    agent_loop, config loaded from env vars, …) run for real.
     """
     mock_openai = MagicMock()
     mock_openai.chat.completions.create = AsyncMock(return_value=_make_llm_response("Hello, world!"))
 
-    # Restore the module-level log level after the test so
-    # other tests that check the default level are not affected.
-    original_log_level = app_log.level
-    try:
-        with patch("sys.argv", ["prog", "cli", "-p", "say hello", "--quiet"]), \
-             patch("app.core.agent.Client") as MockClient, \
-             patch("app.cli.cli_agent.get_default_sys_prompt", return_value=""), \
-             patch("app.cli.cli_agent.MessageHistory") as MockHistory, \
-             patch("app.main.config.load"), \
-             patch.object(config_module, "_config", {"model": "test-model"}):
+    # Config comes from env vars only; main() runs the real config.load().
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.setenv("LLM_API_KEY", "sk-test")
 
-            MockClient.return_value.get_client.return_value = mock_openai
-            MockHistory.return_value.get_history.return_value = []
-            await main()
-    finally:
-        app_log.setLevel(original_log_level)
+    with patch("sys.argv", ["prog", "cli", "-p", "say hello", "--quiet"]), \
+         patch("app.core.agent.Client") as MockClient, \
+         patch("app.cli.cli_agent.get_default_sys_prompt", return_value=""), \
+         patch("app.cli.cli_agent.MessageHistory") as MockHistory:
+
+        MockClient.return_value.get_client.return_value = mock_openai
+        MockHistory.return_value.get_history.return_value = []
+        await main()
 
     captured = capsys.readouterr()
 

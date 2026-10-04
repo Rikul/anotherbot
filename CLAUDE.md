@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Python-based AI agent ("crafterscode") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, single-prompt (`-p`) mode with optional `--quiet` console logging, and a background server architecture with Telegram, Discord, and a FastHTML web UI channel.
+This is a Python-based AI agent ("anotherbot") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, single-prompt (`-p`) mode with optional `--quiet` console logging, and a background server architecture with Telegram, Discord, and a FastHTML web UI channel.
 
 ## Running & Development
 
@@ -38,29 +38,21 @@ The project uses `uv` for dependency management. No compile step is needed.
 
 ## Configuration
 
-Config lives at `~/.crafterscode/config.toml` (created automatically on first run with defaults). Key fields:
-- `model` — LLM model string (default: `"deepseek/deepseek-v4.1-flash"`)
-- `max_iterations` — max agentic loop iterations (default: `100`)
-- `base_url` — API base URL (default: `"https://openrouter.ai/api/v1"`)
-- `[telegram]` — `BOT_TOKEN`, `ALLOW_FROM` (list of integer user IDs)
-- `[discord]` — `TOKEN`, `ALLOW_FROM` (list of integer user IDs; empty = allow all)
-- `[websocket]` — `HOST` (default `"127.0.0.1"`), `PORT` (default `8765`)
+All configuration comes from environment variables — there is no config file. `app/config.py` calls `load_dotenv()` at import time, before computing `PROJECT_HOME`: first the nearest `.env` (searched from `app/` upwards, normally the repo root), then `$PROJECT_HOME/.env`. Neither overrides variables already set in the real environment. `config.load()` (called at the start of `main()`) builds `_config` from defaults + env vars and raises `ValueError` on invalid integers so bad config fails fast. Template: `app/.env.example`.
 
-Environment variables (all override config file values):
-- `LLM_API_KEY` — required
-- `LLM_BASE_URL` — optional API base URL override
-- `MODEL` — optional model override
-- `TELEGRAM_BOT_TOKEN` — Telegram bot token (alternative to config file)
-- `TELEGRAM_ALLOW_FROM` — comma-separated Telegram user IDs (e.g. `"123,456"`)
-- `DISCORD_BOT_TOKEN` — Discord bot token (alternative to config file)
-- `DISCORD_ALLOW_FROM` — comma-separated Discord user IDs
-- `WEBSOCKET_HOST` — bind host for the web UI (set to `0.0.0.0` in Docker)
+- `LLM_API_KEY` — required (`config.get("api_key")`)
+- `LLM_BASE_URL` — API base URL (default: `https://openrouter.ai/api/v1`)
+- `LLM_MODEL` — model string (default: `deepseek/deepseek-v4.1-flash`)
+- `MAX_ITERATIONS` — max agentic loop iterations (default: `250`; CLI `-i` overrides)
+- `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOW_FROM` — bot token and comma-separated user IDs (→ `config.telegram`)
+- `DISCORD_BOT_TOKEN`, `DISCORD_ALLOW_FROM` — bot token and comma-separated user IDs; empty = allow all (→ `config.discord`)
+- `WEBSOCKET_HOST` — bind host for the web UI; setting it enables the web channel (`0.0.0.0` in Docker)
 - `WEBSOCKET_PORT` — port for web UI + WebSocket (default: `8765`)
-- `ANOTHERBOT_HOME` — overrides the data directory (default: `~/.crafterscode`)
+- `ANOTHERBOT_HOME` — data directory, `PROJECT_HOME` (default: `~/.anotherbot`). Holds `app.db`, `logs/app.log`, uploads, traces, `mcp_servers.json` and an optional `.env`. Read at import time, so it can be set in the repo-root `.env` but not in `$PROJECT_HOME/.env`.
 
-MCP servers are configured separately in `~/.crafterscode/mcp_servers.json` (same dir, same format as Claude Desktop's `mcpServers` key). No env-var equivalent — in Docker, mount the file at `$ANOTHERBOT_HOME/mcp_servers.json`.
+MCP servers are configured separately in `$ANOTHERBOT_HOME/mcp_servers.json` (same format as Claude Desktop's `mcpServers` key).
 
-For Docker, no config file is needed — pass everything as env vars. See `Dockerfile` and the Docker section in README.
+For Docker, pass env vars with `-e`/`--env-file` or put a `.env` in the `/data` volume. `.dockerignore` excludes `.env` files so secrets are never baked into the image. See `Dockerfile` and the Docker section in README.
 
 ## Architecture
 
@@ -103,7 +95,7 @@ On startup, `load_system_context()` (`app/infra/startup.py`) loads `app/core/sys
 
 ### Runtime Settings
 
-`app/core/runtime.py` is an in-memory key-value singleton (`set()` / `get()`) for mutable settings like `model`, `base_url`, and `max_iterations`. Values are populated from config during startup in `main.py` and can be changed at runtime via the `/model` slash command.
+`app/core/runtime.py` is an in-memory key-value singleton (`set()` / `get()`) for mutable settings like `model`, `base_url`, and `max_iterations`. Values are populated from `config` (env vars) during startup in `main.py` and can be changed at runtime via the `/model` slash command.
 
 ### Channels & Command Registry
 
@@ -121,8 +113,10 @@ Each channel **must** have its own `MessageQueue` instance to avoid cross-channe
 
 ### Scheduled Tasks
 
-`ScheduledTasks` (`app/core/scheduled_tasks.py`) is a SQLite-backed task runner using the shared `APP_DB` (`~/.crafterscode/app.db`, or `$ANOTHERBOT_HOME/app.db`). It polls every 60 seconds, checks `next_run`, and executes due tasks via `HelperAgent`. Results are delivered to the configured channel via `MessageQueue`. Schema: `tasks` (id, name, prompt, enabled, repeat, interval_mins, next_run, last_run, delivery_channel, run_count, created_at) and `task_outputs` (id, name, prompt, output, status, duration_secs, timestamp). The `run()` coroutine is added to the `asyncio.gather` in `bg_server.py`.
+`ScheduledTasks` (`app/core/scheduled_tasks.py`) is a SQLite-backed task runner using the shared `APP_DB` (`$ANOTHERBOT_HOME/app.db`, default `~/.anotherbot/app.db`). It polls every 60 seconds, checks `next_run`, and executes due tasks via `HelperAgent`. Results are delivered to the configured channel via `MessageQueue`. Schema: `tasks` (id, name, prompt, enabled, repeat, interval_mins, next_run, last_run, delivery_channel, run_count, created_at) and `task_outputs` (id, name, prompt, output, status, duration_secs, timestamp). The `run()` coroutine is added to the `asyncio.gather` in `bg_server.py`.
 
 ## Testing Approach
 
 Unit tests mock `app.core.agent.Client` and `load_system_context` to isolate the agent loop logic. `run_tool` is patched at `app.core.tool_calls.run_tool` (where the function lives) since `handle_tool_call` uses a lazy import. Integration tests in `tests/integration/` mock only the OpenAI HTTP client and run the full pipeline including `main()`, argparse, and agent construction. Tests use `pytest-asyncio` for async test functions.
+
+Config is env-only, so tests set it with `monkeypatch.setenv(...)` and call `config.load()`. The autouse fixture in `tests/conftest.py` clears every config env var (`CONFIG_ENV_VARS`) and restores `config._config` around each test, so the developer's shell or `.env` never leaks in — add new config env vars to that list.

@@ -24,13 +24,13 @@ RUN uv sync --no-dev --frozen
 COPY app/ ./app/
 COPY run.sh restart.sh ./
 
-# Data dir for SQLite DB, workspace, and optional config.toml mount
+# Data dir for SQLite DB, workspace, logs, mcp_servers.json and an optional .env
 ENV ANOTHERBOT_HOME=/data
 VOLUME /data
 
 # Non-secret runtime config
 ENV LLM_BASE_URL=""
-ENV MODEL=""
+ENV LLM_MODEL=""
 ENV TELEGRAM_ALLOW_FROM=""
 ENV DISCORD_ALLOW_FROM=""
 ENV TZ=UTC

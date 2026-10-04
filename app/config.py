@@ -2,15 +2,23 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import tomllib
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 _config: dict = {}
 
-APP_NAME = "crafterscode"
+# Load .env before anything reads os.environ: the nearest .env (searched from
+# app/ upwards, e.g. the repo root) may set ANOTHERBOT_HOME, which decides
+# PROJECT_HOME; $PROJECT_HOME/.env is then loaded too. Neither overrides vars
+# already set in the real environment.
+load_dotenv()
+
+APP_NAME = "anotherbot"
 PROJECT_HOME = Path(os.environ.get("ANOTHERBOT_HOME", Path.home() / f".{APP_NAME}"))
-HOME_CONFIG_PATH = PROJECT_HOME / "config.toml"
 APP_DB = PROJECT_HOME / "app.db"
+
+load_dotenv(PROJECT_HOME / ".env")
 
 
 def get_db_connection(db_path: Path = APP_DB, *, timeout: float = 30.0,
@@ -28,23 +36,16 @@ def get_db_connection(db_path: Path = APP_DB, *, timeout: float = 30.0,
     return sqlite3.connect(db_path, timeout=timeout, isolation_level=isolation_level)
 
 
-def load(path: Path | str = HOME_CONFIG_PATH) -> None:
+def load() -> None:
     global _config
 
-    if os.path.exists(path):
-        with open(path, "rb") as f:
-            _config = tomllib.load(f)
-    else:
-        _config = {
-            "model": "deepseek/deepseek-v4.1-flash",
-            "base_url": "https://openrouter.ai/api/v1",
-            "max_iterations": 100,
-            "telegram": {},
-        }
+    _config = {
+        "model": "deepseek/deepseek-v4.1-flash",
+        "base_url": "https://openrouter.ai/api/v1",
+        "max_iterations": 250,
+        "telegram": {},
+    }
 
-    # env var overrides — takes precedence over config file (Docker-friendly)
-    if v := os.environ.get("MODEL"):
-        _config["model"] = v
     if v := os.environ.get("TELEGRAM_BOT_TOKEN"):
         _config.setdefault("telegram", {})["BOT_TOKEN"] = v
     if v := os.environ.get("TELEGRAM_ALLOW_FROM"):
@@ -61,6 +62,21 @@ def load(path: Path | str = HOME_CONFIG_PATH) -> None:
         except ValueError:
             raise ValueError(f"WEBSOCKET_PORT must be an integer, got: {v!r}") from None
 
+    if v := os.environ.get("MAX_ITERATIONS"):
+        try:
+            _config["max_iterations"] = int(v)
+        except ValueError:
+            raise ValueError(f"MAX_ITERATIONS must be an integer, got: {v!r}") from None
+
+    if v := os.environ.get("LLM_BASE_URL"):
+        _config["base_url"] = v
+
+    if v := os.environ.get("LLM_MODEL"):
+        _config["model"] = v
+
+    if v := os.environ.get("LLM_API_KEY"):
+        _config["api_key"] = v
+
 
 def get(key: str, default=None):
     return _config.get(key, default)
@@ -72,23 +88,3 @@ def __getattr__(name: str):
     if name in _config:
         return _config[name]
     raise AttributeError(f"Config has no attribute {name}")
-
-
-def get_default_config() -> str:
-    return """\
-model = "deepseek/deepseek-v4.1-flash"
-max_iterations = 100
-base_url = "https://openrouter.ai/api/v1"
-
-[telegram]
-BOT_TOKEN = ""
-ALLOW_FROM = []  # List of allowed Telegram user IDs (integers). Must be non-empty.
-
-[discord]
-TOKEN = ""
-ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
-
-[websocket]
-HOST = "127.0.0.1"
-PORT = 8765
-"""

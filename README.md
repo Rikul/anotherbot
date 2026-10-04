@@ -11,7 +11,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 - **MCP Servers**: Connect any [Model Context Protocol](https://modelcontextprotocol.io) server via `mcp_servers.json` — tools are auto-discovered and available alongside built-ins
 - **Tool Calling**: File I/O, shell commands, web fetch, web search (text/images/video/news/books), calculator, Hacker News, todo list
 - **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing)
-- **Persistent History**: Per-channel SQLite message history at `~/.crafterscode/app.db` (shared with scheduled tasks)
+- **Persistent History**: Per-channel SQLite message history at `~/.anotherbot/app.db` (shared with scheduled tasks)
 
 
 ## Prerequisites
@@ -28,39 +28,34 @@ uv sync
 
 ## Configuration
 
-### API Key (Required)
+All configuration comes from environment variables. Put them in a `.env` file, or set them in the shell or container; real environment variables always win over `.env` values. Two `.env` files are read at startup:
 
-Set `LLM_API_KEY` in a `.env` file or as an environment variable. Alternatively, set `api_key` directly in `config.toml` (env var takes precedence):
+1. The nearest `.env` found from `app/` upwards — normally `.env` in the repo root.
+2. `$ANOTHERBOT_HOME/.env` (default `~/.anotherbot/.env`).
 
-```env
-LLM_API_KEY=your_api_key_here
-LLM_BASE_URL=https://openrouter.ai/api/v1  # optional override
+Start from the template:
+
+```bash
+cp app/.env.example .env   # then set LLM_API_KEY
 ```
 
-### Agent Config
+| Env var | Default | Description |
+|---|---|---|
+| `LLM_API_KEY` | — (**required**) | OpenRouter / OpenAI-compatible API key |
+| `LLM_BASE_URL` | `https://openrouter.ai/api/v1` | API base URL |
+| `LLM_MODEL` | `deepseek/deepseek-v4.1-flash` | Model string |
+| `MAX_ITERATIONS` | `250` | Max agentic loop iterations (CLI `-i` overrides) |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token from @BotFather |
+| `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs |
+| `DISCORD_BOT_TOKEN` | — | Discord bot token |
+| `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
+| `WEBSOCKET_HOST` | — | Bind host for the web UI; setting it enables the web channel (`0.0.0.0` in Docker) |
+| `WEBSOCKET_PORT` | `8765` | Port for the web UI + WebSocket |
+| `ANOTHERBOT_HOME` | `~/.anotherbot` | Data directory (SQLite DB, logs, uploads, `mcp_servers.json`, optional `.env`) |
 
-Config lives at `~/.crafterscode/config.toml` and is created automatically on first run with defaults:
+Invalid values (e.g. a non-integer `WEBSOCKET_PORT` or `MAX_ITERATIONS`) stop startup with an error.
 
-```toml
-model = "deepseek/deepseek-v4.1-flash"
-max_iterations = 100
-base_url = "https://openrouter.ai/api/v1"
-api_key = ""  # fallback if LLM_API_KEY env var is not set
-
-[telegram]
-BOT_TOKEN = ""
-ALLOW_FROM = []  # List of allowed Telegram user IDs (integers).
-
-[discord]
-TOKEN = ""
-ALLOW_FROM = []  # List of allowed Discord user IDs (integers). Empty means allow all.
-
-[websocket]
-HOST = "127.0.0.1"   # use 0.0.0.0 to expose on all interfaces (required for Docker)
-PORT = 8765
-```
-
-Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel maintains its own history with estimated token counts per message.
+Message history and conversations are stored in `$ANOTHERBOT_HOME/app.db` (SQLite). Logs go to `$ANOTHERBOT_HOME/logs/app.log`.
 
 ## Usage
 
@@ -71,7 +66,7 @@ Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel
 -p, --prompt          Run this prompt once and exit (omit to start the REPL)
 -y, --auto-approve    Skip tool permission prompts
 -q, --quiet           Don't print log messages to the console (still written to the log file)
--i, --max-iterations  Max agentic loop iterations (default: 100)
+-i, --max-iterations  Max agentic loop iterations (default: MAX_ITERATIONS or 250)
 ```
 
 ### Examples
@@ -89,7 +84,7 @@ Message history is stored in `~/.crafterscode/history.db` (SQLite). Each channel
 
 ### Web UI
 
-The background agent can serve a browser-based chat UI on the same port as the WebSocket endpoint. Enable it by adding a `[websocket]` section to `config.toml` or by setting the `WEBSOCKET_*` env vars:
+The background agent can serve a browser-based chat UI on the same port as the WebSocket endpoint. Enable it by setting the `WEBSOCKET_*` env vars (in `.env` or the shell):
 
 ```bash
 # Start the background server with the web channel enabled
@@ -107,16 +102,14 @@ Then open `http://localhost:8765/` in a browser.
 
 ### Background Agent (Telegram / Discord)
 
-Configure one or both channels in `~/.crafterscode/config.toml`:
+Configure one or both channels in `.env`:
 
-```toml
-[telegram]
-BOT_TOKEN = "123456:ABC-your-bot-token"
-ALLOW_FROM = [123456789]  # restrict by user ID; empty = allow all
+```env
+TELEGRAM_BOT_TOKEN=123456:ABC-your-bot-token
+TELEGRAM_ALLOW_FROM=123456789        # comma-separated user IDs
 
-[discord]
-TOKEN = "your-discord-bot-token"
-ALLOW_FROM = []  # restrict by user ID; empty = allow all
+DISCORD_BOT_TOKEN=your-discord-bot-token
+DISCORD_ALLOW_FROM=                  # comma-separated user IDs; empty = allow all
 ```
 
 ```bash
@@ -138,7 +131,7 @@ list my scheduled tasks
 remove the HN task
 ```
 
-Tasks persist in `~/.crafterscode/app.db` (shared with message history) and survive restarts.
+Tasks persist in `$ANOTHERBOT_HOME/app.db` (shared with message history) and survive restarts.
 
 ## MCP Servers
 
@@ -146,7 +139,7 @@ External [Model Context Protocol (MCP)](https://modelcontextprotocol.io) servers
 
 ### Setup
 
-Create `~/.crafterscode/mcp_servers.json` (same directory as `config.toml`). The format matches Claude Desktop's `mcpServers` config, so existing Claude Desktop configs can be copied directly:
+Create `$ANOTHERBOT_HOME/mcp_servers.json` (default `~/.anotherbot/mcp_servers.json`). The format matches Claude Desktop's `mcpServers` config, so existing Claude Desktop configs can be copied directly:
 
 ```json
 {
@@ -311,12 +304,13 @@ docker run -d \
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
 | `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
 | `LLM_BASE_URL` | no | API base URL (default: `https://openrouter.ai/api/v1`) |
-| `MODEL` | no | Model string (default: `deepseek/deepseek-v4.1-flash`) |
+| `LLM_MODEL` | no | Model string (default: `deepseek/deepseek-v4.1-flash`) |
+| `MAX_ITERATIONS` | no | Max agentic loop iterations (default: `250`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
 
 At least one channel (`WEBSOCKET_HOST`, `TELEGRAM_BOT_TOKEN`, or `DISCORD_BOT_TOKEN`) must be set or the server will exit.
 
-The `/data` volume persists the SQLite database and workspace across restarts. To supply a `config.toml` instead of env vars, mount it at `/data/config.toml` — env vars always take precedence over the file.
+The `/data` volume persists the SQLite database, logs and workspace across restarts. Instead of `-e` flags you can put a `.env` file in the volume (`/data/.env`) or use `docker run --env-file .env`; variables passed with `-e` take precedence. `.env` files are excluded from the image by `.dockerignore`.
 
 ## Roadmap
 

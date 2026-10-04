@@ -262,7 +262,8 @@ def mcp_cmd() -> CommandHandler:
         else:
             statuses = mcp_manager.get_server_status()
             if not statuses:
-                return "No MCP servers configured.\nCreate ~/.crafterscode/mcp_servers.json to add servers."
+                from ..config import PROJECT_HOME
+                return f"No MCP servers configured.\nCreate {PROJECT_HOME / 'mcp_servers.json'} to add servers."
             lines = [f"MCP servers ({len(statuses)}):"]
             for s in statuses:
                 if s["disabled"]:

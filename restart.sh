@@ -13,7 +13,7 @@ fi
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-_DATA_DIR="${ANOTHERBOT_HOME:-$HOME/.crafterscode}"
+_DATA_DIR="${ANOTHERBOT_HOME:-$HOME/.anotherbot}"
 PID_FILE="$_DATA_DIR/background.pid"
 LOG_FILE="$_DATA_DIR/background.log"
 mkdir -p "$_DATA_DIR"
