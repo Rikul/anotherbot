@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from ..infra.app_logging import log
-from ..config import APP_DB, get_db_connection
+from ..config import get_db_connection
 import sqlite3
 import asyncio
 from .helper_agent import HelperAgent

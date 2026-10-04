@@ -8,7 +8,6 @@ from .message import OutgoingMessage, IncomingMessage
 from telegram import Update, constants
 from telegram.ext import (
     ApplicationBuilder,
-    CommandHandler,
     ContextTypes,
     MessageHandler,
     filters,

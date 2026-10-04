@@ -75,7 +75,7 @@ def test_get_last_returns_none_when_empty(store):
 
 
 def test_get_last_returns_most_recently_updated(store, db):
-    cid1 = store.create("cli", "First")
+    store.create("cli", "First")
     cid2 = store.create("cli", "Second")
     # Pin cid2 to a future timestamp so ordering is deterministic
     with sqlite3.connect(db) as conn:

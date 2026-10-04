@@ -1,4 +1,4 @@
-from unittest.mock import patch, mock_open
+from unittest.mock import patch
 
 from app.core.agent import get_default_sys_prompt
 

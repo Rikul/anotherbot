@@ -120,7 +120,6 @@ def list_conversations_cmd(store: ConversationStore, channel: str) -> CommandHan
         if not convs:
             return "No conversations yet."
         
-        total = len(convs)
         lines = []
 
         if args.strip().lower() != "all":

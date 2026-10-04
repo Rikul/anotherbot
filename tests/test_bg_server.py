@@ -1,5 +1,4 @@
 import pytest
-from pathlib import Path
 from unittest.mock import patch, MagicMock, AsyncMock, ANY
 
 from app.bg_server import start_server
@@ -37,7 +36,7 @@ async def test_start_server_discord_only_starts_discord_agent():
          patch("app.bg_server.os.chdir"), \
          patch("app.channels.discord.DiscordChannel") as MockDC, \
          patch("app.bg_server.BackgroundAgent") as MockAgent, \
-         patch("app.bg_server.ScheduledTasks") as MockTasks, \
+         patch("app.bg_server.ScheduledTasks"), \
          patch("app.bg_server.MessageQueue") as MockMQ, \
          patch("asyncio.gather", mock_gather):
 
@@ -79,7 +78,7 @@ async def test_start_server_discord_only_gather_excludes_telegram():
          patch("app.bg_server.os.chdir"), \
          patch("app.channels.discord.DiscordChannel") as MockDC, \
          patch("app.bg_server.BackgroundAgent") as MockAgent, \
-         patch("app.bg_server.ScheduledTasks") as MockTasks, \
+         patch("app.bg_server.ScheduledTasks"), \
          patch("app.bg_server.MessageQueue") as MockMQ, \
          patch("asyncio.gather", mock_gather):
 
