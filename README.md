@@ -16,15 +16,42 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 
 ## Prerequisites
 
-- Python 3.12 or higher
-- `uv` package manager
 - OpenRouter API key (or any OpenAI-compatible API)
+- Docker with Compose, **or** Python 3.12+ and the `uv` package manager to run without Docker
 
-## Installation
+## Quickstart
+
+1. Copy the example env file:
+
+   ```bash
+   cp app/.env.example .env
+   ```
+
+2. Open `.env` and set your API key:
+
+   ```env
+   LLM_API_KEY=sk-or-your-key-here
+   ```
+
+   Optionally set `TELEGRAM_BOT_TOKEN` / `DISCORD_BOT_TOKEN` (and their `*_ALLOW_FROM`) to enable those channels. See [Configuration](#configuration) for all variables.
+
+3. Build and start it:
+
+   ```bash
+   docker compose up --build
+   ```
+
+4. Open `http://localhost:8765/` to use the web UI. Stop with `Ctrl+C` (or run with `-d` to keep it in the background).
+
+**Without Docker** (needs Python 3.12+ and `uv`): after steps 1–2, run
 
 ```bash
 uv sync
+./run.sh cli                 # interactive REPL
+./run.sh background          # Telegram / Discord / web UI server
 ```
+
+`background` needs at least one channel: set `WEBSOCKET_HOST=127.0.0.1` in `.env` for the web UI at `http://localhost:8765/`, and/or a Telegram or Discord token.
 
 ## Configuration
 
@@ -201,6 +228,14 @@ MCP tool names are prefixed with their server name using `__` as a separator: `s
 
 ### Docker
 
+The image does not include Node.js, so `npx`-based servers need it installed first (`uvx`-based servers work out of the box):
+
+```bash
+docker compose exec anotherbot sh -c "apt-get update && apt-get install -y nodejs npm"
+```
+
+This lasts until the container is recreated.
+
 Mount `mcp_servers.json` into the container's data directory:
 
 ```bash
@@ -211,6 +246,18 @@ docker run ... \
 ```
 
 ## Docker
+
+### Docker Compose (easiest)
+
+```bash
+cp app/.env.example .env      # set LLM_API_KEY and any channel tokens
+docker compose up -d --build
+docker compose logs -f        # follow output
+```
+
+Then open `http://localhost:8765/`. `compose.yaml` passes your `.env` into the container and keeps data in the `anotherbot-data` volume. `WEBSOCKET_HOST` and `ANOTHERBOT_HOME` are always forced to `0.0.0.0` and `/data`, so local-dev values in `.env` don't break the container. Setting `WEBSOCKET_PORT` in `.env` changes both the port the app listens on and the published port.
+
+To add MCP servers, copy the file into the volume: `docker compose cp mcp_servers.json anotherbot:/data/`, then run `docker compose restart`.
 
 ### Build
 

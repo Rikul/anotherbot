@@ -52,7 +52,7 @@ All configuration comes from environment variables — there is no config file. 
 
 MCP servers are configured separately in `$ANOTHERBOT_HOME/mcp_servers.json` (same format as Claude Desktop's `mcpServers` key).
 
-For Docker, pass env vars with `-e`/`--env-file` or put a `.env` in the `/data` volume. `.dockerignore` excludes `.env` files so secrets are never baked into the image. See `Dockerfile` and the Docker section in README.
+For Docker, `compose.yaml` is the easy path (`docker compose up -d --build` reads the repo-root `.env`, forces `WEBSOCKET_HOST=0.0.0.0` and `ANOTHERBOT_HOME=/data`, and publishes `${WEBSOCKET_PORT:-8765}` on both sides). With plain `docker run`, pass env vars with `-e`/`--env-file`. `.dockerignore` excludes `.env` files so secrets are never baked into the image. See `Dockerfile` and the Docker section in README.
 
 ## Architecture
 

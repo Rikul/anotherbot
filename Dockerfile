@@ -6,15 +6,13 @@ RUN DEBIAN_FRONTEND=noninteractive apt update && apt install -y --no-install-rec
     sqlite3 \
     curl ca-certificates \
     git \
-    nodejs npm \
-    chromium \
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Node.js / Chromium (puppeteer skill, npx-based MCP servers) are not baked in;
+# install them in the running container when needed.
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 

@@ -1,0 +1,25 @@
+# Usage:
+#   cp app/.env.example .env    # set LLM_API_KEY and any channel tokens
+#   docker compose up -d --build
+#   open http://localhost:8765  (or the WEBSOCKET_PORT you set in .env)
+
+services:
+  anotherbot:
+    build: .
+    image: anotherbot
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      # Always win over .env — values meant for running locally would break the container.
+      ANOTHERBOT_HOME: /data
+      WEBSOCKET_HOST: 0.0.0.0
+    ports:
+      # Same port on both sides, so WEBSOCKET_PORT in .env changes the listen and published port together.
+      - "${WEBSOCKET_PORT:-8765}:${WEBSOCKET_PORT:-8765}"
+    volumes:
+      - anotherbot-data:/data
+
+volumes:
+  anotherbot-data:

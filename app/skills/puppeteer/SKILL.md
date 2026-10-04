@@ -15,6 +15,14 @@ Puppeteer is a Node.js library that provides a high-level API to control Chrome/
 ## Prerequisites
 
 ### Installation
+If `node` is not available (e.g. inside the Docker image, which doesn't ship Node.js or Chromium), install them first. On Debian/Ubuntu as root:
+```bash
+apt-get update && apt-get install -y --no-install-recommends nodejs npm chromium
+# Use the system Chromium instead of downloading one with puppeteer
+export PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+```
+In containers, launch with `args: ['--no-sandbox']`.
+
 ```bash
 # Create and/or navigate to the directory for the project. This could be a temporary directory or reusable Puppeteer directory in the workspace. 
 mkdir -p /tmp/myproject
