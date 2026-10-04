@@ -21,7 +21,7 @@ import uuid
 import uvicorn
 from pathlib import Path
 from fasthtml.common import (
-    Button, Div, Head, Html, Input, Label, Link, Meta, NotStr, Script, Span,
+    A, Button, Div, Head, Html, Input, Label, Link, Meta, NotStr, Script, Span,
     Textarea, Title, Body, H1, P, fast_app,
 )
 from starlette.routing import WebSocketRoute
@@ -40,7 +40,7 @@ log = logging.getLogger(__name__)
 
 # Bump when web_channel.css / web_channel.js change, so browsers (Edge caches
 # static assets aggressively) fetch the new copy instead of a stale one.
-_ASSET_VERSION = "4"
+_ASSET_VERSION = "5"
 
 # Paperclip icon for the attach button (inline so it inherits theme colors).
 _PAPERCLIP_SVG = (
@@ -52,7 +52,7 @@ _PAPERCLIP_SVG = (
 )
 
 
-def _build_page() -> Html:
+def _build_page(auth_enabled: bool = False) -> Html:
     return Html(
         Head(
             Meta(charset="utf-8"),
@@ -79,6 +79,8 @@ def _build_page() -> Html:
                             id="status",
                         ),
                         Button("☾", id="theme-btn", title="Toggle light/dark"),
+                        *([A("Log out", href="/logout", id="logout-link", title="Log out")]
+                          if auth_enabled else []),
                         id="header-right",
                     ),
                     id="header",
@@ -182,10 +184,12 @@ class WebChannel(Channel):
         mq: MessageQueue,
         host: str = "127.0.0.1",
         port: int = 8765,
+        password: str | None = None,
     ) -> None:
         self.mq = mq
         self.host = host
         self.port = port
+        self.password = password or None
         self.stopped: bool = False
         self._connections: dict[str, WebSocket] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
@@ -227,11 +231,24 @@ class WebChannel(Channel):
         """Build the FastHTML app + WebSocket route."""
         log.info(f"Building web channel on {self.host}:{self.port}")
 
+        from .web_auth import WebAuthMiddleware, is_loopback_host
+        if not self.password and not is_loopback_host(self.host):
+            raise RuntimeError(
+                f"Web channel would listen on {self.host} without a password. "
+                "Set WEB_PASSWORD, or bind to 127.0.0.1 (WEBSOCKET_HOST)."
+            )
+        if not self.password:
+            log.warning("Web channel has no password (WEB_PASSWORD unset); localhost access only")
+
         self._fasthtml_app, rt = fast_app(hdrs=())
+        # What uvicorn serves: the app wrapped in the login middleware when a password is set.
+        self._asgi_app = (
+            WebAuthMiddleware(self._fasthtml_app, self.password) if self.password else self._fasthtml_app
+        )
 
         @rt("/")
         def index():
-            return _build_page()
+            return _build_page(auth_enabled=bool(self.password))
 
         @rt("/api/conversations")
         def conversations_api(req):
@@ -396,7 +413,7 @@ class WebChannel(Channel):
     async def run_polling(self) -> None:
         """Start uvicorn and serve until cancelled."""
         config = uvicorn.Config(
-            app=self._fasthtml_app,
+            app=self._asgi_app,
             host=self.host,
             port=self.port,
             log_level="info",

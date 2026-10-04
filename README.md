@@ -31,6 +31,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 
    ```env
    LLM_API_KEY=sk-or-your-key-here
+   WEB_PASSWORD=pick-a-long-password    # login for the web UI
    ```
 
    Optionally set `TELEGRAM_BOT_TOKEN` / `DISCORD_BOT_TOKEN` (and their `*_ALLOW_FROM`) to enable those channels. See [Configuration](#configuration) for all variables.
@@ -41,7 +42,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
    docker compose up --build
    ```
 
-4. Open `http://localhost:8765/` to use the web UI. Stop with `Ctrl+C` (or run with `-d` to keep it in the background).
+4. Open `http://localhost:8765/` and log in with `WEB_PASSWORD`. Stop with `Ctrl+C` (or run with `-d` to keep it in the background).
 
 **Without Docker** (needs Python 3.12+ and `uv`): after steps 1–2, run
 
@@ -78,6 +79,7 @@ cp app/.env.example .env   # then set LLM_API_KEY
 | `DISCORD_ALLOW_FROM` | — | Comma-separated Discord user IDs (empty = allow all) |
 | `WEBSOCKET_HOST` | — | Bind host for the web UI; setting it enables the web channel (`0.0.0.0` in Docker) |
 | `WEBSOCKET_PORT` | `8765` | Port for the web UI + WebSocket |
+| `WEB_PASSWORD` | — | Web UI login password. Required when `WEBSOCKET_HOST` isn't localhost; without it the web channel is disabled |
 | `ANOTHERBOT_HOME` | `~/.anotherbot` | Data directory (SQLite DB, logs, uploads, `mcp_servers.json`, optional `.env`) |
 
 Invalid values (e.g. a non-integer `WEBSOCKET_PORT` or `MAX_ITERATIONS`) stop startup with an error.
@@ -120,9 +122,11 @@ WEBSOCKET_HOST=127.0.0.1 WEBSOCKET_PORT=8765 LLM_API_KEY=... ./run.sh background
 
 Then open `http://localhost:8765/` in a browser.
 
+**Login:** set `WEB_PASSWORD` to require a password. The UI, REST API, uploads and the WebSocket are all behind the login (a signed `HttpOnly` session cookie, valid 30 days; changing the password logs everyone out). Without `WEB_PASSWORD` the web channel only starts when bound to localhost; on any other host it is disabled with an error. The web UI is an admin interface — the agent can run shell commands — so use a long password and put HTTPS in front (e.g. Caddy, Tailscale) if it is reachable over a network.
+
 **Features:**
 - Dark/light theme toggle (persisted in `localStorage`)
-- Collapsible sidebar listing conversations from **all** channels (web, Telegram, Discord, CLI), each tagged with a channel badge — click to load history. The web UI is intended as an admin interface; put auth in front of it (e.g. a reverse proxy) if it is reachable by others
+- Collapsible sidebar listing conversations from **all** channels (web, Telegram, Discord, CLI), each tagged with a channel badge — click to load history
 - `+ New` button and `/new` command to start a fresh conversation
 - `/help`, `/status`, `/whoami`, `/stop` answered instantly without an LLM call
 - All other slash commands (`/model`, `/load`, `/fork`, `/rename`, `/export`) forwarded to the agent
@@ -255,7 +259,7 @@ docker compose up -d --build
 docker compose logs -f        # follow output
 ```
 
-Then open `http://localhost:8765/`. `compose.yaml` passes your `.env` into the container and keeps data in the `anotherbot-data` volume. `WEBSOCKET_HOST` and `ANOTHERBOT_HOME` are always forced to `0.0.0.0` and `/data`, so local-dev values in `.env` don't break the container. Setting `WEBSOCKET_PORT` in `.env` changes both the port the app listens on and the published port.
+Then open `http://localhost:8765/` and log in with your `WEB_PASSWORD` (required: the container binds to `0.0.0.0`). `compose.yaml` passes your `.env` into the container and keeps data in the `anotherbot-data` volume. `WEBSOCKET_HOST` and `ANOTHERBOT_HOME` are always forced to `0.0.0.0` and `/data`, so local-dev values in `.env` don't break the container. Setting `WEBSOCKET_PORT` in `.env` changes both the port the app listens on and the published port.
 
 To add MCP servers, copy the file into the volume: `docker compose cp mcp_servers.json anotherbot:/data/`, then run `docker compose restart`.
 
@@ -271,6 +275,7 @@ docker build -t anotherbot .
 ```bash
 docker run -d \
   -e LLM_API_KEY=sk-... \
+  -e WEB_PASSWORD=pick-a-long-password \
   -e WEBSOCKET_HOST=0.0.0.0 \
   -e WEBSOCKET_PORT=8765 \
   -p 8765:8765 \
@@ -281,11 +286,13 @@ docker run -d \
 **Using `export` first (keeps the run command clean):**
 ```bash
 export LLM_API_KEY=sk-...
+export WEB_PASSWORD=pick-a-long-password
 export WEBSOCKET_HOST=0.0.0.0
 export WEBSOCKET_PORT=8765
 
 docker run -d \
   -e LLM_API_KEY \
+  -e WEB_PASSWORD \
   -e WEBSOCKET_HOST \
   -e WEBSOCKET_PORT \
   -p 8765:8765 \
@@ -324,6 +331,7 @@ export LLM_API_KEY=sk-...
 export TELEGRAM_BOT_TOKEN=123:abc...
 export TELEGRAM_ALLOW_FROM=123456789
 export DISCORD_BOT_TOKEN=your-discord-token
+export WEB_PASSWORD=pick-a-long-password
 export WEBSOCKET_HOST=0.0.0.0
 export WEBSOCKET_PORT=8765
 
@@ -332,6 +340,7 @@ docker run -d \
   -e TELEGRAM_BOT_TOKEN \
   -e TELEGRAM_ALLOW_FROM \
   -e DISCORD_BOT_TOKEN \
+  -e WEB_PASSWORD \
   -e WEBSOCKET_HOST \
   -e WEBSOCKET_PORT \
   -p 8765:8765 \
@@ -346,6 +355,7 @@ docker run -d \
 | `LLM_API_KEY` | **yes** | OpenRouter / OpenAI-compatible API key |
 | `WEBSOCKET_HOST` | — | Bind host for web UI (use `0.0.0.0` in Docker; default: `127.0.0.1`) |
 | `WEBSOCKET_PORT` | — | Port for web UI and WebSocket (default: `8765`) |
+| `WEB_PASSWORD` | for web UI | Web UI login password. The image binds to `0.0.0.0`, so without it the web channel is disabled |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token from @BotFather |
 | `TELEGRAM_ALLOW_FROM` | — | Comma-separated Telegram user IDs (empty = allow all) |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token from developer portal |
@@ -355,7 +365,7 @@ docker run -d \
 | `MAX_ITERATIONS` | no | Max agentic loop iterations (default: `250`) |
 | `ANOTHERBOT_HOME` | no | Data directory for DB and workspace (default: `/data` in container) |
 
-At least one channel (`WEBSOCKET_HOST`, `TELEGRAM_BOT_TOKEN`, or `DISCORD_BOT_TOKEN`) must be set or the server will exit.
+At least one channel must be usable or the server will exit: the web UI (`WEBSOCKET_HOST` plus `WEB_PASSWORD` in Docker), `TELEGRAM_BOT_TOKEN`, or `DISCORD_BOT_TOKEN`. The image always sets `WEBSOCKET_HOST=0.0.0.0`; a Telegram/Discord-only container without `WEB_PASSWORD` just logs that the web channel is disabled.
 
 The `/data` volume persists the SQLite database, logs and workspace across restarts. Instead of `-e` flags you can put a `.env` file in the volume (`/data/.env`) or use `docker run --env-file .env`; variables passed with `-e` take precedence. `.env` files are excluded from the image by `.dockerignore`.
 

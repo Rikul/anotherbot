@@ -68,6 +68,9 @@ def load() -> None:
         except ValueError:
             raise ValueError(f"MAX_ITERATIONS must be an integer, got: {v!r}") from None
 
+    if v := os.environ.get("WEB_PASSWORD"):
+        _config["web_password"] = v
+
     if v := os.environ.get("LLM_BASE_URL"):
         _config["base_url"] = v
 

@@ -191,3 +191,10 @@ def test_real_env_wins_over_project_home_dotenv(tmp_path):
         env=env, capture_output=True, text=True, check=True,
     ).stdout.strip()
     assert out == "9"
+
+
+def test_web_password_env_is_top_level_and_does_not_enable_web(monkeypatch):
+    monkeypatch.setenv("WEB_PASSWORD", "s3cret")
+    config.load()
+    assert config.get("web_password") == "s3cret"
+    assert config.get("websocket") is None  # only WEBSOCKET_* enables the web channel

@@ -151,3 +151,93 @@ async def test_start_server_discord_missing_token_skips_channel():
         await start_server()
 
     mock_gather.assert_not_called()
+
+
+# --- web channel auth guard (config from env vars) ---
+
+def _closing_gather():
+    """Mock asyncio.gather that closes the coroutines it receives (they're never run)."""
+    async def gather(*coros, **kwargs):
+        for c in coros:
+            c.close()
+    return AsyncMock(side_effect=gather)
+
+
+def _web_server_patches():
+    return [
+        patch("app.bg_server.os.chdir"),
+        patch("app.bg_server.BackgroundAgent"),
+        patch("app.bg_server.ScheduledTasks"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_exposed_web_without_password_is_skipped_and_server_exits(monkeypatch):
+    import app.config as config
+    monkeypatch.setenv("WEBSOCKET_HOST", "0.0.0.0")
+    config.load()
+    mock_gather = _closing_gather()
+    patches = _web_server_patches()
+    for p in patches:
+        p.start()
+    try:
+        with patch("asyncio.gather", mock_gather):
+            await start_server()
+    finally:
+        for p in patches:
+            p.stop()
+    mock_gather.assert_not_called()  # web was the only channel
+
+
+@pytest.mark.asyncio
+async def test_exposed_web_without_password_keeps_other_channels(monkeypatch):
+    import app.config as config
+    monkeypatch.setenv("WEBSOCKET_HOST", "0.0.0.0")
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord-token")
+    config.load()
+    mock_gather = _closing_gather()
+    patches = _web_server_patches()
+    for p in patches:
+        p.start()
+    try:
+        with patch("app.channels.discord.DiscordChannel"), \
+             patch("app.channels.web_channel.WebChannel.run_polling") as web_polling, \
+             patch("asyncio.gather", mock_gather):
+            await start_server()
+    finally:
+        for p in patches:
+            p.stop()
+    assert mock_gather.called
+    web_polling.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_exposed_web_with_password_starts(monkeypatch):
+    import app.config as config
+    from app.channels.web_auth import WebAuthMiddleware
+    monkeypatch.setenv("WEBSOCKET_HOST", "0.0.0.0")
+    monkeypatch.setenv("WEB_PASSWORD", "s3cret")
+    config.load()
+    mock_gather = _closing_gather()
+    patches = _web_server_patches()
+    for p in patches:
+        p.start()
+    try:
+        started = []
+
+        async def fake_run_polling(self):
+            pass
+
+        def record(self):
+            started.append(self)
+            return fake_run_polling(self)
+
+        with patch("app.channels.web_channel.WebChannel.run_polling", record), \
+             patch("asyncio.gather", mock_gather):
+            await start_server()
+    finally:
+        for p in patches:
+            p.stop()
+    assert mock_gather.called
+    assert len(started) == 1
+    assert isinstance(started[0]._asgi_app, WebAuthMiddleware)

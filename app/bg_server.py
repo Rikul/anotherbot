@@ -53,9 +53,15 @@ async def start_server() -> None:
         ws_port = ws_config.get("PORT", 8765)
         log.info(f"Starting web channel on {ws_host}:{ws_port}")
         web_mq = MessageQueue()
-        web_channel = WebChannel(web_mq, host=ws_host, port=ws_port)
-        web_channel.start()
-        web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
+        web_channel = WebChannel(web_mq, host=ws_host, port=ws_port, password=config.get("web_password"))
+        try:
+            web_channel.start()
+        except RuntimeError as e:
+            # e.g. exposed on 0.0.0.0 without WEB_PASSWORD — skip the web UI, keep other channels running
+            log.error(f"Web channel disabled: {e}")
+            web_channel = None
+        else:
+            web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
 
     if not telegram_channel and not discord_channel and not web_channel:
         log.error("No channels configured, exiting...")

@@ -45,12 +45,20 @@
         if (!collapsed) loadConversations(false);
     });
 
+    // ---- auth ----
+    // With WEB_PASSWORD set, an expired/missing session makes the API return 401
+    // and the WebSocket handshake fail; send the user back to the login page.
+    function checkAuth(res) {
+        if (res.status === 401) { location.href = '/login'; return false; }
+        return true;
+    }
+
     // ---- conversations ----
     async function loadConversations(populateMessages) {
         try {
             const url = '/api/conversations';
             const res = await fetch(url);
-            if (!res.ok) return;
+            if (!checkAuth(res) || !res.ok) return;
             const { conversations, active_id } = await res.json();
             activeConvId = active_id;
             renderConversations(conversations, active_id);
@@ -63,7 +71,7 @@
         try {
             const url = `/api/messages?conv_id=${convId}`;
             const res = await fetch(url);
-            if (!res.ok) return;
+            if (!checkAuth(res) || !res.ok) return;
             const { messages } = await res.json();
             if (!messages || !messages.length) return;
             const empty = document.getElementById('empty');
@@ -154,6 +162,8 @@
         };
 
         ws.onclose = () => {
+            // A rejected handshake looks like any other close; ask the API whether we're logged out.
+            fetch('/api/status').then(checkAuth).catch(() => {});
             setStatus('', 'Disconnected');
             sendBtn.disabled = true;
             hideThinking();
@@ -275,6 +285,7 @@
         const form = new FormData();
         files.forEach(f => form.append('files', f, f.name));
         const res = await fetch('/api/upload', { method: 'POST', body: form });
+        if (!checkAuth(res)) return [];
         if (!res.ok) {
             let detail = '';
             try { detail = (await res.json()).error || ''; } catch (e) { /* ignore */ }
