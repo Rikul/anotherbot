@@ -82,6 +82,8 @@ Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a s
 
 Current built-in tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`, `helper_agent`.
 
+Todo tools (`app/tools/todo.py`) keep an in-memory `TodoList` per asyncio task via a `ContextVar`: `BackgroundAgent.process_incoming()` calls `init_task_todos()` so each channel has its own list, and tool calls (child tasks from `asyncio.gather`) inherit it. Without a scope (CLI, tests) a module-level default list is used.
+
 `_HELPER_AGENT_TOOLS` in `tool_calls.py` is an explicit allowlist of tools available to `HelperAgent` (used internally by scheduled tasks). Scheduled task mutation tools (`add/update/remove_scheduled_task`) are excluded to prevent recursion.
 
 `get_all_tool_specs()` merges built-in specs with any MCP tool specs at call time (not module load). `run_tool_async()` is the async dispatcher used by `handle_tool_call` — it routes to `MCPManager.call_tool()` for MCP tools or falls through to the synchronous `run_tool()` for built-ins.

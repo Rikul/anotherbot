@@ -1,9 +1,34 @@
+from contextvars import ContextVar
+
 from ..infra.app_logging import log
 from ..core.tool import Tool
 
-_tasks: dict[str, dict] = {}
-_next_id = 1
 _VALID_STATUSES = {"todo", "in_progress", "done"}
+
+
+class TodoList:
+    def __init__(self) -> None:
+        self.tasks: dict[str, dict] = {}
+        self.next_id = 1
+
+
+# Each channel's BackgroundAgent.process_incoming() runs in its own asyncio task
+# and calls init_task_todos() so channels don't share todos. Tool calls run in
+# child tasks (asyncio.gather) that copy the context, so they see the same list.
+# Without a scope (CLI, tests) the module-level default list is used.
+_default = TodoList()
+_current: ContextVar[TodoList] = ContextVar("todo_list")
+
+
+def init_task_todos() -> TodoList:
+    """Bind a fresh todo list to the current asyncio task's context."""
+    todos = TodoList()
+    _current.set(todos)
+    return todos
+
+
+def current_todos() -> TodoList:
+    return _current.get(_default)
 
 class TodoAddTool(Tool):
     @staticmethod
@@ -32,12 +57,12 @@ class TodoAddTool(Tool):
 
     @staticmethod
     def call(title: str, description: str = "") -> str:
-        global _next_id
         log.info(f"todo_add, title: {title}")
 
-        task_id = str(_next_id)
-        _next_id += 1
-        _tasks[task_id] = {"title": title, "description": description, "status": "todo"}
+        todos = current_todos()
+        task_id = str(todos.next_id)
+        todos.next_id += 1
+        todos.tasks[task_id] = {"title": title, "description": description, "status": "todo"}
         return f"Task {task_id} added: {title}"
 
 
@@ -57,11 +82,12 @@ class TodoListTool(Tool):
     def call() -> str:
         log.info("todo_list")
 
-        if not _tasks:
+        tasks = current_todos().tasks
+        if not tasks:
             return "No tasks."
 
         lines = []
-        for task_id, task in _tasks.items():
+        for task_id, task in tasks.items():
             line = f"[{task_id}] [{task['status']}] {task['title']}"
             if task["description"]:
                 line += f" — {task['description']}"
@@ -83,11 +109,11 @@ class TodoClearTool(Tool):
 
     @staticmethod
     def call() -> str:
-        global _next_id
         log.info("todo_clear")
-        count = len(_tasks)
-        _tasks.clear()
-        _next_id = 1
+        todos = current_todos()
+        count = len(todos.tasks)
+        todos.tasks.clear()
+        todos.next_id = 1
         return f"Cleared {count} task(s)."
 
 
@@ -121,7 +147,8 @@ class TodoUpdateTool(Tool):
     def call(task_id: str, status: str) -> str:
         log.info(f"todo_update, task_id: {task_id}, status: {status}")
 
-        if task_id not in _tasks:
+        tasks = current_todos().tasks
+        if task_id not in tasks:
             log.error(f"TodoUpdateTool: task {task_id} not found")
             return f"Error: task {task_id} not found"
 
@@ -129,5 +156,5 @@ class TodoUpdateTool(Tool):
             log.error(f"TodoUpdateTool: invalid status '{status}'")
             return f"Error: invalid status '{status}'. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
 
-        _tasks[task_id]["status"] = status
+        tasks[task_id]["status"] = status
         return f"Task {task_id} updated to '{status}'"

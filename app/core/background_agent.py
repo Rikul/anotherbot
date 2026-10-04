@@ -104,6 +104,8 @@ class BackgroundAgent(Agent):
 
     async def process_incoming(self) -> None:
         log.info("BackgroundAgent started processing incoming messages...")
+        from ..tools.todo import init_task_todos
+        init_task_todos()  # per-channel todo list (this coroutine runs as its own task)
         while True:
             msg = await self.mq.incoming.get()
             try:
