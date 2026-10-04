@@ -90,7 +90,7 @@ Todo tools (`app/tools/todo.py`) keep an in-memory `TodoList` per asyncio task v
 
 ### MCP Servers
 
-`MCPManager` (`app/core/mcp_manager.py`) owns persistent FastMCP client connections and their tool catalogs. It is a module-level singleton (`mcp_manager`). `initialize_mcp()` in `main.py` reads `mcp_servers.json`, then calls `mcp_manager.initialize()` which connects all servers concurrently via `asyncio.gather`. Each server's tools are discovered via `list_tools()` and registered under the namespace `servername__toolname` (`_SEP = "__"`). `rpartition` is used when routing calls so tool names may contain underscores freely; only the server name must not contain `__`.
+`MCPManager` (`app/core/mcp_manager.py`) owns persistent FastMCP client connections and their tool catalogs. It is a module-level singleton (`mcp_manager`). `initialize_mcp()` (same module, called from `main()`) reads `mcp_servers.json`, then calls `mcp_manager.initialize()` which connects all servers concurrently via `asyncio.gather`. Each server's tools are discovered via `list_tools()` and registered under the namespace `servername__toolname` (`_SEP = "__"`). `rpartition` is used when routing calls so tool names may contain underscores freely; only the server name must not contain `__`.
 
 The singleton is shut down via `mcp_manager.shutdown()` in a `try/finally` block in `main()`. `HelperAgent` does not receive MCP tools — it uses the static `helper_tool_specs` allowlist to prevent recursion.
 

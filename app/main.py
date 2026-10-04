@@ -13,41 +13,10 @@ from .cli.cli import input_loop
 from .cli.cli_agent import CliAgent
 from .bg_server import start_server
 from .core import runtime
+from .core.mcp_manager import initialize_mcp
 
 from dotenv import load_dotenv
 load_dotenv()
-
-async def initialize_mcp() -> None:
-    import json
-    from pathlib import Path
-    mcp_config_path = Path(config.PROJECT_HOME) / "mcp_servers.json"
-    if not mcp_config_path.exists():
-        return
-    try:
-        with open(mcp_config_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        log.error(f"Failed to load mcp_servers.json: {e}")
-        return
-
-    if not isinstance(data, dict):
-        log.error("mcp_servers.json must contain a JSON object at the top level.")
-        return
-
-    mcp_servers = data.get("mcpServers")
-    if not mcp_servers:
-        return
-    if not isinstance(mcp_servers, dict):
-        log.error("mcp_servers.json: 'mcpServers' must be a JSON object mapping server names to configs.")
-        return
-
-    from .core.mcp_manager import mcp_manager
-    log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
-    try:
-        await mcp_manager.initialize(mcp_servers)
-    except Exception as e:
-        log.error(f"Failed to initialize MCP servers: {e}")
-
 
 async def load_config() -> None:
     try:

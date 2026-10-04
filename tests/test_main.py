@@ -4,7 +4,8 @@ import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
 from app.cli.cli import input_loop
-from app.main import main, initialize_mcp
+from app.main import main
+from app.core.mcp_manager import initialize_mcp
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +274,7 @@ async def test_main_tracedir_defaults_to_project_home_trace():
 async def test_initialize_mcp_no_op_when_file_missing(tmp_path):
     mock_mgr = MagicMock()
     mock_mgr.initialize = AsyncMock()
-    with patch("app.main.config") as mock_cfg, \
+    with patch("app.core.mcp_manager.config") as mock_cfg, \
          patch("app.core.mcp_manager.mcp_manager", mock_mgr):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()
@@ -286,7 +287,7 @@ async def test_initialize_mcp_calls_initialize_with_server_dict(tmp_path):
     (tmp_path / "mcp_servers.json").write_text(json.dumps({"mcpServers": servers}))
     mock_mgr = MagicMock()
     mock_mgr.initialize = AsyncMock()
-    with patch("app.main.config") as mock_cfg, \
+    with patch("app.core.mcp_manager.config") as mock_cfg, \
          patch("app.core.mcp_manager.mcp_manager", mock_mgr):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()
@@ -298,7 +299,7 @@ async def test_initialize_mcp_handles_malformed_json(tmp_path):
     (tmp_path / "mcp_servers.json").write_text("not json{{")
     mock_mgr = MagicMock()
     mock_mgr.initialize = AsyncMock()
-    with patch("app.main.config") as mock_cfg, \
+    with patch("app.core.mcp_manager.config") as mock_cfg, \
          patch("app.core.mcp_manager.mcp_manager", mock_mgr):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()  # must not raise

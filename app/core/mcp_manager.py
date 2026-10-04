@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
 
 from fastmcp import Client
 from fastmcp.client import StdioTransport
@@ -9,6 +10,37 @@ from fastmcp.client import StdioTransport
 from ..infra.app_logging import log
 from ..infra.helpers import trunc_str_with_ellipsis
 from .tool_calls import MAX_TOOL_RESULT_LENGTH
+from .. import config
+
+
+async def initialize_mcp() -> None:
+    """Load mcp_servers.json and connect the module-level ``mcp_manager``."""
+    mcp_config_path = Path(config.PROJECT_HOME) / "mcp_servers.json"
+    if not mcp_config_path.exists():
+        return
+    try:
+        with open(mcp_config_path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        log.error(f"Failed to load mcp_servers.json: {e}")
+        return
+
+    if not isinstance(data, dict):
+        log.error("mcp_servers.json must contain a JSON object at the top level.")
+        return
+
+    mcp_servers = data.get("mcpServers")
+    if not mcp_servers:
+        return
+    if not isinstance(mcp_servers, dict):
+        log.error("mcp_servers.json: 'mcpServers' must be a JSON object mapping server names to configs.")
+        return
+
+    log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
+    try:
+        await mcp_manager.initialize(mcp_servers)
+    except Exception as e:
+        log.error(f"Failed to initialize MCP servers: {e}")
 
 
 class MCPManager:
