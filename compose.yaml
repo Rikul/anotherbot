@@ -15,6 +15,8 @@ services:
       # Always win over .env — values meant for running locally would break the container.
       ANOTHERBOT_HOME: /data
       WEBSOCKET_HOST: 0.0.0.0
+      # Default login so the web UI starts; set WEB_PASSWORD in .env to change it.
+      WEB_PASSWORD: ${WEB_PASSWORD:-botpassword}
     ports:
       # Same port on both sides, so WEBSOCKET_PORT in .env changes the listen and published port together.
       - "${WEBSOCKET_PORT:-8765}:${WEBSOCKET_PORT:-8765}"

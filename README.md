@@ -259,7 +259,7 @@ docker compose up -d --build
 docker compose logs -f        # follow output
 ```
 
-Then open `http://localhost:8765/` and log in with your `WEB_PASSWORD` (required: the container binds to `0.0.0.0`). `compose.yaml` passes your `.env` into the container and keeps data in the `anotherbot-data` volume. `WEBSOCKET_HOST` and `ANOTHERBOT_HOME` are always forced to `0.0.0.0` and `/data`, so local-dev values in `.env` don't break the container. Setting `WEBSOCKET_PORT` in `.env` changes both the port the app listens on and the published port.
+Then open `http://localhost:8765/` and log in with your `WEB_PASSWORD`. If `.env` doesn't set one, compose uses the default `botpassword` — change it before exposing the port beyond your machine. `compose.yaml` passes your `.env` into the container and keeps data in the `anotherbot-data` volume. `WEBSOCKET_HOST` and `ANOTHERBOT_HOME` are always forced to `0.0.0.0` and `/data`, so local-dev values in `.env` don't break the container. Setting `WEBSOCKET_PORT` in `.env` changes both the port the app listens on and the published port.
 
 To add MCP servers, copy the file into the volume: `docker compose cp mcp_servers.json anotherbot:/data/`, then run `docker compose restart`.
 
