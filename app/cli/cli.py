@@ -1,23 +1,17 @@
-from ..infra.term_display import ANSI
+"""Interactive terminal REPL and single-prompt mode."""
+
 import asyncio
+import os
+from collections.abc import AsyncIterator
+
+from ..channels.commands import build_command_registry
 from ..core import runtime
 from ..infra.app_logging import log
 from .cli_agent import CliAgent
-import os
 
 
-def ask_permission(tool_name: str, args: dict) -> bool:
-    msg = f"{ANSI.YELLOW}⚡ Tool Call{ANSI.RESET}: {ANSI.CYAN}{tool_name}{ANSI.RESET}   Args: {args}"
-    print(msg)
-
-    msg = f"Proceed? {ANSI.DIM}[Y/n]{ANSI.RESET} "
-    print(msg, end="", flush=True)
-
-    answer = input().strip().lower()
-    return answer in ("", "y", "yes")
-
-
-async def input_loop() -> str:
+async def input_loop() -> AsyncIterator[str]:
+    """Yield non-empty lines typed by the user until EOF or Ctrl+C."""
     loop = asyncio.get_event_loop()
 
     while True:
@@ -32,13 +26,20 @@ async def input_loop() -> str:
             # Stop the loop on EOF or Ctrl+C
             break
         except asyncio.CancelledError:
-            raise KeyboardInterrupt
+            raise KeyboardInterrupt from None
 
 
 async def run_cli(max_iterations: int, auto_approve: bool, prompt: str | None):
+    """Run the CLI agent: one prompt and exit, or an interactive REPL with slash commands.
+
+    Args:
+        max_iterations: must be positive, otherwise nothing runs.
+        auto_approve: run tools without asking.
+        prompt: run just this prompt and exit; ``None`` starts the REPL.
+    """
 
     if max_iterations <= 0:
-        log.warning(f"max_iterations must be positive (got {max_iterations}), exiting")
+        log.warning("max_iterations must be positive (got %s), exiting", max_iterations)
         return
 
     log.info("Starting agent...")
@@ -56,76 +57,7 @@ async def run_cli(max_iterations: int, auto_approve: bool, prompt: str | None):
         "Starting interactive session. Type your prompts below. Press Ctrl+C to exit."
     )
 
-    from ..channels.commands import (
-        CommandRegistry,
-        BotCommand,
-        make_status_cmd,
-        help_cmd,
-        model_cmd,
-        trace_cmd,
-        list_conversations_cmd,
-        new_conversation_cmd,
-        load_conversation_cmd,
-        fork_conversation_cmd,
-        rename_conversation_cmd,
-        export_conversation_cmd,
-        mcp_cmd,
-    )
-
-    cli_registry = CommandRegistry()
-    cli_registry.register(BotCommand("status", "Show bot status.", make_status_cmd()))
-    cli_registry.register(
-        BotCommand("model", "Get or set model. Usage: /model [name]", model_cmd)
-    )
-    cli_registry.register(
-        BotCommand("trace", "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd)
-    )
-    cli_registry.register(
-        BotCommand(
-            "list",
-            "List conversations. Usage: /list [all]",
-            list_conversations_cmd(agent._store, agent._channel_str),
-        )
-    )
-    cli_registry.register(
-        BotCommand("new", "Start a new conversation.", new_conversation_cmd(agent))
-    )
-    cli_registry.register(
-        BotCommand(
-            "load",
-            "Load a conversation. Usage: /load <id>",
-            load_conversation_cmd(agent),
-        )
-    )
-    cli_registry.register(
-        BotCommand(
-            "fork",
-            "Fork a conversation. Usage: /fork [id]",
-            fork_conversation_cmd(agent),
-        )
-    )
-    cli_registry.register(
-        BotCommand(
-            "rename",
-            "Rename a conversation. Usage: /rename <id> <name>",
-            rename_conversation_cmd(agent._store, agent._channel_str),
-        )
-    )
-    cli_registry.register(
-        BotCommand(
-            "export",
-            "Export a conversation to JSON. Usage: /export [id]",
-            export_conversation_cmd(agent._store, agent._channel_str),
-        )
-    )
-    cli_registry.register(
-        BotCommand(
-            "mcp", "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()
-        )
-    )
-    cli_registry.register(
-        BotCommand("help", "Show available commands.", help_cmd(cli_registry))
-    )
+    cli_registry = build_command_registry(agent)
 
     try:
         async for user_input in input_loop():
@@ -140,5 +72,5 @@ async def run_cli(max_iterations: int, auto_approve: bool, prompt: str | None):
     except KeyboardInterrupt:
         log.info("Exiting...")
         os._exit(0)
-    except Exception as e:
-        log.error(f"An error occurred: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught  # end the REPL cleanly
+        log.error("An error occurred: %s", e)

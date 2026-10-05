@@ -1,10 +1,14 @@
-from ..infra.app_logging import log
-from ..core.tool import Tool
+"""DuckDuckGo search tools (via ``ddgs``): text, images, videos, news and books."""
 
 from ddgs import DDGS
 
+from ..core.tool import Tool
+from ..infra.app_logging import log
+
 
 class WebSearchText(Tool):
+    """Web search: return up to ``max_results`` text results."""
+
     @staticmethod
     def spec():
         return {
@@ -23,7 +27,8 @@ class WebSearchText(Tool):
 
     @staticmethod
     def call(query: str, max_results: int = 10) -> list[dict[str, str]]:
-        log.info(f"WebSearchText: {query} {max_results}")
+        """Return text results (past year, safe search off); errors as ``[{"error": ...}]``."""
+        log.info("WebSearchText: %s %s", query, max_results)
 
         try:
             ddgs = DDGS()
@@ -32,12 +37,14 @@ class WebSearchText(Tool):
             )
             return results
 
-        except Exception as e:
-            log.error(f"Error performing web search: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error performing web search: %s", e)
             return [{"error": f"Error performing web search: {e}"}]
 
 
 class WebSearchImages(Tool):
+    """Image search: return up to ``max_results`` image results."""
+
     @staticmethod
     def spec():
         return {
@@ -56,19 +63,22 @@ class WebSearchImages(Tool):
 
     @staticmethod
     def call(query: str, max_results: int = 10) -> list[dict[str, str]]:
-        log.info(f"WebSearchImages: {query} {max_results}")
+        """Return image results; errors as ``[{"error": ...}]``."""
+        log.info("WebSearchImages: %s %s", query, max_results)
 
         try:
             ddgs = DDGS()
             results = ddgs.images(query, max_results=max_results, safesearch="off")
             return results
 
-        except Exception as e:
-            log.error(f"Error performing web image search: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error performing web image search: %s", e)
             return [{"error": f"Error performing web image search: {e}"}]
 
 
 class WebSearchVideos(Tool):
+    """Video search: return up to ``max_results`` video results."""
+
     @staticmethod
     def spec():
         return {
@@ -87,7 +97,8 @@ class WebSearchVideos(Tool):
 
     @staticmethod
     def call(query: str, max_results: int = 10) -> list[dict[str, str]]:
-        log.info(f"WebSearchVideos: {query} {max_results}")
+        """Return video results; errors as ``[{"error": ...}]``."""
+        log.info("WebSearchVideos: %s %s", query, max_results)
 
         try:
             ddgs = DDGS()
@@ -96,12 +107,14 @@ class WebSearchVideos(Tool):
             )
             return results
 
-        except Exception as e:
-            log.error(f"Error performing web video search: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error performing web video search: %s", e)
             return [{"error": f"Error performing web video search: {e}"}]
 
 
 class WebSearchNews(Tool):
+    """News search: return up to ``max_results`` news results."""
+
     @staticmethod
     def spec():
         return {
@@ -120,7 +133,8 @@ class WebSearchNews(Tool):
 
     @staticmethod
     def call(query: str, max_results: int = 10) -> list[dict[str, str]]:
-        log.info(f"WebSearchNews: {query} {max_results}")
+        """Return news results; errors as ``[{"error": ...}]``."""
+        log.info("WebSearchNews: %s %s", query, max_results)
 
         try:
             ddgs = DDGS()
@@ -129,12 +143,14 @@ class WebSearchNews(Tool):
             )
             return results
 
-        except Exception as e:
-            log.error(f"Error performing web news search: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error performing web news search: %s", e)
             return [{"error": f"Error performing web news search: {e}"}]
 
 
 class WebSearchBooks(Tool):
+    """Book search: return up to ``max_results`` book results."""
+
     @staticmethod
     def spec():
         return {
@@ -153,13 +169,14 @@ class WebSearchBooks(Tool):
 
     @staticmethod
     def call(query: str, max_results: int = 10) -> list[dict[str, str]]:
-        log.info(f"WebSearchBooks: {query} {max_results}")
+        """Return book results; errors as ``[{"error": ...}]``."""
+        log.info("WebSearchBooks: %s %s", query, max_results)
 
         try:
             ddgs = DDGS()
             results = ddgs.books(query, max_results=max_results)
             return results
 
-        except Exception as e:
-            log.error(f"Error performing web book search: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error performing web book search: %s", e)
             return [{"error": f"Error performing web book search: {e}"}]

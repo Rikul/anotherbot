@@ -1,3 +1,5 @@
+"""The shared agentic loop (LLM call → tool calls → repeat) and its hooks."""
+
 import asyncio
 import base64
 import json
@@ -22,6 +24,12 @@ def _slugify(name: str) -> str:
 
 
 def get_default_sys_prompt(context: dict | None = None) -> str:
+    """Build the system prompt: ``sys_instructions.md`` plus a current-context section.
+
+    Args:
+        context: optional ``channel``, ``conversation_id`` and
+            ``conversation_name`` to include.
+    """
     ctx = context or {}
     channel = ctx.get("channel", "cli")
 
@@ -32,8 +40,8 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
     try:
         with open(sys_instructions_path, "r", encoding="utf-8") as f:
             sys_prompt = f.read().strip()
-    except Exception as e:
-        log.error(f"Error loading system prompt: {e}")
+    except (OSError, UnicodeDecodeError) as e:
+        log.error("Error loading system prompt: %s", e)
 
     conv_id = ctx.get("conversation_id", "")
     conv_name = ctx.get("conversation_name", "")
@@ -54,11 +62,18 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 - Current Channel: {channel}{conv_line}
 """
 
-    log.info(f"Loaded system prompt: {len(sys_prompt)} characters")
+    log.info("Loaded system prompt: %s characters", len(sys_prompt))
     return sys_prompt
 
 
 class Agent(ABC):
+    """Base agent: runs the LLM/tool loop and leaves I/O to subclass hooks.
+
+    Subclasses implement ``agent_loop`` and override the ``_on_*``,
+    ``_check_permission`` and ``_should_stop`` hooks (see CLAUDE.md for which
+    agent overrides what).
+    """
+
     def __init__(self, max_iterations: int = 250) -> None:
         self.client = Client().get_client()
         self.messages: list[dict] = []
@@ -112,7 +127,7 @@ class Agent(ABC):
         except PermissionError as e:
             raise PermissionError(f"Cannot read attachment: {path}") from e
 
-        log.info(f"Encoding attachment {path} ({mime_type}, {len(raw)} bytes)")
+        log.info("Encoding attachment %s (%s, %s bytes)", path, mime_type, len(raw))
 
         data_url = f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}"
 
@@ -170,7 +185,9 @@ class Agent(ABC):
     async def _on_thinking(self, content: str | None) -> None:
         """Called when the assistant emits text alongside tool calls."""
 
-    async def _check_permission(self, tool_name: str, tool_args: dict) -> bool:
+    async def _check_permission(  # pylint: disable=unused-argument  # hook; subclasses use the args
+        self, tool_name: str, tool_args: dict
+    ) -> bool:
         """Return False to deny; refusal string is sent back as the tool result."""
         return True
 
@@ -191,7 +208,8 @@ class Agent(ABC):
     async def _auto_name(
         self, store, conv_id: int, messages: list[dict], name_runtime_key: str
     ) -> None:
-        from .helper_agent import HelperAgent  # lazy — helper_agent imports Agent
+        # Lazy: helper_agent imports Agent (circular import).
+        from .helper_agent import HelperAgent  # pylint: disable=import-outside-toplevel
 
         transcript = "\n".join(
             f"{m['role']}: {m['content'][:200]}" for m in messages[:4]
@@ -207,25 +225,32 @@ class Agent(ABC):
             if conv and conv["name"] == "New Conversation":
                 store.rename(conv_id, name, conv["channel"])
                 runtime.set(name_runtime_key, name)
-                log.info(f"Auto-named conversation {conv_id}: {name!r}")
-        except Exception as e:
-            log.warning(f"Auto-naming conversation {conv_id} failed: {e}")
+                log.info("Auto-named conversation %s: %r", conv_id, name)
+        except Exception as e:  # pylint: disable=broad-exception-caught  # naming is best-effort
+            log.warning("Auto-naming conversation %s failed: %s", conv_id, e)
 
     # --- shared tool dispatch ---
 
     async def handle_tool_call(self, tool_call) -> str:
-        from .tool_calls import (
-            run_tool_async,
-        )  # lazy — tool_calls imports scheduled_tasks which imports Agent
+        """Run one tool call from the model and return its result as text.
+
+        Permission is checked first; a refusal or any error is returned as text
+        so the model can react to it.
+        """
+        # Lazy: tool_calls imports scheduled_tasks, which imports Agent (circular import).
+        from .tool_calls import run_tool_async  # pylint: disable=import-outside-toplevel
 
         tool_name = tool_call.function.name
         try:
             tool_args = json.loads((tool_call.function.arguments or "").strip() or "{}")
             if not await self._check_permission(tool_name, tool_args):
-                return "User denied permission to run this tool. Ask for permission to run the tool again if you want to try running it."
+                return (
+                    "User denied permission to run this tool. Ask for permission "
+                    "to run the tool again if you want to try running it."
+                )
             await self._on_tool_start(tool_name, tool_args)
             return await run_tool_async(tool_name=tool_name, tool_args=tool_args)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
             error_msg = f"Error running tool {tool_name}: {str(e)}"
             log.error(error_msg)
             return error_msg
@@ -270,7 +295,7 @@ class Agent(ABC):
                             "content": result,
                         }
                     )
-                    log.info(f"{result[:250]}...")
+                    log.info("%s...", result[:250])
             else:
                 messages.append(self._serialize_assistant_msg(assistant_message))
                 await self._on_response(assistant_message.content)
@@ -279,7 +304,8 @@ class Agent(ABC):
                     and finish_reason is not None
                 ):
                     log.warning(
-                        f"Unexpected finish_reason={finish_reason!r}, treating as terminal"
+                        "Unexpected finish_reason=%r, treating as terminal",
+                        finish_reason,
                     )
                 break
 
@@ -294,4 +320,4 @@ class Agent(ABC):
 
     @abstractmethod
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
-        pass
+        """Handle one user message end to end and return the final reply."""

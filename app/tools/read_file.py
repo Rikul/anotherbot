@@ -1,15 +1,22 @@
-from ..infra.app_logging import log
+"""``read_file`` tool: read a file, optionally a byte range."""
+
 from ..core.tool import Tool
+from ..infra.app_logging import log
 
 
 class ReadFileTool(Tool):
+    """Read a file as UTF-8 (bad bytes replaced), optionally from ``offset`` for ``size`` bytes."""
+
     @staticmethod
     def spec():
         return {
             "type": "function",
             "function": {
                 "name": "read_file",
-                "description": "Read and return the contents of a file. Supports optional offset and size parameters for partial reads.",
+                "description": (
+                    "Read and return the contents of a file. Supports optional offset and size "
+                    "parameters for partial reads."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -23,7 +30,9 @@ class ReadFileTool(Tool):
                         },
                         "size": {
                             "type": "integer",
-                            "description": "Maximum number of bytes to read (default: read to end of file)",
+                            "description": (
+                                "Maximum number of bytes to read (default: read to end of file)"
+                            ),
                         },
                     },
                     "required": ["file_path"],
@@ -33,7 +42,10 @@ class ReadFileTool(Tool):
 
     @staticmethod
     def call(file_path: str, offset: int = 0, size: int | None = None) -> str:
-        log.info(f"read_file, file_path: {file_path}, offset: {offset}, size: {size}")
+        """Return the file's contents (or the requested byte range); errors as text."""
+        log.info(
+            "read_file, file_path: %s, offset: %s, size: %s", file_path, offset, size
+        )
 
         if offset < 0:
             return "Error: offset must be non-negative"
@@ -48,6 +60,6 @@ class ReadFileTool(Tool):
             return data.decode("utf-8", errors="replace")
         except FileNotFoundError:
             return f"Error: file {file_path} does not exist"
-        except Exception as e:
-            log.error(f"Error reading file {file_path}: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error reading file %s: %s", file_path, e)
             return f"Error reading file {file_path}: {e}"

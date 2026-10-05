@@ -1,3 +1,5 @@
+"""Agent behind a chat channel (Telegram, Discord, web), fed by a ``MessageQueue``."""
+
 from __future__ import annotations
 
 import asyncio
@@ -11,11 +13,23 @@ from .agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
 from ..infra.message_history import MessageHistory
 from ..infra.conversations import ConversationStore
 from . import runtime
+from ..channels.commands import BotCommand, build_command_registry
+from ..infra import tracer
+from ..tools.todo import init_task_todos
 
 _MAX_EMPTY_RETRIES = 5
 
 
 class BackgroundAgent(Agent):
+    """Serves one channel: runs slash commands and agent turns for its messages.
+
+    Keeps its own active conversation (persisted via ``ConversationStore``) and
+    sends thinking text, tool status and replies back through the queue.
+
+    Raises:
+        ValueError: if no channel is given.
+    """
+
     def __init__(
         self,
         mq: MessageQueue = None,
@@ -29,115 +43,41 @@ class BackgroundAgent(Agent):
         if self.channel is None:
             raise ValueError("channel must be specified for BackgroundAgent")
 
-        self._channel_str = channel.channel_type.value
-        self._store = ConversationStore()
-        self.history = MessageHistory(channel_type=self._channel_str)
+        self.channel_str = channel.channel_type.value
+        self.store = ConversationStore()
+        self.history = MessageHistory(channel_type=self.channel_str)
 
-        conv = self._store.get_last(self._channel_str)
+        conv = self.store.get_last(self.channel_str)
         if conv is None:
-            cid = self._store.create(self._channel_str)
-            conv = self._store.get(cid)
+            cid = self.store.create(self.channel_str)
+            conv = self.store.get(cid)
 
         self.conversation_id: int = conv["id"]
-        runtime.set(f"conversation_id:{self._channel_str}", conv["id"])
-        runtime.set(f"conversation_name:{self._channel_str}", conv["name"])
+        runtime.set(f"conversation_id:{self.channel_str}", conv["id"])
+        runtime.set(f"conversation_name:{self.channel_str}", conv["name"])
         self.messages.extend(
-            self._store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES)
+            self.store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES)
         )
 
         self._reply_metadata: dict = {}
         self._empty_retries: int = 0
 
-        # Lazy import to avoid circular: commands imports runtime which is fine,
-        # but conversation commands need self reference so we build registry here.
-        from ..channels.commands import (
-            CommandRegistry,
-            BotCommand,
-            help_cmd,
-            make_status_cmd,
-            model_cmd,
-            trace_cmd,
-            list_conversations_cmd,
-            new_conversation_cmd,
-            load_conversation_cmd,
-            fork_conversation_cmd,
-            rename_conversation_cmd,
-            export_conversation_cmd,
-            mcp_cmd,
+        self.registry = build_command_registry(
+            self,
+            status_channel=self.channel_str,
+            extra=(BotCommand("stop", "Pause the bot.", self._stop_cmd),),
         )
 
-        self.registry = CommandRegistry()
-        ch = self._channel_str
-        self.registry.register(
-            BotCommand("model", "Get or set model. Usage: /model [name]", model_cmd)
-        )
-        self.registry.register(
-            BotCommand("trace", "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd)
-        )
-        self.registry.register(
-            BotCommand("status", "Show bot status.", make_status_cmd(ch))
-        )
-        self.registry.register(BotCommand("stop", "Pause the bot.", self._stop_cmd))
-        self.registry.register(
-            BotCommand(
-                "list",
-                "List conversations. Usage: /list [all]",
-                list_conversations_cmd(self._store, ch),
-            )
-        )
-        self.registry.register(
-            BotCommand("new", "Start a new conversation.", new_conversation_cmd(self))
-        )
-        self.registry.register(
-            BotCommand(
-                "load",
-                "Load a conversation. Usage: /load <id>",
-                load_conversation_cmd(self),
-            )
-        )
-        self.registry.register(
-            BotCommand(
-                "fork",
-                "Fork a conversation. Usage: /fork [id]",
-                fork_conversation_cmd(self),
-            )
-        )
-        self.registry.register(
-            BotCommand(
-                "rename",
-                "Rename a conversation. Usage: /rename <id> <name>",
-                rename_conversation_cmd(self._store, ch),
-            )
-        )
-        self.registry.register(
-            BotCommand(
-                "export",
-                "Export a conversation to JSON. Usage: /export [id]",
-                export_conversation_cmd(self._store, ch),
-            )
-        )
-        self.registry.register(
-            BotCommand(
-                "mcp",
-                "Show MCP server status. Usage: /mcp [tools [<server>]]",
-                mcp_cmd(),
-            )
-        )
-        self.registry.register(
-            BotCommand("help", "Show available commands.", help_cmd(self.registry))
-        )
-
-    async def _stop_cmd(self, args: str = "") -> str:
+    async def _stop_cmd(self, _args: str = "") -> str:
         self.channel.stopped = True
         return "Stopped."
 
-    def _switch_conversation(self, conv: dict) -> None:
+    def switch_conversation(self, conv: dict) -> None:
+        """Make ``conv`` the channel's active conversation and load its messages."""
         self.conversation_id = conv["id"]
-        self.messages = self._store.load_messages(
-            conv["id"], limit=MAX_CONTEXT_MESSAGES
-        )
-        runtime.set(f"conversation_id:{self._channel_str}", conv["id"])
-        runtime.set(f"conversation_name:{self._channel_str}", conv["name"])
+        self.messages = self.store.load_messages(conv["id"], limit=MAX_CONTEXT_MESSAGES)
+        runtime.set(f"conversation_id:{self.channel_str}", conv["id"])
+        runtime.set(f"conversation_name:{self.channel_str}", conv["name"])
 
     async def _on_thinking(self, content: str | None) -> None:
         if self.mq and content:
@@ -181,7 +121,10 @@ class BackgroundAgent(Agent):
             )
         wait = min(2**self._empty_retries, 60)
         log.warning(
-            f"No choices in API response, retrying in {wait}s (attempt {self._empty_retries}/{_MAX_EMPTY_RETRIES})"
+            "No choices in API response, retrying in %ss (attempt %s/%s)",
+            wait,
+            self._empty_retries,
+            _MAX_EMPTY_RETRIES,
         )
         await asyncio.sleep(wait)
 
@@ -189,9 +132,12 @@ class BackgroundAgent(Agent):
         return self.channel.has_stopped
 
     async def process_incoming(self) -> None:
-        log.info("BackgroundAgent started processing incoming messages...")
-        from ..tools.todo import init_task_todos
+        """Consume the incoming queue forever: run commands and agent turns.
 
+        Runs as its own asyncio task, so it binds the channel's own todo list
+        first. Errors are reported back to the user instead of stopping the loop.
+        """
+        log.info("BackgroundAgent started processing incoming messages...")
         init_task_todos()  # per-channel todo list (this coroutine runs as its own task)
         while True:
             msg = await self.mq.incoming.get()
@@ -213,8 +159,8 @@ class BackgroundAgent(Agent):
                     )
                 else:
                     await self.agent_loop(msg.content, msg.metadata)
-            except Exception as e:
-                log.error(f"Agent loop error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught  # report it, keep serving
+                log.error("Agent loop error: %s", e)
                 await self.mq.outgoing_msg(
                     OutgoingMessage(
                         content=str(e), channel=self.channel, metadata=msg.metadata
@@ -230,10 +176,10 @@ class BackgroundAgent(Agent):
         placeholder_content = self._build_placeholder_content(message, attachments)
         self.history.add_message("user", placeholder_content, self.conversation_id)
 
-        conv = self._store.get(self.conversation_id)
+        conv = self.store.get(self.conversation_id)
         system_context = get_default_sys_prompt(
             {
-                "channel": self._channel_str,
+                "channel": self.channel_str,
                 "conversation_id": self.conversation_id,
                 "conversation_name": conv["name"] if conv else "New Conversation",
             }
@@ -246,9 +192,7 @@ class BackgroundAgent(Agent):
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
         if runtime.get("trace"):
-            from ..infra.tracer import write_trace
-
-            path = write_trace(session_messages)
+            path = tracer.write_trace(session_messages)
             if path:
                 runtime.set("last_trace", path.name)
 
@@ -257,17 +201,17 @@ class BackgroundAgent(Agent):
         self.messages.append({"role": "user", "content": placeholder_content})
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
-        self._store.touch(self.conversation_id)
+        self.store.touch(self.conversation_id)
 
-        if self._store.count_user_messages(self.conversation_id) == 1:
-            conv = self._store.get(self.conversation_id)
+        if self.store.count_user_messages(self.conversation_id) == 1:
+            conv = self.store.get(self.conversation_id)
             if conv and conv["name"] == "New Conversation":
                 asyncio.create_task(
                     self._auto_name(
-                        self._store,
+                        self.store,
                         self.conversation_id,
                         list(self.messages),
-                        f"conversation_name:{self._channel_str}",
+                        f"conversation_name:{self.channel_str}",
                     )
                 )
 

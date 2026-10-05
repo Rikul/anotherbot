@@ -77,3 +77,21 @@ async def test_run_tool_async_falls_through_for_local_tool(tmp_path):
         result = await run_tool_async("read_file", {"file_path": file_path})
     mock_mgr.call_tool.assert_not_called()
     assert result == "hello"
+
+
+def test_tool_subclass_without_call_is_rejected():
+    from app.core.tool import Tool
+
+    with pytest.raises(TypeError, match="must define call"):
+        class NoCall(Tool):  # noqa: F841
+            @staticmethod
+            def spec():
+                return {}
+
+
+def test_every_registered_tool_has_callable_call_and_matching_spec_name():
+    from app.core.tool_calls import tool_registry
+
+    for name, cls in tool_registry.items():
+        assert callable(cls.call)
+        assert cls.spec()["function"]["name"] == name

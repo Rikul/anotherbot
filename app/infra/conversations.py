@@ -1,3 +1,5 @@
+"""Named conversations: create, list, load, rename, fork and export chat histories."""
+
 from __future__ import annotations
 
 import contextlib
@@ -24,6 +26,13 @@ def _fk_conn(db_path: Path):
 
 
 class ConversationStore:
+    """SQLite store for conversations and the messages that belong to them.
+
+    Uses the ``conversations`` table plus a ``conversation_id`` column on the
+    ``messages`` table written by ``MessageHistory``. Methods that take a
+    conversation ID work across channels (the web UI is an admin view).
+    """
+
     def __init__(self, db_path: Path = APP_DB):
         self.db_path = db_path
         self._ensure_schema()
@@ -110,19 +119,20 @@ class ConversationStore:
             except Exception:
                 try:
                     mconn.execute("ROLLBACK")
-                except Exception:
-                    pass
+                except sqlite3.Error:
+                    pass  # no transaction to roll back; re-raise the original error
                 raise
             finally:
                 mconn.close()
 
         except sqlite3.Error as e:
-            log.error(f"ConversationStore schema error: {e}")
+            log.error("ConversationStore schema error: %s", e)
             raise
 
     def create(
         self, channel: str, name: str = "New Conversation", parent_id: int = None
     ) -> int:
+        """Create a conversation for ``channel`` and return its ID (name trimmed to 80 chars)."""
         clean = name.strip()[:80] or "New Conversation"
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
@@ -134,6 +144,7 @@ class ConversationStore:
         return cid
 
     def get(self, conversation_id: int) -> dict | None:
+        """Return the conversation with this ID as a dict, or ``None`` if it doesn't exist."""
         with _fk_conn(self.db_path) as conn:
             row = conn.execute(
                 "SELECT id, name, channel, parent_id, created_at, updated_at "
@@ -152,6 +163,7 @@ class ConversationStore:
         }
 
     def get_last(self, channel: str) -> dict | None:
+        """Return ``channel``'s most recently updated conversation, or ``None`` if it has none."""
         with _fk_conn(self.db_path) as conn:
             row = conn.execute(
                 "SELECT id, name, channel, parent_id, created_at, updated_at "
@@ -170,6 +182,11 @@ class ConversationStore:
         }
 
     def list(self, channel: str | None = None) -> list[dict]:
+        """List conversations, most recently updated first, with their message counts.
+
+        Args:
+            channel: only list this channel's conversations; ``None`` lists every channel's.
+        """
         with _fk_conn(self.db_path) as conn:
             where, params = ("WHERE c.channel=?", (channel,)) if channel else ("", ())
             q = f"""SELECT c.id, c.name, c.parent_id, c.created_at, c.updated_at,
@@ -194,6 +211,13 @@ class ConversationStore:
         ]
 
     def rename(self, conversation_id: int, name: str, channel: str) -> None:
+        """Rename a conversation (trimmed to 80 chars) and bump its ``updated_at``.
+
+        ``channel`` is accepted for API compatibility but no longer checked.
+
+        Raises:
+            ValueError: if the conversation doesn't exist.
+        """
         conv = self.get(conversation_id)
         if conv is None:
             raise ValueError(f"Conversation {conversation_id} not found")
@@ -207,6 +231,7 @@ class ConversationStore:
             )
 
     def touch(self, conversation_id: int) -> None:
+        """Set the conversation's ``updated_at`` to now (moves it to the top of lists)."""
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
             conn.execute(
@@ -215,6 +240,14 @@ class ConversationStore:
             )
 
     def fork(self, conversation_id: int, channel: str) -> int:
+        """Copy a conversation and all its messages into a new conversation for ``channel``.
+
+        Returns:
+            The new conversation's ID; its ``parent_id`` points at the original.
+
+        Raises:
+            ValueError: if the source conversation doesn't exist.
+        """
         conv = self.get(conversation_id)
         if conv is None:
             raise ValueError(f"Conversation {conversation_id} not found")
@@ -237,6 +270,10 @@ class ConversationStore:
         return new_id
 
     def load_messages(self, conversation_id: int, limit: int = 1000) -> list[dict]:
+        """Return the conversation's last ``limit`` messages, oldest first.
+
+        Each is a ``{"role": ..., "content": ...}`` dict.
+        """
         with _fk_conn(self.db_path) as conn:
             rows = conn.execute(
                 "SELECT role, content FROM messages WHERE conversation_id=? "
@@ -246,6 +283,7 @@ class ConversationStore:
         return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
 
     def count_user_messages(self, conversation_id: int) -> int:
+        """Return how many user messages the conversation has."""
         with _fk_conn(self.db_path) as conn:
             return conn.execute(
                 "SELECT COUNT(*) FROM messages WHERE conversation_id=? AND role='user'",
@@ -253,6 +291,16 @@ class ConversationStore:
             ).fetchone()[0]
 
     def export(self, conversation_id: int, channel: str) -> Path:
+        """Write the conversation and its messages to ``PROJECT_HOME/conversations`` as JSON.
+
+        ``channel`` is accepted for API compatibility but no longer checked.
+
+        Returns:
+            Path of the written ``<id>-<slug>.json`` file.
+
+        Raises:
+            ValueError: if the conversation doesn't exist.
+        """
         conv = self.get(conversation_id)
         if conv is None:
             raise ValueError(f"Conversation {conversation_id} not found")

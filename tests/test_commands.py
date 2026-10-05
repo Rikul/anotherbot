@@ -204,3 +204,79 @@ async def test_status_shows_tracing_on_without_filename():
         result = await status_cmd()
     assert "Tracing" in result
     assert "on" in result
+
+
+# --- /mcp ---
+
+def _mcp_manager_mock(statuses=None, specs=None, server_specs=None):
+    from unittest.mock import MagicMock
+    mgr = MagicMock()
+    mgr.get_server_status.return_value = statuses or []
+    mgr.get_tool_specs.return_value = specs or []
+    mgr.get_tools_for_server.side_effect = lambda name: (server_specs or {}).get(name, [])
+    return mgr
+
+
+def _spec(name, desc=""):
+    return {"type": "function", "function": {"name": name, "description": desc}}
+
+
+async def _run_mcp(args, mgr):
+    from unittest.mock import patch
+    from app.channels.commands import mcp_cmd
+    with patch("app.core.mcp_manager.mcp_manager", mgr):
+        return await mcp_cmd()(args)
+
+
+@pytest.mark.asyncio
+async def test_mcp_no_servers_points_to_config_file():
+    out = await _run_mcp("", _mcp_manager_mock())
+    assert out.startswith("No MCP servers configured.")
+    assert "mcp_servers.json" in out
+
+
+@pytest.mark.asyncio
+async def test_mcp_lists_server_status():
+    statuses = [
+        {"name": "mem", "disabled": False, "connected": True, "transport": "stdio", "target": "npx", "tool_count": 3},
+        {"name": "off", "disabled": True, "connected": False, "transport": "http", "target": "url", "tool_count": 0},
+        {"name": "down", "disabled": False, "connected": False, "transport": "stdio", "target": "x", "tool_count": 0},
+    ]
+    out = await _run_mcp("", _mcp_manager_mock(statuses=statuses))
+    assert out.splitlines() == [
+        "MCP servers (3):",
+        "  mem — connected, stdio (npx), 3 tool(s)",
+        "  off — disabled, http (url), 0 tool(s)",
+        "  down — disconnected, stdio (x), 0 tool(s)",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_lists_all_tools():
+    specs = [_spec("mem__read", "Read memory"), _spec("mem__write")]
+    out = await _run_mcp("tools", _mcp_manager_mock(specs=specs))
+    assert out.splitlines() == ["MCP tools (2):", "  mem__read — Read memory", "  mem__write"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_empty():
+    assert await _run_mcp("TOOLS", _mcp_manager_mock()) == "No MCP tools available."
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_for_server_uses_bare_names():
+    mgr = _mcp_manager_mock(server_specs={"mem": [_spec("mem__read", "Read")]})
+    out = await _run_mcp("tools mem", mgr)
+    assert out.splitlines() == ["Tools for 'mem' (1):", "  read — Read"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_for_unknown_server():
+    mgr = _mcp_manager_mock(statuses=[{"name": "mem"}])
+    assert await _run_mcp("tools nope", mgr) == "Server 'nope' not found. Configured: mem"
+
+
+@pytest.mark.asyncio
+async def test_mcp_tools_for_server_without_tools():
+    mgr = _mcp_manager_mock(statuses=[{"name": "mem"}])
+    assert await _run_mcp("tools mem", mgr) == "Server 'mem' has no tools."

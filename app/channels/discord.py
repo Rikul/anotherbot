@@ -1,5 +1,8 @@
-import discord
+"""Discord channel, built on discord.py."""
+
 import logging
+
+import discord
 
 from .message_queue import MessageQueue
 from .channel import Channel, ChannelType
@@ -11,6 +14,13 @@ MAX_DISCORD_LENGTH = 2000
 
 
 class DiscordChannel(discord.Client, Channel):
+    """Discord bot front end (also a ``discord.Client``).
+
+    Only users in ``allow_from`` may talk to the bot (an empty list allows
+    everyone). Replies go to the channel the message came from; scheduled-task
+    results go to the last active channel, or as a DM to the bot's owner.
+    """
+
     user: discord.ClientUser  # filled after login
 
     def __init__(
@@ -42,15 +52,17 @@ class DiscordChannel(discord.Client, Channel):
         return {"channel_id": self._last_channel_id} if self._last_channel_id else {}
 
     async def on_ready(self) -> None:
-        log.info(f"Discord: logged in as {self.user} (ID: {self.user.id})")
+        """discord.py event: log the bot's identity once connected."""
+        log.info("Discord: logged in as %s (ID: %s)", self.user, self.user.id)
 
     async def on_message(self, message: discord.Message) -> None:
+        """discord.py event: check the sender, answer /whoami and /stop, forward the rest."""
         if message.author.id == self.user.id:
             return
         user_id = message.author.id
         if self.allow_from and user_id not in self.allow_from:
             log.warning(
-                f"Discord: ignoring message from unauthorized user id={user_id}"
+                "Discord: ignoring message from unauthorized user id=%s", user_id
             )
             await message.reply("Sorry, you are not authorized to use this bot.")
             return
@@ -62,9 +74,10 @@ class DiscordChannel(discord.Client, Channel):
             cmd_name = content[1:].split(maxsplit=1)[0].lower()
             metadata = {"channel_id": message.channel.id}
             if cmd_name == "whoami":
+                name = message.author.display_name
                 await self.send_message(
                     OutgoingMessage(
-                        content=f"Your user ID is {user_id} and your name is {message.author.display_name}.",
+                        content=f"Your user ID is {user_id} and your name is {name}.",
                         channel=ChannelType.DISCORD,
                         metadata=metadata,
                     )
@@ -98,33 +111,36 @@ class DiscordChannel(discord.Client, Channel):
                 try:
                     channel = await self.fetch_channel(channel_id)
                 except discord.NotFound:
-                    log.error(f"Discord channel {channel_id} not found")
+                    log.error("Discord channel %s not found", channel_id)
                     return None
             return channel
         # No channel context — DM the app owner
         try:
             app_info = await self.application_info()
             return await app_info.owner.create_dm()
-        except Exception as e:
-            log.error(f"Discord: failed to open DM with owner: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # best-effort fallback
+            log.error("Discord: failed to open DM with owner: %s", e)
             return None
 
-    async def send_message(self, msg: OutgoingMessage) -> None:
-        channel_id = msg.metadata.get("channel_id")
+    async def send_message(self, message: OutgoingMessage) -> None:
+        channel_id = message.metadata.get("channel_id")
         dest = await self._resolve_destination(channel_id)
         if dest is None:
             return
-        for i in range(0, len(msg.content), MAX_DISCORD_LENGTH):
-            await dest.send(msg.content[i : i + MAX_DISCORD_LENGTH])
+        for i in range(0, len(message.content), MAX_DISCORD_LENGTH):
+            await dest.send(message.content[i : i + MAX_DISCORD_LENGTH])
 
     async def process_message(self, message) -> None:
         pass  # handled by on_message discord event
 
     async def error_handler(self, update, context) -> None:
-        log.error(f"Discord error: {context}")
+        log.error("Discord error: %s", context)
 
-    def start(self) -> None:
+    # Channel.start() (sync setup hook) shadows discord.Client.start(token);
+    # run_polling() calls discord.Client.start explicitly.
+    def start(self) -> None:  # pylint: disable=arguments-differ,invalid-overridden-method
         log.info("Starting Discord channel...")
 
     async def run_polling(self) -> None:
+        """Log in and process Discord events until cancelled."""
         await discord.Client.start(self, self.token)

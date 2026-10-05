@@ -1,3 +1,5 @@
+"""Background server: starts every configured channel with its own agent and queue."""
+
 import asyncio
 import os
 
@@ -13,6 +15,7 @@ from .channels.channel import Channel, ChannelType
 def telegram_channel_agent() -> tuple[
     Channel | None, BackgroundAgent | None, MessageQueue | None
 ]:
+    """Create and start the Telegram channel and its agent if configured; otherwise return Nones."""
     telegram_channel = None
     telegram_agent = None
     telegram_mq = None
@@ -22,7 +25,7 @@ def telegram_channel_agent() -> tuple[
         if not bot_token:
             log.error("Telegram BOT_TOKEN not set in config, skipping Telegram channel")
         else:
-            from .channels.telegram import TelegramChannel
+            from .channels.telegram import TelegramChannel  # pylint: disable=import-outside-toplevel  # only load configured channels' deps
 
             telegram_mq = MessageQueue()
             telegram_channel = TelegramChannel(
@@ -43,6 +46,7 @@ def telegram_channel_agent() -> tuple[
 def discord_channel_agent() -> tuple[
     Channel | None, BackgroundAgent | None, MessageQueue | None
 ]:
+    """Create and start the Discord channel and its agent if configured; otherwise return Nones."""
     discord_channel = None
     discord_agent = None
     discord_mq = None
@@ -52,7 +56,7 @@ def discord_channel_agent() -> tuple[
         if not discord_token:
             log.error("Discord TOKEN not set in config, skipping Discord channel")
         else:
-            from .channels.discord import DiscordChannel
+            from .channels.discord import DiscordChannel  # pylint: disable=import-outside-toplevel  # only load configured channels' deps
 
             discord_mq = MessageQueue()
             discord_channel = DiscordChannel(
@@ -73,17 +77,22 @@ def discord_channel_agent() -> tuple[
 def web_channel_agent() -> tuple[
     Channel | None, BackgroundAgent | None, MessageQueue | None
 ]:
+    """Create and start the web channel and its agent if configured; otherwise return Nones.
+
+    If the web channel refuses to start (exposed without ``WEB_PASSWORD``) it is
+    skipped with an error log, so the other channels still run.
+    """
     web_channel = None
     web_agent = None
     web_mq = None
 
     if config.get("websocket"):
-        from .channels.web_channel import WebChannel
+        from .channels.web_channel import WebChannel  # pylint: disable=import-outside-toplevel  # only load configured channels' deps
 
         ws_config = config.get("websocket")
         ws_host = ws_config.get("HOST", "127.0.0.1")
         ws_port = ws_config.get("PORT", 8765)
-        log.info(f"Starting web channel on {ws_host}:{ws_port}")
+        log.info("Starting web channel on %s:%s", ws_host, ws_port)
         web_mq = MessageQueue()
         web_channel = WebChannel(
             web_mq, host=ws_host, port=ws_port, password=config.get("web_password")
@@ -91,8 +100,9 @@ def web_channel_agent() -> tuple[
         try:
             web_channel.start()
         except RuntimeError as e:
-            # e.g. exposed on 0.0.0.0 without WEB_PASSWORD — skip the web UI, keep other channels running
-            log.error(f"Web channel disabled: {e}")
+            # e.g. exposed on 0.0.0.0 without WEB_PASSWORD: skip the web UI,
+            # keep the other channels running
+            log.error("Web channel disabled: %s", e)
             web_channel = None
         else:
             web_agent = BackgroundAgent(
@@ -105,10 +115,14 @@ def web_channel_agent() -> tuple[
 
 
 async def start_server() -> None:
+    """Run all configured channels, their agents and the task scheduler until cancelled.
+
+    Returns immediately (after logging an error) if no channel is usable.
+    """
     log.info("Starting server...")
 
-    # Change CWD to PROJECT_HOME/workspace to ensure all file operations are relative to this directory
-    # This is important for the agent to read/write files in the workspace
+    # Run from PROJECT_HOME/workspace so the agent's relative file operations
+    # (read/write files, shell commands) happen inside the workspace.
     workspace_dir = config.PROJECT_HOME / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     os.chdir(workspace_dir)

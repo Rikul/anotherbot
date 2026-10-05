@@ -1,16 +1,24 @@
-from ..infra.app_logging import log
-from ..core.tool import Tool
+"""``calculator`` tool: basic arithmetic and number checks."""
+
 import math
+
+from ..core.tool import Tool
+from ..infra.app_logging import log
 
 
 class CalculatorTool(Tool):
+    """Arithmetic for the model: + - * /, powers, factorial, primality and square roots."""
+
     @staticmethod
     def spec():
         return {
             "type": "function",
             "function": {
                 "name": "calculator",
-                "description": "Provides add, subtract, multiply, divide, exponentiate, factorial, is_prime, square_root",
+                "description": (
+                    "Provides add, subtract, multiply, divide, exponentiate, factorial, is_prime, "
+                    "square_root"
+                ),
                 "parameters": {
                     "type": "object",
                     "required": ["command", "argument1"],
@@ -35,7 +43,10 @@ class CalculatorTool(Tool):
                         },
                         "argument2": {
                             "type": "number",
-                            "description": "Second argument (not needed for factorial, is_prime, square_root)",
+                            "description": (
+                                "Second argument (not needed for factorial, is_prime, "
+                                "square_root)"
+                            ),
                         },
                     },
                 },
@@ -44,35 +55,42 @@ class CalculatorTool(Tool):
 
     @staticmethod
     def add(a: int, b: int) -> int:
+        """Return ``a + b``."""
         return a + b
 
     @staticmethod
     def subtract(a: int, b: int) -> int:
+        """Return ``a - b``."""
         return a - b
 
     @staticmethod
     def multiply(a: int, b: int) -> int:
+        """Return ``a * b``."""
         return a * b
 
     @staticmethod
     def divide(a: int, b: int) -> float:
+        """Return ``a / b``; raises ``ValueError`` if ``b`` is 0."""
         if b == 0:
             raise ValueError("Division by zero is not allowed")
         return a / b
 
     @staticmethod
-    def exponentiate(a: float, b: float) -> str:
+    def exponentiate(a: float, b: float) -> float:
+        """Return ``a`` to the power ``b``."""
         result = math.pow(a, b)
         return result
 
     @staticmethod
     def factorial(n: int) -> int:
+        """Return ``n!``; raises ``ValueError`` if ``n`` is negative."""
         if n < 0:
             raise ValueError("Attempt to calculate factorial of a negative number")
         return math.factorial(n)
 
     @staticmethod
     def is_prime(n: int) -> bool:
+        """Return True if ``n`` is prime (trial division)."""
         if n <= 1:
             return False
         for i in range(2, int(math.sqrt(n)) + 1):
@@ -83,6 +101,7 @@ class CalculatorTool(Tool):
 
     @staticmethod
     def square_root(n: float) -> float:
+        """Return the square root of ``n``; raises ``ValueError`` if ``n`` is negative."""
         if n < 0:
             raise ValueError("Attempt to calculate square root of a negative number")
 
@@ -90,7 +109,12 @@ class CalculatorTool(Tool):
 
     @staticmethod
     def call(command: str, argument1: int, argument2: int = None) -> str:
-        log.info(f"calculator, command: {command}")
+        """Apply ``command`` to the arguments and return the result as text.
+
+        ``argument2`` is only used by the two-operand commands; errors are returned
+        as text.
+        """
+        log.info("calculator, command: %s", command)
 
         try:
             if command == "add":
@@ -124,6 +148,6 @@ class CalculatorTool(Tool):
 
             return str(result)
 
-        except Exception as e:
-            log.error(f"Error executing command '{command}': {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error executing command '%s': %s", command, e)
             return f"Error executing command: {e}"

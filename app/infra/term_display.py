@@ -1,9 +1,13 @@
+"""ANSI escape codes for coloured terminal output."""
+
 from __future__ import annotations
 
 from enum import StrEnum
 
 
 class ANSI(StrEnum):
+    """ANSI SGR escape sequences; members are plain strings usable in f-strings."""
+
     RESET = "\033[0m"
     DIM = "\033[2m"
     GREEN = "\033[32m"

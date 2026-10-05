@@ -1,9 +1,14 @@
+"""``bash`` tool: run a shell command."""
+
 import subprocess
-from ..infra.app_logging import log
+
 from ..core.tool import Tool
+from ..infra.app_logging import log
 
 
 class BashTool(Tool):
+    """Run a shell command (30 s timeout); return stdout plus any stderr under ``[stderr]``."""
+
     @staticmethod
     def spec():
         return {
@@ -26,7 +31,8 @@ class BashTool(Tool):
 
     @staticmethod
     def call(command: str) -> str:
-        log.info(f"bash, command: {command}")
+        """Run ``command`` in a shell; errors (including timeouts) are returned as text."""
+        log.info("bash, command: %s", command)
 
         try:
             result = subprocess.run(
@@ -42,6 +48,6 @@ class BashTool(Tool):
                 output += f"\n[stderr]\n{result.stderr}"
             return output
 
-        except Exception as e:
-            log.error(f"Error executing command '{command}': {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error executing command '%s': %s", command, e)
             return f"Error executing command: {e}"

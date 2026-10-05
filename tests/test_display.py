@@ -1,7 +1,7 @@
 import logging
 from unittest.mock import patch
 
-from app.cli.cli import ask_permission
+from app.cli.cli_agent import ask_permission
 from app.infra.app_logging import log
 
 

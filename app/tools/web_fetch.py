@@ -1,9 +1,14 @@
+"""``web_fetch`` tool: fetch a URL with curl."""
+
 import subprocess
-from ..infra.app_logging import log
+
 from ..core.tool import Tool
+from ..infra.app_logging import log
 
 
 class WebFetchTool(Tool):
+    """Fetch a URL with ``curl -sL`` (10 s timeout) and return the body."""
+
     @staticmethod
     def spec():
         return {
@@ -26,7 +31,8 @@ class WebFetchTool(Tool):
 
     @staticmethod
     def call(url: str) -> str:
-        log.info(f"web_fetch, url: {url}")
+        """Return the body of ``url``, or an error message if curl fails."""
+        log.info("web_fetch, url: %s", url)
 
         try:
             result = subprocess.run(
@@ -35,11 +41,12 @@ class WebFetchTool(Tool):
                 stderr=subprocess.PIPE,
                 text=True,
                 timeout=10,
+                check=False,
             )
             if result.returncode != 0:
                 return f"Error fetching URL {url}: {result.stderr.strip()}"
             return result.stdout.strip()
 
-        except Exception as e:
-            log.error(f"Error fetching URL {url}: {str(e)}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error fetching URL %s: %s", url, str(e))
             return f"Error fetching URL {url}: {str(e)}"

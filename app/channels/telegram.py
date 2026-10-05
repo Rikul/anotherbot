@@ -1,9 +1,7 @@
+"""Telegram channel, built on python-telegram-bot (long polling)."""
+
 import asyncio
 import logging
-
-from .message_queue import MessageQueue
-from .channel import Channel, ChannelType
-from .message import OutgoingMessage, IncomingMessage
 
 from telegram import Update, constants
 from telegram.ext import (
@@ -13,12 +11,23 @@ from telegram.ext import (
     filters,
 )
 
+from .message_queue import MessageQueue
+from .channel import Channel, ChannelType
+from .message import OutgoingMessage, IncomingMessage
+
 log = logging.getLogger(__name__)
 
 MAX_TG_LENGTH = 2048
 
 
 class TelegramChannel(Channel):
+    """Telegram bot front end.
+
+    Only users in ``allow_from`` may talk to the bot (an empty list allows
+    everyone). ``/whoami`` and ``/stop`` are answered here; other commands and
+    all text go to the agent via the message queue.
+    """
+
     def __init__(
         self, mq: MessageQueue, bot_token: str, allow_from: list[int] = None
     ) -> None:
@@ -26,6 +35,7 @@ class TelegramChannel(Channel):
         self.allow_from = allow_from or []
         self.mq = mq
         self.stopped = False
+        self.app = None  # telegram Application, built in start()
         mq.register(self, self.send_message)
 
     @property
@@ -55,12 +65,13 @@ class TelegramChannel(Channel):
             )
 
     async def command_handler(
-        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+        self, update: Update, _context: ContextTypes.DEFAULT_TYPE
     ) -> None:
+        """Handle ``/commands``: answer ``/whoami`` and ``/stop`` here, forward the rest."""
         user_id = update.effective_user.id if update.effective_user else None
         if user_id is None or (self.allow_from and user_id not in self.allow_from):
             log.warning(
-                f"Received message from unauthorized user id={user_id}, ignoring."
+                "Received message from unauthorized user id=%s, ignoring.", user_id
             )
             await update.message.reply_text(
                 "Sorry, you are not authorized to use this bot."
@@ -73,7 +84,10 @@ class TelegramChannel(Channel):
                 cmd_name = content[1:].split(maxsplit=1)[0].lower()
                 metadata = {"chat_id": update.effective_chat.id}
                 if cmd_name == "whoami":
-                    text = f"Your user ID is {update.effective_user.id} and your name is {update.effective_user.first_name}."
+                    user = update.effective_user
+                    text = (
+                        f"Your user ID is {user.id} and your name is {user.first_name}."
+                    )
                     await self.send_message(
                         OutgoingMessage(
                             content=text,
@@ -99,28 +113,25 @@ class TelegramChannel(Channel):
                 )
 
     async def send_message(self, message: OutgoingMessage) -> None:
-        # This function is called by the MessageQueue when there is an outgoing message for this channel
-        # It should deliver the message to the user via Telegram API
-
-        # For simplicity, let's assume we are sending messages back to the same chat where they came from
-        # In a real implementation, you would want to track which chat/user sent which message and route responses accordingly
-
+        # Called by the MessageQueue for each outgoing message on this channel.
+        # Replies go to the chat_id carried in the message metadata (the chat the
+        # request came from, or the default chat for scheduled-task deliveries).
         chat_id = message.metadata.get("chat_id")
         if not chat_id:
             log.error("Cannot send Telegram message: no chat_id in message metadata")
             return
-        log.info(f"Sending message to Telegram chat {chat_id}: {message.content}")
+        log.info("Sending message to Telegram chat %s: %s", chat_id, message.content)
         for i in range(0, len(message.content), MAX_TG_LENGTH):
             chunk = message.content[i : i + MAX_TG_LENGTH]
             await self.app.bot.send_message(chat_id=chat_id, text=chunk)
 
-    async def process_message(
+    async def process_message(  # pylint: disable=arguments-differ  # PTB handler signature
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
     ) -> None:
         user_id = update.effective_user.id if update.effective_user else None
         if user_id is None or (self.allow_from and user_id not in self.allow_from):
             log.warning(
-                f"Received message from unauthorized user id={user_id}, ignoring."
+                "Received message from unauthorized user id=%s, ignoring.", user_id
             )
             await update.message.reply_text(
                 "Sorry, you are not authorized to use this bot."
@@ -146,6 +157,7 @@ class TelegramChannel(Channel):
             await update.message.reply_text("Sorry, I can only process text messages.")
 
     def start(self) -> None:
+        """Build the Telegram application and register the message, command and error handlers."""
         log.info("Starting Telegram channel...")
 
         self.app = (
@@ -164,6 +176,7 @@ class TelegramChannel(Channel):
         self.app.add_error_handler(self.error_handler)
 
     async def run_polling(self) -> None:
+        """Poll Telegram for updates until cancelled, then shut the application down."""
         await self.app.initialize()
         await self.app.start()
         await self.app.updater.start_polling()

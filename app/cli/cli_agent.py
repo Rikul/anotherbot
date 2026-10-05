@@ -1,41 +1,61 @@
+"""Agent for the terminal: prints output and asks before running tools."""
+
 from __future__ import annotations
 
 import asyncio
 
-from ..core.tool_calls import get_all_tool_specs
-from ..core.agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
-from ..core import runtime
-from ..infra.message_history import MessageHistory
-from ..infra.conversations import ConversationStore
 from ..channels.channel import ChannelType
+from ..core import runtime
+from ..core.agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
+from ..core.tool_calls import get_all_tool_specs
+from ..infra import tracer
+from ..infra.conversations import ConversationStore
+from ..infra.message_history import MessageHistory
+from ..infra.term_display import ANSI
+
+
+def ask_permission(tool_name: str, args: dict) -> bool:
+    """Ask on the terminal whether a tool call may run; Enter means yes."""
+    print(
+        f"{ANSI.YELLOW}⚡ Tool Call{ANSI.RESET}: {ANSI.CYAN}{tool_name}{ANSI.RESET}"
+        f"   Args: {args}"
+    )
+    print(f"Proceed? {ANSI.DIM}[Y/n]{ANSI.RESET} ", end="", flush=True)
+    answer = input().strip().lower()
+    return answer in ("", "y", "yes")
 
 
 class CliAgent(Agent):
+    """Terminal agent: prints thinking text and replies, and asks before each tool call.
+
+    Args:
+        auto_approve: run tools without asking.
+    """
+
     def __init__(self, max_iterations: int = 250, auto_approve: bool = False) -> None:
         super().__init__(max_iterations)
         self.auto_approve = auto_approve
-        self._channel_str = ChannelType.CLI.value
+        self.channel_str = ChannelType.CLI.value
 
-        self._store = ConversationStore()
-        self.history = MessageHistory(channel_type=self._channel_str)
+        self.store = ConversationStore()
+        self.history = MessageHistory(channel_type=self.channel_str)
 
-        conv = self._store.get_last(self._channel_str)
+        conv = self.store.get_last(self.channel_str)
         if conv is None:
-            cid = self._store.create(self._channel_str)
-            conv = self._store.get(cid)
+            cid = self.store.create(self.channel_str)
+            conv = self.store.get(cid)
 
         self.conversation_id: int = conv["id"]
         runtime.set("conversation_id", conv["id"])
         runtime.set("conversation_name", conv["name"])
         self.messages.extend(
-            self._store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES)
+            self.store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES)
         )
 
-    def _switch_conversation(self, conv: dict) -> None:
+    def switch_conversation(self, conv: dict) -> None:
+        """Make ``conv`` the active conversation and load its messages."""
         self.conversation_id = conv["id"]
-        self.messages = self._store.load_messages(
-            conv["id"], limit=MAX_CONTEXT_MESSAGES
-        )
+        self.messages = self.store.load_messages(conv["id"], limit=MAX_CONTEXT_MESSAGES)
         runtime.set("conversation_id", conv["id"])
         runtime.set("conversation_name", conv["name"])
 
@@ -44,8 +64,6 @@ class CliAgent(Agent):
             print(content.strip())
 
     async def _check_permission(self, tool_name: str, tool_args: dict) -> bool:
-        from .cli import ask_permission
-
         if self.auto_approve:
             return True
         return ask_permission(tool_name, tool_args)
@@ -61,10 +79,10 @@ class CliAgent(Agent):
         placeholder_content = self._build_placeholder_content(message, attachments)
         self.history.add_message("user", placeholder_content, self.conversation_id)
 
-        conv = self._store.get(self.conversation_id)
+        conv = self.store.get(self.conversation_id)
         system_context = get_default_sys_prompt(
             {
-                "channel": self._channel_str,
+                "channel": self.channel_str,
                 "conversation_id": self.conversation_id,
                 "conversation_name": conv["name"] if conv else "New Conversation",
             }
@@ -77,21 +95,19 @@ class CliAgent(Agent):
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
         if runtime.get("trace"):
-            from ..infra.tracer import write_trace
-
-            write_trace(session_messages)
+            tracer.write_trace(session_messages)
 
         self.messages.append({"role": "user", "content": placeholder_content})
         self.messages.append({"role": "assistant", "content": final_content})
         self.history.add_message("assistant", final_content, self.conversation_id)
-        self._store.touch(self.conversation_id)
+        self.store.touch(self.conversation_id)
 
-        if self._store.count_user_messages(self.conversation_id) == 1:
-            conv = self._store.get(self.conversation_id)
+        if self.store.count_user_messages(self.conversation_id) == 1:
+            conv = self.store.get(self.conversation_id)
             if conv and conv["name"] == "New Conversation":
                 asyncio.create_task(
                     self._auto_name(
-                        self._store,
+                        self.store,
                         self.conversation_id,
                         list(self.messages),
                         "conversation_name",

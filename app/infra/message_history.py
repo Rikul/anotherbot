@@ -1,3 +1,5 @@
+"""SQLite-backed log of user / final-assistant messages, per channel."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -12,6 +14,13 @@ def _est_tokens(content: str) -> int:
 
 
 class MessageHistory:
+    """Appends a channel's messages to the ``messages`` table in the app database.
+
+    Only the user's text and the final assistant reply of each turn are stored
+    (not tool calls). Rows are tagged with the channel and, when known, the
+    conversation they belong to; ``ConversationStore`` reads them back.
+    """
+
     def __init__(self, channel_type: str, db_path: Path = APP_DB):
         self.db_path = db_path
         self.channel = channel_type
@@ -54,27 +63,35 @@ class MessageHistory:
                 conn.close()
 
         except sqlite3.Error as e:
-            log.error(f"Error creating message history database: {str(e)}")
+            log.error("Error creating message history database: %s", str(e))
             raise
 
     def add_message(self, role: str, content: str, conversation_id: int = None):
+        """Insert one message for this channel, with a rough token estimate (chars / 4)."""
         timestamp = datetime.now().isoformat()
         est = _est_tokens(content)
         conn = get_db_connection(self.db_path)
         try:
             with conn:
                 conn.execute(
-                    "INSERT INTO messages (channel, role, content, timestamp, est_tokens, conversation_id) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO messages (channel, role, content, timestamp, "
+                    "est_tokens, conversation_id) VALUES (?, ?, ?, ?, ?, ?)",
                     (self.channel, role, content, timestamp, est, conversation_id),
                 )
         finally:
             conn.close()
         log.info(
-            f"Added message to history: role={role}, est_tokens={est}, content={content[:30]}..."
+            "Added message to history: role=%s, est_tokens=%s, content=%s...",
+            role,
+            est,
+            content[:30],
         )
 
     def get_history(self, limit: int = 100) -> list[dict]:
+        """Return this channel's last ``limit`` messages, oldest first.
+
+        Each is a ``{"role": ..., "content": ...}`` dict.
+        """
         conn = get_db_connection(self.db_path)
         try:
             rows = conn.execute(

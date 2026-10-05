@@ -1,3 +1,5 @@
+"""Entry point: ``python -m app.main {cli,background}``."""
+
 from __future__ import annotations
 
 import argparse
@@ -12,10 +14,12 @@ from .infra.setup import ensure_home_dir
 from .cli.cli import run_cli
 from .bg_server import start_server
 from .core import runtime
+from .core import mcp_manager as mcp
 from .core.mcp_manager import initialize_mcp
 
 
 def parse_args():
+    """Parse the command line; ``max_iterations`` defaults to the configured value."""
     parser = argparse.ArgumentParser(prog="app")
     parser.add_argument(
         "--trace", action="store_true", default=False, help="Enable LLM call tracing"
@@ -73,11 +77,16 @@ def parse_args():
     return args
 
 
-async def run_background_agent(args):
+async def run_background_agent():
+    """Run the background server (Telegram / Discord / web channels)."""
     await start_server()
 
 
 async def main():
+    """Set up config, logging, runtime settings and MCP, then run the chosen command.
+
+    MCP connections are always shut down on the way out.
+    """
 
     ensure_home_dir()
 
@@ -90,8 +99,6 @@ async def main():
     runtime.set("trace", args.trace)
     runtime.set("tracedir", Path(args.tracedir))
 
-    from .core.mcp_manager import mcp_manager
-
     try:
         await initialize_mcp()
         if args.command == "cli":
@@ -101,21 +108,21 @@ async def main():
                 prompt=args.prompt,
             )
         elif args.command == "background":
-            await run_background_agent(args)
+            await run_background_agent()
         else:
             raise ValueError(f"Unknown command: {args.command}")
     finally:
-        await mcp_manager.shutdown()
+        await mcp.mcp_manager.shutdown()
 
 
 if __name__ == "__main__":
-    # For better Ctrl+C handling, we use asyncio.Runner which is available in Python 3.11 and later
+    # asyncio.Runner (Python 3.11+) gives better Ctrl+C handling than asyncio.run
     try:
         with asyncio.Runner() as runner:
             runner.run(main())
     except KeyboardInterrupt:
         log.info("Exiting...")
         os._exit(0)
-    except Exception as e:
-        log.error(f"An error occurred: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught  # top-level: log and exit non-zero
+        log.error("An error occurred: %s", e)
         os._exit(1)

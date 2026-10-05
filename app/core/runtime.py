@@ -12,7 +12,7 @@ from typing import Any
 _store: dict[str, Any] = {}
 
 
-def set(key: str, value: Any) -> None:
+def set(key: str, value: Any) -> None:  # pylint: disable=redefined-builtin  # public API: runtime.set()
     """Store a runtime variable."""
     _store[key] = value
 

@@ -1,4 +1,7 @@
+"""Built-in tool registry and dispatch (MCP tools are routed via ``mcp_manager``)."""
+
 import asyncio
+import json
 import os
 
 from ..infra.app_logging import log
@@ -29,8 +32,8 @@ from ..tools.sched_tasks_tool import (
 from ..tools.get_city_state import GetCityState
 from ..tools.get_datetime import GetDateTime
 from ..tools.helper_agent import HelperAgentTool
-
-import json
+from . import mcp_manager as mcp
+from .tool import MAX_TOOL_RESULT_LENGTH
 
 tool_registry = {
     "read_file": ReadFileTool,
@@ -83,24 +86,25 @@ helper_tool_specs = [
     tool.spec() for k, tool in tool_registry.items() if k in _HELPER_AGENT_TOOLS
 ]
 
-MAX_TOOL_RESULT_LENGTH = 16000
-
 
 def get_all_tool_specs() -> list[dict]:
-    from .mcp_manager import mcp_manager
-
-    return all_tool_specs + mcp_manager.get_tool_specs()
+    """Built-in tool specs plus the specs of every connected MCP server's tools."""
+    return all_tool_specs + mcp.mcp_manager.get_tool_specs()
 
 
 async def run_tool_async(tool_name: str, tool_args: dict) -> str:
-    from .mcp_manager import mcp_manager
-
-    if mcp_manager.is_mcp_tool(tool_name):
-        return await mcp_manager.call_tool(tool_name, tool_args)
+    """Run a tool by name: MCP tools via the MCP manager, the rest via run_tool()."""
+    if mcp.mcp_manager.is_mcp_tool(tool_name):
+        return await mcp.mcp_manager.call_tool(tool_name, tool_args)
     return await run_tool(tool_name=tool_name, tool_args=tool_args)
 
 
 async def run_tool(tool_name: str, tool_args: dict) -> str:
+    """Run a built-in tool by name and return its result as a (truncated) string.
+
+    Errors are returned as text so the model can see them. The working
+    directory is restored afterwards, in case the tool changed it.
+    """
     original_cwd = os.getcwd()
 
     try:
@@ -108,8 +112,8 @@ async def run_tool(tool_name: str, tool_args: dict) -> str:
         result = func(**tool_args)
         if asyncio.iscoroutine(result):
             result = await result
-    except Exception as e:
-        log.error(f"Error running tool {tool_name}: {str(e)}")
+    except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+        log.error("Error running tool %s: %s", tool_name, str(e))
         result = f"Error running tool {tool_name}: {str(e)}"
     finally:
         os.chdir(original_cwd)

@@ -382,3 +382,46 @@ def test_start_mounts_static_files():
     ch.start()
     mounts = [r for r in ch._fasthtml_app.router.routes if isinstance(r, Mount)]
     assert any(getattr(r, "path", None) == "/static" for r in mounts)
+
+
+# --- routes registered by start() ---
+
+def test_conversations_api_lists_all_and_active_id():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    convs = [{"id": 1, "name": "A", "channel": "telegram"}, {"id": 2, "name": "B", "channel": "web"}]
+    with patch("app.infra.conversations.ConversationStore.list", return_value=convs) as mock_list, \
+         patch("app.core.runtime._store", {"conversation_id:web": 2}):
+        resp = TestClient(ch._asgi_app).get("/api/conversations")
+    assert resp.status_code == 200
+    assert resp.json() == {"conversations": convs, "active_id": 2}
+    mock_list.assert_called_once_with()  # no channel filter: web sees every channel
+
+
+def test_status_api_returns_runtime_model():
+    from unittest.mock import patch
+    from starlette.testclient import TestClient
+    ch, _ = make_web_channel()
+    ch.start()
+    with patch("app.core.runtime._store", {"model": "m-1"}):
+        resp = TestClient(ch._asgi_app).get("/api/status")
+    assert resp.json() == {"model": "m-1"}
+
+
+@pytest.mark.asyncio
+async def test_websocket_message_is_enqueued_for_agent():
+    from starlette.testclient import TestClient
+    ch, mq = make_web_channel()
+    ch.start()
+    with TestClient(ch._asgi_app).websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "message", "content": "hello"}))
+        ws.send_text(json.dumps({"type": "message", "content": "/help"}))
+        ws.send_text(json.dumps({"type": "message", "content": "/whoami"}))
+        assert "Connection ID" in ws.receive_json()["content"]  # answered inline, not enqueued
+    first, second = mq.incoming.get_nowait(), mq.incoming.get_nowait()
+    assert first.content == "hello" and first.metadata["is_command"] is False
+    assert second.content == "/help" and second.metadata["is_command"] is True
+    assert first.metadata["websocket_id"] == second.metadata["websocket_id"]
+    assert mq.incoming.empty()

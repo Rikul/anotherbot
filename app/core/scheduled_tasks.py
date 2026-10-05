@@ -1,10 +1,14 @@
+"""SQLite-backed scheduler that runs prompts on a schedule and delivers the results."""
+
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-from ..infra.app_logging import log
-from ..config import get_db_connection
-import sqlite3
 import asyncio
+import sqlite3
+from datetime import datetime, timedelta
+
+from ..channels.message import OutgoingMessage
+from ..config import get_db_connection
+from ..infra.app_logging import log
 from .helper_agent import HelperAgent
 
 TASKS_SYSTEM_PROMPT = """
@@ -14,6 +18,13 @@ Read your instructions and execute them. Be concise.
 
 
 class ScheduledTasks:
+    """Stores scheduled tasks and their outputs, and runs them when due.
+
+    Args:
+        mqs: message queue per channel name, for delivering results.
+        channels: channel object per channel name.
+    """
+
     def __init__(self, mqs: dict = None, channels: dict = None):
         self._mqs = mqs or {}
         self._channels = channels or {}
@@ -55,6 +66,7 @@ class ScheduledTasks:
             conn.close()
 
     def load_tasks(self) -> list[dict]:
+        """Return every task as a dict (enabled or not)."""
         query = """SELECT name, prompt, enabled, repeat, interval_mins,
                           last_run, next_run, delivery_channel, run_count, created_at
                    FROM tasks"""
@@ -80,16 +92,29 @@ class ScheduledTasks:
             for n, p, e, rpt, i, lr, nr, dc, rc, c in rows
         ]
 
-    def add_task(
+    def add_task(  # pylint: disable=too-many-arguments  # one argument per task column
         self,
         name: str,
         prompt: str,
         next_run: str,
+        *,
         interval_mins: int = 1,
         repeat: int = 0,
         delivery_channel: str = "telegram",
         enabled: int = 1,
     ):
+        """Add a task.
+
+        Args:
+            next_run: ISO datetime of the first run; empty means now.
+            interval_mins: minutes between runs of a repeating task.
+            repeat: 1 to repeat every ``interval_mins``, 0 to run once.
+            delivery_channel: channel name to send the output to.
+            enabled: 0 to add it paused.
+
+        Raises:
+            ValueError: if a task with this name already exists.
+        """
         now = datetime.now().isoformat()
         conn = get_db_connection()
         try:
@@ -97,7 +122,8 @@ class ScheduledTasks:
                 with conn:
                     conn.execute(
                         """
-                        INSERT INTO tasks (name, prompt, interval_mins, repeat, next_run, delivery_channel, enabled, created_at)
+                        INSERT INTO tasks (name, prompt, interval_mins, repeat,
+                                           next_run, delivery_channel, enabled, created_at)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                         (
@@ -111,12 +137,13 @@ class ScheduledTasks:
                             now,
                         ),
                     )
-            except sqlite3.IntegrityError:
-                raise ValueError(f"Task '{name}' already exists")
+            except sqlite3.IntegrityError as e:
+                raise ValueError(f"Task '{name}' already exists") from e
         finally:
             conn.close()
 
     def remove_task(self, name: str):
+        """Delete a task (no error if it doesn't exist)."""
         conn = get_db_connection()
         try:
             with conn:
@@ -125,6 +152,11 @@ class ScheduledTasks:
             conn.close()
 
     def update_task(self, name: str, **fields):
+        """Update the given columns of a task, e.g. ``update_task("x", enabled=0)``.
+
+        Raises:
+            ValueError: if the task doesn't exist.
+        """
         if not fields:
             return
         set_clause = ", ".join(f"{col} = ?" for col in fields)
@@ -148,12 +180,14 @@ class ScheduledTasks:
         status: str = "success",
         duration_secs: float = None,
     ):
+        """Record one run's output, status and duration."""
         conn = get_db_connection()
         try:
             with conn:
                 conn.execute(
                     """
-                    INSERT INTO task_outputs (name, prompt, output, status, duration_secs, timestamp)
+                    INSERT INTO task_outputs
+                        (name, prompt, output, status, duration_secs, timestamp)
                     VALUES (?, ?, ?, ?, ?, ?)
                 """,
                     (
@@ -169,6 +203,7 @@ class ScheduledTasks:
             conn.close()
 
     def get_output(self, name: str, num_entries: int = 5) -> list[dict]:
+        """Return a task's last ``num_entries`` outputs, oldest first."""
         conn = get_db_connection()
         try:
             rows = conn.execute(
@@ -235,18 +270,23 @@ class ScheduledTasks:
         return now >= datetime.fromisoformat(task["next_run"])
 
     async def run_task(self, task: dict) -> str:
+        """Run one task with a ``HelperAgent``, record the output, deliver it, and reschedule.
+
+        Returns:
+            The output (or the error message if the run failed).
+        """
         name, prompt = task["name"], task["prompt"]
-        log.info(f"Running scheduled task '{name}'")
+        log.info("Running scheduled task '%s'", name)
         start = datetime.now()
         status = "success"
         output = ""
         try:
             agent = HelperAgent(system_prompt=TASKS_SYSTEM_PROMPT)
             output = await agent.agent_loop(prompt)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught  # recorded as the task's output
             status = "error"
             output = str(e)
-            log.error(f"Scheduled task '{name}' failed: {e}")
+            log.error("Scheduled task '%s' failed: %s", name, e)
         finally:
             duration = (datetime.now() - start).total_seconds()
             self.save_output(
@@ -263,8 +303,6 @@ class ScheduledTasks:
         channel = self._channels.get(channel_name)
         if mq and channel:
             try:
-                from ..channels.message import OutgoingMessage
-
                 await mq.outgoing_msg(
                     OutgoingMessage(
                         content=output,
@@ -272,18 +310,22 @@ class ScheduledTasks:
                         metadata=channel.default_metadata,
                     )
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught  # delivery is best-effort
                 log.error(
-                    f"Scheduled task '{name}': failed to deliver to '{channel_name}': {e}"
+                    "Scheduled task '%s': failed to deliver to '%s': %s",
+                    name,
+                    channel_name,
+                    e,
                 )
         else:
             log.warning(
-                f"Delivery channel '{channel_name}' not found for task '{name}'"
+                "Delivery channel '%s' not found for task '%s'", channel_name, name
             )
 
         return output
 
     async def run(self):
+        """Check for due tasks every 30 seconds and run them concurrently, forever."""
         while True:
             try:
                 now = datetime.now()
@@ -293,6 +335,6 @@ class ScheduledTasks:
                     await asyncio.gather(
                         *[self.run_task(t) for t in due], return_exceptions=True
                     )
-            except Exception as e:
-                log.error(f"ScheduledTasks.run error: {e}", exc_info=True)
+            except Exception as e:  # pylint: disable=broad-exception-caught  # keep the scheduler alive
+                log.error("ScheduledTasks.run error: %s", e, exc_info=True)
             await asyncio.sleep(30)

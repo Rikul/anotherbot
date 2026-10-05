@@ -1,3 +1,5 @@
+"""Logging setup: coloured console output plus a rotating log file under ``PROJECT_HOME/logs``."""
+
 from __future__ import annotations
 
 import logging
@@ -9,6 +11,8 @@ LOG_DIR = PROJECT_HOME / "logs"
 
 
 class AnsiFormatter(logging.Formatter):
+    """Console formatter: dim timestamp, coloured level name, dim logger name and message."""
+
     LEVELS = {
         logging.DEBUG: f"{ANSI.DIM}DEBUG{ANSI.RESET}",
         logging.INFO: f"{ANSI.GREEN}INFO{ANSI.RESET}",
@@ -27,6 +31,8 @@ class AnsiFormatter(logging.Formatter):
 
 
 class PlainFormatter(logging.Formatter):
+    """Log-file formatter: ``YYYY-MM-DD HH:MM:SS LEVEL logger message`` without colours."""
+
     def format(self, record: logging.LogRecord) -> str:
         return (
             f"{self.formatTime(record, '%Y-%m-%d %H:%M:%S')}"

@@ -1,10 +1,15 @@
+"""``write_file`` tool: write text to a file."""
+
 import os
-from ..infra.app_logging import log
 from pathlib import Path
+
 from ..core.tool import Tool
+from ..infra.app_logging import log
 
 
 class WriteFileTool(Tool):
+    """Write ``content`` to a file, creating parent directories as needed."""
+
     @staticmethod
     def spec():
         return {
@@ -31,14 +36,15 @@ class WriteFileTool(Tool):
 
     @staticmethod
     def call(file_path: str, content: str) -> str:
-        log.info(f"write_file, file_path: {file_path}")
+        """Write ``content`` to ``file_path`` (overwriting it); return a status message."""
+        log.info("write_file, file_path: %s", file_path)
 
         try:
             os.makedirs(Path(file_path).parent, exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
-        except Exception as e:
-            log.error(f"Error writing to file {file_path}: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("Error writing to file %s: %s", file_path, e)
             return f"Error writing to file {file_path}: {e}"
 
         return f"Successfully wrote to file: {file_path}"

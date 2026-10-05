@@ -1,10 +1,14 @@
-from ..infra.app_logging import log
-from ..core.tool import Tool
+"""``get_datetime`` tool: current local date and time."""
 
 from datetime import datetime
 
+from ..core.tool import Tool
+from ..infra.app_logging import log
+
 
 class GetDateTime(Tool):
+    """Return the current local date and time."""
+
     @staticmethod
     def spec():
         return {
@@ -18,6 +22,7 @@ class GetDateTime(Tool):
 
     @staticmethod
     def call() -> str:
+        """Return ``YYYY-MM-DD HH:MM:SS`` plus the local time zone name."""
         log.info("get_datetime")
 
         now = datetime.now()

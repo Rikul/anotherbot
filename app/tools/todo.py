@@ -1,15 +1,21 @@
-from contextvars import ContextVar
+"""In-memory todo list tools, one list per channel (see ``init_task_todos``)."""
 
-from ..infra.app_logging import log
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+
 from ..core.tool import Tool
+from ..infra.app_logging import log
+
 
 _VALID_STATUSES = {"todo", "in_progress", "done"}
 
 
+@dataclass
 class TodoList:
-    def __init__(self) -> None:
-        self.tasks: dict[str, dict] = {}
-        self.next_id = 1
+    """One todo list: tasks by ID (as strings) and the next ID to hand out."""
+
+    tasks: dict[str, dict] = field(default_factory=dict)
+    next_id: int = 1
 
 
 # Each channel's BackgroundAgent.process_incoming() runs in its own asyncio task
@@ -28,10 +34,13 @@ def init_task_todos() -> TodoList:
 
 
 def current_todos() -> TodoList:
+    """Return the todo list bound to the current task, or the shared default list."""
     return _current.get(_default)
 
 
 class TodoAddTool(Tool):
+    """Add a task to the current todo list."""
+
     @staticmethod
     def spec():
         return {
@@ -58,7 +67,8 @@ class TodoAddTool(Tool):
 
     @staticmethod
     def call(title: str, description: str = "") -> str:
-        log.info(f"todo_add, title: {title}")
+        """Add a task with status ``todo`` and return its ID."""
+        log.info("todo_add, title: %s", title)
 
         todos = current_todos()
         task_id = str(todos.next_id)
@@ -72,6 +82,8 @@ class TodoAddTool(Tool):
 
 
 class TodoListTool(Tool):
+    """List the current todo list's tasks with their statuses."""
+
     @staticmethod
     def spec():
         return {
@@ -85,6 +97,7 @@ class TodoListTool(Tool):
 
     @staticmethod
     def call() -> str:
+        """Return one line per task (``[id] [status] title — description``)."""
         log.info("todo_list")
 
         tasks = current_todos().tasks
@@ -101,6 +114,8 @@ class TodoListTool(Tool):
 
 
 class TodoClearTool(Tool):
+    """Remove every task from the current todo list and reset the IDs."""
+
     @staticmethod
     def spec():
         return {
@@ -114,6 +129,7 @@ class TodoClearTool(Tool):
 
     @staticmethod
     def call() -> str:
+        """Clear the list and return how many tasks were removed."""
         log.info("todo_clear")
         todos = current_todos()
         count = len(todos.tasks)
@@ -123,6 +139,8 @@ class TodoClearTool(Tool):
 
 
 class TodoUpdateTool(Tool):
+    """Set a task's status to ``todo``, ``in_progress`` or ``done``."""
+
     @staticmethod
     def spec():
         return {
@@ -150,16 +168,18 @@ class TodoUpdateTool(Tool):
 
     @staticmethod
     def call(task_id: str, status: str) -> str:
-        log.info(f"todo_update, task_id: {task_id}, status: {status}")
+        """Set the task's status and return a confirmation, or an error message."""
+        log.info("todo_update, task_id: %s, status: %s", task_id, status)
 
         tasks = current_todos().tasks
         if task_id not in tasks:
-            log.error(f"TodoUpdateTool: task {task_id} not found")
+            log.error("TodoUpdateTool: task %s not found", task_id)
             return f"Error: task {task_id} not found"
 
         if status not in _VALID_STATUSES:
-            log.error(f"TodoUpdateTool: invalid status '{status}'")
-            return f"Error: invalid status '{status}'. Must be one of: {', '.join(sorted(_VALID_STATUSES))}"
+            log.error("TodoUpdateTool: invalid status '%s'", status)
+            valid = ", ".join(sorted(_VALID_STATUSES))
+            return f"Error: invalid status '{status}'. Must be one of: {valid}"
 
         tasks[task_id]["status"] = status
         return f"Task {task_id} updated to '{status}'"

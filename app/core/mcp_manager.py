@@ -1,3 +1,5 @@
+"""MCP (Model Context Protocol) servers: connections, tool discovery and tool calls."""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +11,7 @@ from fastmcp.client import StdioTransport
 
 from ..infra.app_logging import log
 from ..infra.helpers import trunc_str_with_ellipsis
-from .tool_calls import MAX_TOOL_RESULT_LENGTH
+from .tool import MAX_TOOL_RESULT_LENGTH
 from .. import config
 
 
@@ -21,8 +23,11 @@ async def initialize_mcp() -> None:
     try:
         with open(mcp_config_path, encoding="utf-8") as f:
             data = json.load(f)
-    except Exception as e:
-        log.error(f"Failed to load mcp_servers.json: {e}")
+    except (
+        OSError,
+        ValueError,
+    ) as e:  # ValueError covers JSONDecodeError/UnicodeDecodeError
+        log.error("Failed to load mcp_servers.json: %s", e)
         return
 
     if not isinstance(data, dict):
@@ -34,15 +39,16 @@ async def initialize_mcp() -> None:
         return
     if not isinstance(mcp_servers, dict):
         log.error(
-            "mcp_servers.json: 'mcpServers' must be a JSON object mapping server names to configs."
+            "mcp_servers.json: 'mcpServers' must be a JSON object "
+            "mapping server names to configs."
         )
         return
 
-    log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
+    log.info("Initializing %s MCP server(s)...", len(mcp_servers))
     try:
         await mcp_manager.initialize(mcp_servers)
-    except Exception as e:
-        log.error(f"Failed to initialize MCP servers: {e}")
+    except Exception as e:  # pylint: disable=broad-exception-caught  # MCP is optional; never block startup
+        log.error("Failed to initialize MCP servers: %s", e)
 
 
 class MCPManager:
@@ -56,6 +62,7 @@ class MCPManager:
         self._server_configs: dict[str, dict] = {}
 
     async def initialize(self, mcp_servers: dict[str, dict]) -> None:
+        """Connect every enabled server in ``mcp_servers`` concurrently and collect their tools."""
         self._server_configs = dict(mcp_servers)
         await asyncio.gather(
             *(
@@ -68,18 +75,22 @@ class MCPManager:
     async def _connect_server(self, name: str, cfg: dict) -> None:
         if self._SEP in name:
             log.error(
-                f"MCP server '{name}': invalid name — must not contain '{self._SEP}'."
+                "MCP server '%s': invalid name — must not contain '%s'.",
+                name,
+                self._SEP,
             )
             return
         try:
             client = self._build_client(cfg)
-        except Exception as e:
-            log.error(f"MCP server '{name}': invalid config — {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # one bad server must not stop the rest
+            log.error("MCP server '%s': invalid config — %s", name, e)
             return
+        # The connection stays open until shutdown(), so the context manager is
+        # entered/exited by hand instead of with ``async with``.
         try:
-            await client.__aenter__()
-        except Exception as e:
-            log.error(f"MCP server '{name}': failed to connect — {e}")
+            await client.__aenter__()  # pylint: disable=unnecessary-dunder-call
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            log.error("MCP server '%s': failed to connect — %s", name, e)
             return
         try:
             tools = await client.list_tools()
@@ -87,12 +98,14 @@ class MCPManager:
                 namespaced = f"{name}{self._SEP}{tool.name}"
                 self._specs[namespaced] = self._to_openai_spec(namespaced, tool)
             self._clients[name] = client
-            log.info(f"MCP server '{name}': connected, {len(tools)} tool(s) discovered")
-        except Exception as e:
-            log.error(f"MCP server '{name}': failed to initialize — {e}")
+            log.info(
+                "MCP server '%s': connected, %s tool(s) discovered", name, len(tools)
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            log.error("MCP server '%s': failed to initialize — %s", name, e)
             try:
                 await client.__aexit__(None, None, None)
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught  # best-effort cleanup
                 pass
 
     def _build_client(self, cfg: dict) -> Client:
@@ -115,9 +128,15 @@ class MCPManager:
         }
 
     def get_tool_specs(self) -> list[dict]:
+        """Return OpenAI tool specs for every discovered MCP tool (``server__tool`` names)."""
         return list(self._specs.values())
 
     def get_server_status(self) -> list[dict]:
+        """Return one status dict per configured server.
+
+        Keys: ``name``, ``connected``, ``disabled``, ``transport``, ``target``,
+        ``tool_count``.
+        """
         result = []
         for name, cfg in self._server_configs.items():
             prefix = f"{name}{self._SEP}"
@@ -137,13 +156,16 @@ class MCPManager:
         return result
 
     def get_tools_for_server(self, server_name: str) -> list[dict]:
+        """Return the tool specs of one server."""
         prefix = f"{server_name}{self._SEP}"
         return [spec for k, spec in self._specs.items() if k.startswith(prefix)]
 
     def is_mcp_tool(self, tool_name: str) -> bool:
+        """True if ``tool_name`` is a namespaced MCP tool (``server__tool``)."""
         return tool_name in self._specs
 
     async def call_tool(self, tool_name: str, tool_args: dict) -> str:
+        """Call an MCP tool by its namespaced name; errors are returned as text for the model."""
         server_name, sep, bare_name = tool_name.partition(self._SEP)
         if not sep:
             return (
@@ -155,8 +177,8 @@ class MCPManager:
         try:
             result = await client.call_tool(bare_name, tool_args)
             return self._result_to_str(result)
-        except Exception as e:
-            log.error(f"MCP tool call failed [{tool_name}]: {e}")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
+            log.error("MCP tool call failed [%s]: %s", tool_name, e)
             return f"Error calling MCP tool {tool_name}: {e}"
 
     def _result_to_str(self, result) -> str:
@@ -173,17 +195,21 @@ class MCPManager:
             data = getattr(result, "data", None)
             if data is not None:
                 return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, json.dumps(data))
-        except Exception:
+        except (
+            TypeError,
+            ValueError,
+        ):  # data not JSON-serialisable: fall back to str()
             pass
         return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, str(result))
 
     async def shutdown(self) -> None:
+        """Close every server connection and forget all tools."""
         for name, client in self._clients.items():
             try:
                 await client.__aexit__(None, None, None)
-                log.info(f"MCP server '{name}': disconnected")
-            except Exception as e:
-                log.warning(f"MCP server '{name}': error during shutdown — {e}")
+                log.info("MCP server '%s': disconnected", name)
+            except Exception as e:  # pylint: disable=broad-exception-caught  # keep closing the others
+                log.warning("MCP server '%s': error during shutdown — %s", name, e)
         self._clients.clear()
         self._specs.clear()
         self._server_configs.clear()

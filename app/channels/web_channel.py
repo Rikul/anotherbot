@@ -18,8 +18,9 @@ import asyncio
 import json
 import logging
 import uuid
-import uvicorn
 from pathlib import Path
+
+import uvicorn
 from fasthtml.common import (
     A,
     Button,
@@ -40,12 +41,19 @@ from fasthtml.common import (
     P,
     fast_app,
 )
-from starlette.routing import WebSocketRoute
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
+from starlette.routing import Mount, WebSocketRoute
+from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from .. import config
+from ..core import runtime
+from ..infra.conversations import ConversationStore
 from .channel import Channel, ChannelType
 from .message import IncomingMessage, OutgoingMessage
 from .message_queue import MessageQueue
+from .web_auth import WebAuthMiddleware, is_loopback_host
 
 log = logging.getLogger(__name__)
 
@@ -181,7 +189,10 @@ def _build_page(auth_enabled: bool = False) -> Html:
                             ),
                             Textarea(
                                 id="msg-input",
-                                placeholder="Message anotherbot…  (Enter to send, Shift+Enter for newline)",
+                                placeholder=(
+                                    "Message anotherbot…  "
+                                    "(Enter to send, Shift+Enter for newline)"
+                                ),
                                 autocomplete="off",
                                 rows="1",
                             ),
@@ -228,9 +239,11 @@ class WebChannel(Channel):
         self._connections: dict[str, WebSocket] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
         self._conn_lock = asyncio.Lock()
-        from .. import config as _cfg
-
-        self._upload_dir = _cfg.PROJECT_HOME / "uploads"
+        self._upload_dir = config.PROJECT_HOME / "uploads"
+        # Built in start(): the FastHTML app, and what uvicorn serves (the app,
+        # wrapped in WebAuthMiddleware when a password is set).
+        self._fasthtml_app = None
+        self._asgi_app = None
         mq.register(self, self.send_message)
 
     # Cap on a single multipart upload request (combined across files). The
@@ -255,7 +268,7 @@ class WebChannel(Channel):
         return {}
 
     async def error_handler(self, update: object, context: object) -> None:
-        log.error(f"WebChannel error: {context}")
+        log.error("WebChannel error: %s", context)
 
     async def process_message(self, message: object) -> None:
         pass  # handled inline in the WebSocket endpoint
@@ -263,10 +276,13 @@ class WebChannel(Channel):
     # -- Lifecycle ----------------------------------------------------------
 
     def start(self) -> None:
-        """Build the FastHTML app + WebSocket route."""
-        log.info(f"Building web channel on {self.host}:{self.port}")
+        """Build the FastHTML app, its routes, and the WebSocket endpoint.
 
-        from .web_auth import WebAuthMiddleware, is_loopback_host
+        Raises:
+            RuntimeError: if the channel would listen on a non-loopback host
+                without a password.
+        """
+        log.info("Building web channel on %s:%s", self.host, self.port)
 
         if not self.password and not is_loopback_host(self.host):
             raise RuntimeError(
@@ -279,195 +295,186 @@ class WebChannel(Channel):
             )
 
         self._fasthtml_app, rt = fast_app(hdrs=())
-        # What uvicorn serves: the app wrapped in the login middleware when a password is set.
         self._asgi_app = (
             WebAuthMiddleware(self._fasthtml_app, self.password)
             if self.password
             else self._fasthtml_app
         )
 
-        @rt("/")
-        def index():
-            return _build_page(auth_enabled=bool(self.password))
+        rt("/")(self._index)
+        rt("/api/conversations")(self._conversations_api)
+        rt("/api/messages")(self._messages_api)
+        rt("/api/status")(self._status_api)
+        rt("/api/upload", methods=["POST"])(self._upload_api)
 
-        @rt("/api/conversations")
-        def conversations_api(req):
-            from starlette.responses import JSONResponse
-            from ..infra.conversations import ConversationStore
-            from ..core import runtime as _rt
-
-            store = ConversationStore()
-            ch = ChannelType.WEB.value
-            convs = store.list()
-            active_id = _rt.get(f"conversation_id:{ch}")
-            return JSONResponse({"conversations": convs, "active_id": active_id})
-
-        @rt("/api/messages")
-        def messages_api(req):
-            from starlette.responses import JSONResponse, Response
-            from ..infra.conversations import ConversationStore
-
-            try:
-                conv_id = int(req.query_params.get("conv_id", 0))
-            except (ValueError, TypeError):
-                return Response(status_code=400)
-            if not conv_id:
-                return Response(status_code=400)
-            store = ConversationStore()
-            conv = store.get(conv_id)
-            if not conv:
-                from starlette.responses import Response
-
-                return Response(status_code=404)
-            msgs = store.load_messages(conv_id)
-            return JSONResponse({"messages": msgs})
-
-        @rt("/api/status")
-        def status_api(req):
-            from starlette.responses import JSONResponse
-            from .. import config as _cfg
-            from ..core import runtime as _rt
-
-            model = _rt.get("model", _cfg.get("model", "AI"))
-            return JSONResponse({"model": model})
-
-        @rt("/api/upload", methods=["POST"])
-        async def upload_api(req):
-            """Accept one or more multipart files and store them on disk.
-
-            Returns the server-side basenames the browser then references in
-            its WebSocket ``message`` frame via the ``files`` field.  Files are
-            written under ``$ANOTHERBOT_HOME/uploads`` with a UUID prefix so
-            concurrent clients never collide.
-            """
-            from starlette.responses import JSONResponse, Response
-
-            form = await req.form()
-            uploads = [f for f in form.getlist("files") if getattr(f, "filename", None)]
-            if not uploads:
-                return Response("No files provided", status_code=400)
-
-            self._upload_dir.mkdir(parents=True, exist_ok=True)
-            saved: list[dict] = []
-            total = 0
-            try:
-                for uf in uploads:
-                    name = Path(uf.filename).name
-                    stored = f"{uuid.uuid4().hex}_{name}"
-                    out_path = self._upload_dir / stored
-                    too_large = False
-                    with out_path.open("wb") as out:
-                        while True:
-                            chunk = await uf.read(64 * 1024)
-                            if not chunk:
-                                break
-                            total += len(chunk)
-                            if total > self._MAX_UPLOAD_BYTES:
-                                too_large = True
-                                break
-                            out.write(chunk)
-                    if too_large:
-                        out_path.unlink(missing_ok=True)
-                        for s in saved:
-                            (self._upload_dir / s["path"]).unlink(missing_ok=True)
-                        limit_mb = max(1, self._MAX_UPLOAD_BYTES // (1024 * 1024))
-                        return JSONResponse(
-                            {"error": f"Upload exceeds {limit_mb} MB limit"},
-                            status_code=413,
-                        )
-                    saved.append({"path": stored, "name": name})
-            finally:
-                for uf in uploads:
-                    close = getattr(uf, "close", None)
-                    if close:
-                        await close()
-
-            return JSONResponse({"files": saved})
-
-        # Starlette WebSocket route (low-level, for multi-client management)
-        async def _ws_endpoint(ws: WebSocket) -> None:
-            await ws.accept()
-
-            client_id = str(uuid.uuid4())
-            log.info(f"WebSocket client connected: {client_id}")
-
-            async with self._conn_lock:
-                self._connections[client_id] = ws
-
-            try:
-                while True:
-                    raw = await ws.receive_text()
-                    if len(raw) > 65_536:
-                        await ws.close(code=1009, reason="Message too large")
-                        return
-                    content, files = self._extract_message(raw)
-                    if not content and not files:
-                        continue
-
-                    is_command = bool(content and content.startswith("/"))
-                    if is_command:
-                        cmd = content[1:].split(maxsplit=1)
-                        name = cmd[0].lower() if cmd else ""
-                        # /whoami is handled inline — it needs the per-connection client_id.
-                        # All other commands (/help, /status, /stop, /new, /load, …) are
-                        # forwarded to BackgroundAgent's CommandRegistry for consistency
-                        # with the Telegram and Discord channels.
-                        if name == "whoami":
-                            await self._safe_send_json(
-                                client_id,
-                                {
-                                    "type": "system",
-                                    "content": f"Connection ID: {client_id}",
-                                },
-                            )
-                            continue
-
-                    metadata = {
-                        "websocket_id": client_id,
-                        "is_command": is_command,
-                    }
-                    if files:
-                        metadata["files"] = files
-
-                    await self.mq.incoming.put(
-                        IncomingMessage(
-                            content=content or "",
-                            channel=ChannelType.WEB,
-                            metadata=metadata,
-                        )
-                    )
-            except WebSocketDisconnect:
-                log.info(f"WebSocket client disconnected: {client_id}")
-            except Exception:
-                log.exception(f"WebSocket error for client {client_id}")
-            finally:
-                async with self._conn_lock:
-                    self._connections.pop(client_id, None)
-                    self._send_locks.pop(client_id, None)
-
-        # Mount the WebSocket route on the FastHTML (Starlette) app
-        self._fasthtml_app.router.routes.insert(0, WebSocketRoute("/ws", _ws_endpoint))
-
-        # Serve static assets (CSS, JS)
-        from starlette.routing import Mount
-        from starlette.staticfiles import StaticFiles
-
+        routes = self._fasthtml_app.router.routes
+        # Low-level Starlette WebSocket route (multi-client management)
+        routes.insert(0, WebSocketRoute("/ws", self._ws_endpoint))
+        # Static assets (CSS, JS)
         static_dir = Path(__file__).parent / "static"
-        self._fasthtml_app.router.routes.insert(
+        routes.insert(
             1, Mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        )
+
+    # -- HTTP routes ----------------------------------------------------------
+
+    def _index(self):
+        """Serve the chat UI page."""
+        return _build_page(auth_enabled=bool(self.password))
+
+    def _conversations_api(self):
+        """List conversations from all channels plus the web channel's active one."""
+        ch = ChannelType.WEB.value
+        convs = ConversationStore().list()
+        active_id = runtime.get(f"conversation_id:{ch}")
+        return JSONResponse({"conversations": convs, "active_id": active_id})
+
+    def _messages_api(self, req: Request):
+        """Return the messages of the conversation given by ``?conv_id=``."""
+        try:
+            conv_id = int(req.query_params.get("conv_id", 0))
+        except (ValueError, TypeError):
+            return Response(status_code=400)
+        if not conv_id:
+            return Response(status_code=400)
+        store = ConversationStore()
+        if not store.get(conv_id):
+            return Response(status_code=404)
+        return JSONResponse({"messages": store.load_messages(conv_id)})
+
+    def _status_api(self):
+        """Return the model currently in use."""
+        model = runtime.get("model", config.get("model", "AI"))
+        return JSONResponse({"model": model})
+
+    async def _upload_api(self, req: Request):
+        """Accept one or more multipart files and store them on disk.
+
+        Returns the server-side basenames the browser then references in
+        its WebSocket ``message`` frame via the ``files`` field.  Files are
+        written under ``$ANOTHERBOT_HOME/uploads`` with a UUID prefix so
+        concurrent clients never collide.
+        """
+        form = await req.form()
+        uploads = [f for f in form.getlist("files") if getattr(f, "filename", None)]
+        if not uploads:
+            return Response("No files provided", status_code=400)
+
+        self._upload_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            saved = await self._save_uploads(uploads)
+        finally:
+            for uf in uploads:
+                close = getattr(uf, "close", None)
+                if close:
+                    await close()
+
+        if saved is None:
+            limit_mb = max(1, self._MAX_UPLOAD_BYTES // (1024 * 1024))
+            return JSONResponse(
+                {"error": f"Upload exceeds {limit_mb} MB limit"}, status_code=413
+            )
+        return JSONResponse({"files": saved})
+
+    async def _save_uploads(self, uploads: list) -> list[dict] | None:
+        """Write uploaded files to the upload dir.
+
+        Returns ``[{"path": stored_name, "name": original_name}, ...]``, or
+        ``None`` (after deleting anything already written) if the combined
+        size exceeds ``_MAX_UPLOAD_BYTES``.
+        """
+        saved: list[dict] = []
+        total = 0
+        for uf in uploads:
+            name = Path(uf.filename).name
+            stored = f"{uuid.uuid4().hex}_{name}"
+            out_path = self._upload_dir / stored
+            too_large = False
+            with out_path.open("wb") as out:
+                while chunk := await uf.read(64 * 1024):
+                    total += len(chunk)
+                    if total > self._MAX_UPLOAD_BYTES:
+                        too_large = True
+                        break
+                    out.write(chunk)
+            if too_large:
+                out_path.unlink(missing_ok=True)
+                for s in saved:
+                    (self._upload_dir / s["path"]).unlink(missing_ok=True)
+                return None
+            saved.append({"path": stored, "name": name})
+        return saved
+
+    # -- WebSocket --------------------------------------------------------------
+
+    async def _ws_endpoint(self, ws: WebSocket) -> None:
+        """Serve one browser connection: forward its messages to the agent."""
+        await ws.accept()
+
+        client_id = str(uuid.uuid4())
+        log.info("WebSocket client connected: %s", client_id)
+
+        async with self._conn_lock:
+            self._connections[client_id] = ws
+
+        try:
+            while True:
+                raw = await ws.receive_text()
+                if len(raw) > 65_536:
+                    await ws.close(code=1009, reason="Message too large")
+                    return
+                await self._handle_ws_text(client_id, raw)
+        except WebSocketDisconnect:
+            log.info("WebSocket client disconnected: %s", client_id)
+        except Exception:  # pylint: disable=broad-exception-caught  # one bad client must not kill the server
+            log.exception("WebSocket error for client %s", client_id)
+        finally:
+            async with self._conn_lock:
+                self._connections.pop(client_id, None)
+                self._send_locks.pop(client_id, None)
+
+    async def _handle_ws_text(self, client_id: str, raw: str) -> None:
+        """Parse one WebSocket frame and enqueue it for the agent.
+
+        ``/whoami`` is answered inline because it needs the per-connection
+        client ID. All other commands (/help, /status, /stop, /new, /load, …)
+        are forwarded to BackgroundAgent's CommandRegistry for consistency with
+        the Telegram and Discord channels.
+        """
+        content, files = self._extract_message(raw)
+        if not content and not files:
+            return
+
+        is_command = bool(content and content.startswith("/"))
+        if is_command:
+            cmd = content[1:].split(maxsplit=1)
+            if cmd and cmd[0].lower() == "whoami":
+                await self._safe_send_json(
+                    client_id,
+                    {"type": "system", "content": f"Connection ID: {client_id}"},
+                )
+                return
+
+        metadata = {"websocket_id": client_id, "is_command": is_command}
+        if files:
+            metadata["files"] = files
+        await self.mq.incoming.put(
+            IncomingMessage(
+                content=content or "", channel=ChannelType.WEB, metadata=metadata
+            )
         )
 
     async def run_polling(self) -> None:
         """Start uvicorn and serve until cancelled."""
-        config = uvicorn.Config(
+        server_config = uvicorn.Config(
             app=self._asgi_app,
             host=self.host,
             port=self.port,
             log_level="info",
         )
-        server = uvicorn.Server(config)
-        log.info(f"Web UI at http://{self.host}:{self.port}/")
-        log.info(f"WebSocket at ws://{self.host}:{self.port}/ws")
+        server = uvicorn.Server(server_config)
+        log.info("Web UI at http://%s:%s/", self.host, self.port)
+        log.info("WebSocket at ws://%s:%s/ws", self.host, self.port)
         await server.serve()
 
     # -- Message delivery ---------------------------------------------------
@@ -551,8 +558,8 @@ class WebChannel(Channel):
         async with lock:
             try:
                 await ws.send_json(payload)
-            except Exception:
-                log.exception(f"Failed to send to WebSocket client {client_id}")
+            except Exception:  # pylint: disable=broad-exception-caught  # drop the broken connection
+                log.exception("Failed to send to WebSocket client %s", client_id)
                 async with self._conn_lock:
                     self._connections.pop(client_id, None)
                     self._send_locks.pop(client_id, None)

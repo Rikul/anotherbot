@@ -52,13 +52,16 @@ def is_loopback_host(host: str) -> bool:
 def _login_page(error: str = "") -> HTMLResponse:
     err = f'<p class="err">{html.escape(error)}</p>' if error else ""
     body = f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>anotherbot — log in</title>
 <style>
   :root {{ color-scheme: light dark; }}
-  body {{ font-family: system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh; margin: 0; }}
+  body {{ font-family: system-ui, sans-serif; margin: 0;
+         display: grid; place-items: center; min-height: 100vh; }}
   form {{ display: flex; flex-direction: column; gap: 12px; width: min(320px, 90vw); }}
-  input, button {{ font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid #8884; }}
+  input, button {{ font: inherit; padding: 10px 12px;
+                   border-radius: 8px; border: 1px solid #8884; }}
   button {{ cursor: pointer; background: #6366f1; color: #fff; border: none; }}
   .err {{ color: #dc2626; margin: 0; }}
 </style></head>
@@ -72,7 +75,14 @@ def _login_page(error: str = "") -> HTMLResponse:
     return HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
 
 
-class WebAuthMiddleware:
+class WebAuthMiddleware:  # pylint: disable=too-few-public-methods  # ASGI app: only __call__
+    """ASGI middleware that puts the whole web app behind a password login.
+
+    Args:
+        app: the ASGI app to protect.
+        password: the ``WEB_PASSWORD``; must not be empty.
+    """
+
     def __init__(self, app, password: str) -> None:
         if not password:
             raise ValueError("WebAuthMiddleware requires a non-empty password")
@@ -122,7 +132,7 @@ class WebAuthMiddleware:
         headers = Headers(scope=scope)
         if not self._same_origin(headers):
             log.warning(
-                f"Rejected cross-origin WebSocket from {headers.get('origin')!r}"
+                "Rejected cross-origin WebSocket from %r", headers.get("origin")
             )
         elif self._is_authenticated(headers):
             await self.app(scope, receive, send)
@@ -178,7 +188,7 @@ class WebAuthMiddleware:
 
         if not self._check_password(password):
             client = (scope.get("client") or ("?",))[0]
-            log.warning(f"Failed web login from {client}")
+            log.warning("Failed web login from %s", client)
             await asyncio.sleep(_FAILED_LOGIN_DELAY)
             return _login_page("Wrong password.")
 
