@@ -30,6 +30,7 @@ def init_task_todos() -> TodoList:
 def current_todos() -> TodoList:
     return _current.get(_default)
 
+
 class TodoAddTool(Tool):
     @staticmethod
     def spec():
@@ -44,15 +45,15 @@ class TodoAddTool(Tool):
                     "properties": {
                         "title": {
                             "type": "string",
-                            "description": "Short title for the task"
+                            "description": "Short title for the task",
                         },
                         "description": {
                             "type": "string",
-                            "description": "Optional longer description of the task"
-                        }
-                    }
-                }
-            }
+                            "description": "Optional longer description of the task",
+                        },
+                    },
+                },
+            },
         }
 
     @staticmethod
@@ -62,7 +63,11 @@ class TodoAddTool(Tool):
         todos = current_todos()
         task_id = str(todos.next_id)
         todos.next_id += 1
-        todos.tasks[task_id] = {"title": title, "description": description, "status": "todo"}
+        todos.tasks[task_id] = {
+            "title": title,
+            "description": description,
+            "status": "todo",
+        }
         return f"Task {task_id} added: {title}"
 
 
@@ -74,8 +79,8 @@ class TodoListTool(Tool):
             "function": {
                 "name": "todo_list",
                 "description": "List all tasks and their statuses",
-                "parameters": {"type": "object", "properties": {}}
-            }
+                "parameters": {"type": "object", "properties": {}},
+            },
         }
 
     @staticmethod
@@ -103,8 +108,8 @@ class TodoClearTool(Tool):
             "function": {
                 "name": "todo_clear",
                 "description": "Todos are done, clear all todos",
-                "parameters": {"type": "object", "properties": {}}
-            }
+                "parameters": {"type": "object", "properties": {}},
+            },
         }
 
     @staticmethod
@@ -131,16 +136,16 @@ class TodoUpdateTool(Tool):
                     "properties": {
                         "task_id": {
                             "type": "string",
-                            "description": "The ID of the task to update"
+                            "description": "The ID of the task to update",
                         },
                         "status": {
                             "type": "string",
                             "enum": ["todo", "in_progress", "done"],
-                            "description": "New status for the task"
-                        }
-                    }
-                }
-            }
+                            "description": "New status for the task",
+                        },
+                    },
+                },
+            },
         }
 
     @staticmethod

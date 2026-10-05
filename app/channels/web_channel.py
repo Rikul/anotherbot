@@ -21,8 +21,24 @@ import uuid
 import uvicorn
 from pathlib import Path
 from fasthtml.common import (
-    A, Button, Div, Head, Html, Input, Label, Link, Meta, NotStr, Script, Span,
-    Textarea, Title, Body, H1, P, fast_app,
+    A,
+    Button,
+    Div,
+    Head,
+    Html,
+    Input,
+    Label,
+    Link,
+    Meta,
+    NotStr,
+    Script,
+    Span,
+    Textarea,
+    Title,
+    Body,
+    H1,
+    P,
+    fast_app,
 )
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -59,8 +75,10 @@ def _build_page(auth_enabled: bool = False) -> Html:
             Meta(name="viewport", content="width=device-width, initial-scale=1"),
             Title("anotherbot"),
             Link(rel="preconnect", href="https://fonts.googleapis.com"),
-            Link(rel="stylesheet",
-                 href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap"),
+            Link(
+                rel="stylesheet",
+                href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
+            ),
             Link(rel="stylesheet", href=f"/static/web_channel.css?v={_ASSET_VERSION}"),
         ),
         Body(
@@ -79,8 +97,18 @@ def _build_page(auth_enabled: bool = False) -> Html:
                             id="status",
                         ),
                         Button("☾", id="theme-btn", title="Toggle light/dark"),
-                        *([A("Log out", href="/logout", id="logout-link", title="Log out")]
-                          if auth_enabled else []),
+                        *(
+                            [
+                                A(
+                                    "Log out",
+                                    href="/logout",
+                                    id="logout-link",
+                                    title="Log out",
+                                )
+                            ]
+                            if auth_enabled
+                            else []
+                        ),
                         id="header-right",
                     ),
                     id="header",
@@ -104,7 +132,9 @@ def _build_page(auth_enabled: bool = False) -> Html:
                             Div(
                                 Div(
                                     Div("✦", cls="icon"),
-                                    P("Ask me anything, or try /help for available commands."),
+                                    P(
+                                        "Ask me anything, or try /help for available commands."
+                                    ),
                                     id="empty",
                                 ),
                                 id="messages",
@@ -113,7 +143,10 @@ def _build_page(auth_enabled: bool = False) -> Html:
                         ),
                         # Thinking dots — always just above the input box
                         Div(
-                            Div(Div(Span(), Span(), Span(), cls="dots"), cls="thinking-bubble"),
+                            Div(
+                                Div(Span(), Span(), Span(), cls="dots"),
+                                cls="thinking-bubble",
+                            ),
                             id="thinking",
                         ),
                         # Selected-attachment preview chips (populated by JS)
@@ -171,6 +204,7 @@ def _build_page(auth_enabled: bool = False) -> Html:
 # Channel class                                                                #
 # --------------------------------------------------------------------------- #
 
+
 class WebChannel(Channel):
     """FastHTML web channel.
 
@@ -195,6 +229,7 @@ class WebChannel(Channel):
         self._send_locks: dict[str, asyncio.Lock] = {}
         self._conn_lock = asyncio.Lock()
         from .. import config as _cfg
+
         self._upload_dir = _cfg.PROJECT_HOME / "uploads"
         mq.register(self, self.send_message)
 
@@ -232,18 +267,23 @@ class WebChannel(Channel):
         log.info(f"Building web channel on {self.host}:{self.port}")
 
         from .web_auth import WebAuthMiddleware, is_loopback_host
+
         if not self.password and not is_loopback_host(self.host):
             raise RuntimeError(
                 f"Web channel would listen on {self.host} without a password. "
                 "Set WEB_PASSWORD, or bind to 127.0.0.1 (WEBSOCKET_HOST)."
             )
         if not self.password:
-            log.warning("Web channel has no password (WEB_PASSWORD unset); localhost access only")
+            log.warning(
+                "Web channel has no password (WEB_PASSWORD unset); localhost access only"
+            )
 
         self._fasthtml_app, rt = fast_app(hdrs=())
         # What uvicorn serves: the app wrapped in the login middleware when a password is set.
         self._asgi_app = (
-            WebAuthMiddleware(self._fasthtml_app, self.password) if self.password else self._fasthtml_app
+            WebAuthMiddleware(self._fasthtml_app, self.password)
+            if self.password
+            else self._fasthtml_app
         )
 
         @rt("/")
@@ -255,6 +295,7 @@ class WebChannel(Channel):
             from starlette.responses import JSONResponse
             from ..infra.conversations import ConversationStore
             from ..core import runtime as _rt
+
             store = ConversationStore()
             ch = ChannelType.WEB.value
             convs = store.list()
@@ -265,6 +306,7 @@ class WebChannel(Channel):
         def messages_api(req):
             from starlette.responses import JSONResponse, Response
             from ..infra.conversations import ConversationStore
+
             try:
                 conv_id = int(req.query_params.get("conv_id", 0))
             except (ValueError, TypeError):
@@ -275,6 +317,7 @@ class WebChannel(Channel):
             conv = store.get(conv_id)
             if not conv:
                 from starlette.responses import Response
+
                 return Response(status_code=404)
             msgs = store.load_messages(conv_id)
             return JSONResponse({"messages": msgs})
@@ -284,6 +327,7 @@ class WebChannel(Channel):
             from starlette.responses import JSONResponse
             from .. import config as _cfg
             from ..core import runtime as _rt
+
             model = _rt.get("model", _cfg.get("model", "AI"))
             return JSONResponse({"model": model})
 
@@ -297,6 +341,7 @@ class WebChannel(Channel):
             concurrent clients never collide.
             """
             from starlette.responses import JSONResponse, Response
+
             form = await req.form()
             uploads = [f for f in form.getlist("files") if getattr(f, "filename", None)]
             if not uploads:
@@ -370,7 +415,10 @@ class WebChannel(Channel):
                         if name == "whoami":
                             await self._safe_send_json(
                                 client_id,
-                                {"type": "system", "content": f"Connection ID: {client_id}"},
+                                {
+                                    "type": "system",
+                                    "content": f"Connection ID: {client_id}",
+                                },
                             )
                             continue
 
@@ -398,13 +446,12 @@ class WebChannel(Channel):
                     self._send_locks.pop(client_id, None)
 
         # Mount the WebSocket route on the FastHTML (Starlette) app
-        self._fasthtml_app.router.routes.insert(
-            0, WebSocketRoute("/ws", _ws_endpoint)
-        )
+        self._fasthtml_app.router.routes.insert(0, WebSocketRoute("/ws", _ws_endpoint))
 
         # Serve static assets (CSS, JS)
         from starlette.routing import Mount
         from starlette.staticfiles import StaticFiles
+
         static_dir = Path(__file__).parent / "static"
         self._fasthtml_app.router.routes.insert(
             1, Mount("/static", StaticFiles(directory=str(static_dir)), name="static")

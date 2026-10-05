@@ -3,8 +3,8 @@ from __future__ import annotations
 from openai import AsyncOpenAI
 from .. import config
 
-class Client:
 
+class Client:
     def __init__(self, api_key: str = None, base_url: str = None) -> None:
         if api_key is None:
             api_key = config.get("api_key", None)

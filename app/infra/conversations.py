@@ -22,6 +22,7 @@ def _fk_conn(db_path: Path):
     finally:
         conn.close()
 
+
 class ConversationStore:
     def __init__(self, db_path: Path = APP_DB):
         self.db_path = db_path
@@ -87,11 +88,14 @@ class ConversationStore:
                     "SELECT DISTINCT channel FROM messages WHERE conversation_id IS NULL"
                 ).fetchall()
                 for (channel,) in rows:
-                    oldest = mconn.execute(
-                        "SELECT MIN(timestamp) FROM messages "
-                        "WHERE channel=? AND conversation_id IS NULL",
-                        (channel,),
-                    ).fetchone()[0] or now
+                    oldest = (
+                        mconn.execute(
+                            "SELECT MIN(timestamp) FROM messages "
+                            "WHERE channel=? AND conversation_id IS NULL",
+                            (channel,),
+                        ).fetchone()[0]
+                        or now
+                    )
                     cid = mconn.execute(
                         "INSERT INTO conversations (name, channel, created_at, updated_at) "
                         "VALUES (?,?,?,?)",
@@ -116,7 +120,9 @@ class ConversationStore:
             log.error(f"ConversationStore schema error: {e}")
             raise
 
-    def create(self, channel: str, name: str = "New Conversation", parent_id: int = None) -> int:
+    def create(
+        self, channel: str, name: str = "New Conversation", parent_id: int = None
+    ) -> int:
         clean = name.strip()[:80] or "New Conversation"
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
@@ -137,8 +143,12 @@ class ConversationStore:
         if row is None:
             return None
         return {
-            "id": row[0], "name": row[1], "channel": row[2],
-            "parent_id": row[3], "created_at": row[4], "updated_at": row[5],
+            "id": row[0],
+            "name": row[1],
+            "channel": row[2],
+            "parent_id": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
         }
 
     def get_last(self, channel: str) -> dict | None:
@@ -151,8 +161,12 @@ class ConversationStore:
         if row is None:
             return None
         return {
-            "id": row[0], "name": row[1], "channel": row[2],
-            "parent_id": row[3], "created_at": row[4], "updated_at": row[5],
+            "id": row[0],
+            "name": row[1],
+            "channel": row[2],
+            "parent_id": row[3],
+            "created_at": row[4],
+            "updated_at": row[5],
         }
 
     def list(self, channel: str | None = None) -> list[dict]:
@@ -167,9 +181,15 @@ class ConversationStore:
                 ORDER BY c.updated_at DESC, c.id DESC"""
             rows = conn.execute(q, params).fetchall()
         return [
-            {"id": r[0], "name": r[1], "parent_id": r[2],
-             "created_at": r[3], "updated_at": r[4], "message_count": r[5],
-             "channel": r[6]}
+            {
+                "id": r[0],
+                "name": r[1],
+                "parent_id": r[2],
+                "created_at": r[3],
+                "updated_at": r[4],
+                "message_count": r[5],
+                "channel": r[6],
+            }
             for r in rows
         ]
 
@@ -177,7 +197,7 @@ class ConversationStore:
         conv = self.get(conversation_id)
         if conv is None:
             raise ValueError(f"Conversation {conversation_id} not found")
-     
+
         clean = name.strip()[:80] or "New Conversation"
         now = datetime.now().isoformat()
         with _fk_conn(self.db_path) as conn:
@@ -242,7 +262,10 @@ class ConversationStore:
 
         export_dir = PROJECT_HOME / "conversations"
         export_dir.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^a-z0-9-]", "", conv["name"].lower().replace(" ", "-"))[:40] or "conversation"
+        slug = (
+            re.sub(r"[^a-z0-9-]", "", conv["name"].lower().replace(" ", "-"))[:40]
+            or "conversation"
+        )
         filename = f"{conversation_id}-{slug}.json"
         path = export_dir / filename
         with open(path, "w", encoding="utf-8") as f:

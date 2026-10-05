@@ -12,11 +12,13 @@ if TYPE_CHECKING:
 
 class ConversationAgent(Protocol):
     """Structural type for agents that support conversation management."""
-    _store: Any          # ConversationStore
+
+    _store: Any  # ConversationStore
     _channel_str: str
     conversation_id: int
 
     def _switch_conversation(self, conv: dict) -> None: ...
+
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +61,7 @@ def help_cmd(registry: CommandRegistry) -> CommandHandler:
         for cmd in registry.list():
             lines.append(f"/{cmd.name} — {cmd.description}")
         return "\n".join(lines)
+
     return _help
 
 
@@ -97,7 +100,11 @@ def make_status_cmd(channel_str: str = "") -> CommandHandler:
             conv_name = runtime.get("conversation_name", "—")
         tracing = runtime.get("trace", False)
         last_trace = runtime.get("last_trace")
-        trace_line = f"on ({last_trace})" if (tracing and last_trace) else ("on" if tracing else "off")
+        trace_line = (
+            f"on ({last_trace})"
+            if (tracing and last_trace)
+            else ("on" if tracing else "off")
+        )
         return (
             f"Bot status:\n"
             f"  Model:        {model}\n"
@@ -105,6 +112,7 @@ def make_status_cmd(channel_str: str = "") -> CommandHandler:
             f"  Conversation: [{conv_id}] {conv_name}\n"
             f"  Tracing:      {trace_line}"
         )
+
     return _status
 
 
@@ -114,21 +122,23 @@ status_cmd = make_status_cmd()
 
 # --- Conversation management commands ---
 
+
 def list_conversations_cmd(store: ConversationStore, channel: str) -> CommandHandler:
     async def _list(args: str = "") -> str:
         convs = store.list(channel)
         if not convs:
             return "No conversations yet."
-        
+
         lines = []
 
         if args.strip().lower() != "all":
             convs = convs[:10]
-        
+
         for c in convs:
             lines.append(f"#{c['id']} {c['name']} — {c['message_count']} msgs")
-        
+
         return "\n".join(lines)
+
     return _list
 
 
@@ -138,6 +148,7 @@ def new_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
         conv = agent._store.get(cid)
         agent._switch_conversation(conv)
         return f"Started new conversation [{conv['id']}] {conv['name']}"
+
     return _new
 
 
@@ -155,7 +166,10 @@ def load_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
         agent._switch_conversation(conv)
         convs = agent._store.list()
         msg_count = next((c["message_count"] for c in convs if c["id"] == conv_id), 0)
-        return f"Loaded conversation [{conv['id']}] {conv['name']} ({msg_count} messages)"
+        return (
+            f"Loaded conversation [{conv['id']}] {conv['name']} ({msg_count} messages)"
+        )
+
     return _load
 
 
@@ -174,6 +188,7 @@ def fork_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
         conv = agent._store.get(new_id)
         agent._switch_conversation(conv)
         return f"Forked into new conversation [{conv['id']}] {conv['name']}"
+
     return _fork
 
 
@@ -200,7 +215,8 @@ def rename_conversation_cmd(store: ConversationStore, channel: str) -> CommandHa
         if channel and runtime.get(f"conversation_id:{channel}") == conv_id:
             runtime.set(f"conversation_name:{channel}", persisted_name)
 
-        return f"Conversation [{conv_id}] renamed to \"{persisted_name}\""
+        return f'Conversation [{conv_id}] renamed to "{persisted_name}"'
+
     return _rename
 
 
@@ -223,6 +239,7 @@ def export_conversation_cmd(store: ConversationStore, channel: str) -> CommandHa
         except ValueError as e:
             return str(e)
         return f"Exported to {path}"
+
     return _export
 
 
@@ -263,6 +280,7 @@ def mcp_cmd() -> CommandHandler:
             statuses = mcp_manager.get_server_status()
             if not statuses:
                 from ..config import PROJECT_HOME
+
                 return f"No MCP servers configured.\nCreate {PROJECT_HOME / 'mcp_servers.json'} to add servers."
             lines = [f"MCP servers ({len(statuses)}):"]
             for s in statuses:

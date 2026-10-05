@@ -13,7 +13,9 @@ MAX_DISCORD_LENGTH = 2000
 class DiscordChannel(discord.Client, Channel):
     user: discord.ClientUser  # filled after login
 
-    def __init__(self, mq: MessageQueue, token: str, allow_from: list[int] = None) -> None:
+    def __init__(
+        self, mq: MessageQueue, token: str, allow_from: list[int] = None
+    ) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents)
@@ -47,7 +49,9 @@ class DiscordChannel(discord.Client, Channel):
             return
         user_id = message.author.id
         if self.allow_from and user_id not in self.allow_from:
-            log.warning(f"Discord: ignoring message from unauthorized user id={user_id}")
+            log.warning(
+                f"Discord: ignoring message from unauthorized user id={user_id}"
+            )
             await message.reply("Sorry, you are not authorized to use this bot.")
             return
         content = message.content.strip() if message.content else ""
@@ -58,15 +62,23 @@ class DiscordChannel(discord.Client, Channel):
             cmd_name = content[1:].split(maxsplit=1)[0].lower()
             metadata = {"channel_id": message.channel.id}
             if cmd_name == "whoami":
-                await self.send_message(OutgoingMessage(
-                    content=f"Your user ID is {user_id} and your name is {message.author.display_name}.",
-                    channel=ChannelType.DISCORD,
-                    metadata=metadata,
-                ))
+                await self.send_message(
+                    OutgoingMessage(
+                        content=f"Your user ID is {user_id} and your name is {message.author.display_name}.",
+                        channel=ChannelType.DISCORD,
+                        metadata=metadata,
+                    )
+                )
                 return
             if cmd_name == "stop":
                 self.stopped = True
-                await self.send_message(OutgoingMessage(content="Stopped.", channel=ChannelType.DISCORD, metadata=metadata))
+                await self.send_message(
+                    OutgoingMessage(
+                        content="Stopped.",
+                        channel=ChannelType.DISCORD,
+                        metadata=metadata,
+                    )
+                )
                 return
         self._last_channel_id = message.channel.id
         await self.mq.incoming.put(
@@ -77,7 +89,9 @@ class DiscordChannel(discord.Client, Channel):
             )
         )
 
-    async def _resolve_destination(self, channel_id: int | None) -> discord.abc.Messageable | None:
+    async def _resolve_destination(
+        self, channel_id: int | None
+    ) -> discord.abc.Messageable | None:
         if channel_id:
             channel = self.get_channel(channel_id)
             if channel is None:

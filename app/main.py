@@ -14,52 +14,84 @@ from .bg_server import start_server
 from .core import runtime
 from .core.mcp_manager import initialize_mcp
 
+
 def parse_args():
     parser = argparse.ArgumentParser(prog="app")
-    parser.add_argument("--trace", action="store_true", default=False,
-                        help="Enable LLM call tracing")
-    parser.add_argument("--tracedir", default=str(config.PROJECT_HOME / "trace"), metavar="DIR",
-                        help="Trace output directory (default: %(default)s)")
-    
+    parser.add_argument(
+        "--trace", action="store_true", default=False, help="Enable LLM call tracing"
+    )
+    parser.add_argument(
+        "--tracedir",
+        default=str(config.PROJECT_HOME / "trace"),
+        metavar="DIR",
+        help="Trace output directory (default: %(default)s)",
+    )
+
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("background", help="Run in background")
 
     cli_parser = subparsers.add_parser("cli", help="Run interactive CLI")
 
-    cli_parser.add_argument("-p", "--prompt", metavar="PROMPT", dest="prompt", type=str, required=False, 
-                   help="The initial prompt for the agent", default=None)
-    cli_parser.add_argument("-y", "--auto-approve", dest="auto_approve", action="store_true", 
-                   help="Allow the agent to call tools without asking for permission")
-    cli_parser.add_argument("-i", "--max-iterations", metavar="N", dest="max_iterations", type=int, 
-                   help="The maximum number of iterations the agent will run before stopping (default: 250)")
-    cli_parser.add_argument("-q", "--quiet", dest="quiet", action="store_true",
-                   help="Don't print log messages to the console (they still go to the log file)")
-
+    cli_parser.add_argument(
+        "-p",
+        "--prompt",
+        metavar="PROMPT",
+        dest="prompt",
+        type=str,
+        required=False,
+        help="The initial prompt for the agent",
+        default=None,
+    )
+    cli_parser.add_argument(
+        "-y",
+        "--auto-approve",
+        dest="auto_approve",
+        action="store_true",
+        help="Allow the agent to call tools without asking for permission",
+    )
+    cli_parser.add_argument(
+        "-i",
+        "--max-iterations",
+        metavar="N",
+        dest="max_iterations",
+        type=int,
+        help="The maximum number of iterations the agent will run before stopping (default: 250)",
+    )
+    cli_parser.add_argument(
+        "-q",
+        "--quiet",
+        dest="quiet",
+        action="store_true",
+        help="Don't print log messages to the console (they still go to the log file)",
+    )
 
     args = parser.parse_args()
 
     if not hasattr(args, "max_iterations") or args.max_iterations is None:
         args.max_iterations = config.get("max_iterations")
-        
+
     return args
+
 
 async def run_background_agent(args):
     await start_server()
 
+
 async def main():
-    
+
     ensure_home_dir()
 
     config.load()  # env vars only; raises on invalid values so bad config fails fast
     args = parse_args()
     setup_logging(level=logging.INFO, console=not getattr(args, "quiet", False))
 
-    runtime.set("model",  config.get("model", "deepseek/deepseek-v4.1-flash"))
+    runtime.set("model", config.get("model", "deepseek/deepseek-v4.1-flash"))
     runtime.set("max_iterations", args.max_iterations)
     runtime.set("trace", args.trace)
     runtime.set("tracedir", Path(args.tracedir))
 
     from .core.mcp_manager import mcp_manager
+
     try:
         await initialize_mcp()
         if args.command == "cli":
@@ -74,10 +106,9 @@ async def main():
             raise ValueError(f"Unknown command: {args.command}")
     finally:
         await mcp_manager.shutdown()
-    
-    
+
+
 if __name__ == "__main__":
-    
     # For better Ctrl+C handling, we use asyncio.Runner which is available in Python 3.11 and later
     try:
         with asyncio.Runner() as runner:
@@ -88,4 +119,3 @@ if __name__ == "__main__":
     except Exception as e:
         log.error(f"An error occurred: {e}")
         os._exit(1)
-

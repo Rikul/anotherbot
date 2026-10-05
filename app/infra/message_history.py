@@ -6,8 +6,10 @@ from pathlib import Path
 from .app_logging import log
 from ..config import APP_DB, get_db_connection
 
+
 def _est_tokens(content: str) -> int:
     return max(1, len(content) // 4)
+
 
 class MessageHistory:
     def __init__(self, channel_type: str, db_path: Path = APP_DB):
@@ -37,7 +39,9 @@ class MessageHistory:
                     """)
                     # Add conversation_id if missing (ConversationStore adds it too,
                     # but MessageHistory must be self-consistent for standalone use)
-                    cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+                    cols = {
+                        row[1] for row in conn.execute("PRAGMA table_info(messages)")
+                    }
                     if "conversation_id" not in cols:
                         conn.execute(
                             "ALTER TABLE messages ADD COLUMN conversation_id INTEGER"
@@ -66,16 +70,19 @@ class MessageHistory:
                 )
         finally:
             conn.close()
-        log.info(f"Added message to history: role={role}, est_tokens={est}, content={content[:30]}...")
+        log.info(
+            f"Added message to history: role={role}, est_tokens={est}, content={content[:30]}..."
+        )
 
     def get_history(self, limit: int = 100) -> list[dict]:
         conn = get_db_connection(self.db_path)
         try:
-            rows = conn.execute("""SELECT role, content FROM messages
+            rows = conn.execute(
+                """SELECT role, content FROM messages
                                     WHERE channel = ?
-                                    ORDER BY id DESC LIMIT ?""", (self.channel, limit)).fetchall()
+                                    ORDER BY id DESC LIMIT ?""",
+                (self.channel, limit),
+            ).fetchall()
         finally:
             conn.close()
         return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
-
-

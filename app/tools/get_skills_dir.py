@@ -2,8 +2,8 @@ from ..infra.app_logging import log
 import pathlib
 from ..core.tool import Tool
 
-class GetSkillsDirTool(Tool):
 
+class GetSkillsDirTool(Tool):
     @staticmethod
     def spec():
         return {
@@ -11,11 +11,8 @@ class GetSkillsDirTool(Tool):
             "function": {
                 "name": "get_skills_dir",
                 "description": "Get the path to the skills directory",
-                "parameters": {
-                    "type": "object",
-                    "properties": {}
-                }
-            }
+                "parameters": {"type": "object", "properties": {}},
+            },
         }
 
     @staticmethod

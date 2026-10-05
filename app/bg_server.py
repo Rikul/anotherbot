@@ -9,7 +9,10 @@ from .core.scheduled_tasks import ScheduledTasks
 from .core import runtime
 from .channels.channel import Channel, ChannelType
 
-def telegram_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, MessageQueue | None]:
+
+def telegram_channel_agent() -> tuple[
+    Channel | None, BackgroundAgent | None, MessageQueue | None
+]:
     telegram_channel = None
     telegram_agent = None
     telegram_mq = None
@@ -20,15 +23,26 @@ def telegram_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, Me
             log.error("Telegram BOT_TOKEN not set in config, skipping Telegram channel")
         else:
             from .channels.telegram import TelegramChannel
+
             telegram_mq = MessageQueue()
-            telegram_channel = TelegramChannel(telegram_mq, bot_token=bot_token, allow_from=config.telegram.get("ALLOW_FROM", []))
+            telegram_channel = TelegramChannel(
+                telegram_mq,
+                bot_token=bot_token,
+                allow_from=config.telegram.get("ALLOW_FROM", []),
+            )
             telegram_channel.start()
-            telegram_agent = BackgroundAgent(mq=telegram_mq, channel=telegram_channel, max_iterations=runtime.get("max_iterations", 250))
-    
+            telegram_agent = BackgroundAgent(
+                mq=telegram_mq,
+                channel=telegram_channel,
+                max_iterations=runtime.get("max_iterations", 250),
+            )
+
     return telegram_channel, telegram_agent, telegram_mq
 
 
-def discord_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, MessageQueue | None]:
+def discord_channel_agent() -> tuple[
+    Channel | None, BackgroundAgent | None, MessageQueue | None
+]:
     discord_channel = None
     discord_agent = None
     discord_mq = None
@@ -39,26 +53,41 @@ def discord_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, Mes
             log.error("Discord TOKEN not set in config, skipping Discord channel")
         else:
             from .channels.discord import DiscordChannel
+
             discord_mq = MessageQueue()
-            discord_channel = DiscordChannel(discord_mq, token=discord_token, allow_from=config.discord.get("ALLOW_FROM", []))
+            discord_channel = DiscordChannel(
+                discord_mq,
+                token=discord_token,
+                allow_from=config.discord.get("ALLOW_FROM", []),
+            )
             discord_channel.start()
-            discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel, max_iterations=runtime.get("max_iterations", 250))
+            discord_agent = BackgroundAgent(
+                mq=discord_mq,
+                channel=discord_channel,
+                max_iterations=runtime.get("max_iterations", 250),
+            )
 
     return discord_channel, discord_agent, discord_mq
 
-def web_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, MessageQueue | None]:
+
+def web_channel_agent() -> tuple[
+    Channel | None, BackgroundAgent | None, MessageQueue | None
+]:
     web_channel = None
     web_agent = None
     web_mq = None
 
     if config.get("websocket"):
         from .channels.web_channel import WebChannel
+
         ws_config = config.get("websocket")
         ws_host = ws_config.get("HOST", "127.0.0.1")
         ws_port = ws_config.get("PORT", 8765)
         log.info(f"Starting web channel on {ws_host}:{ws_port}")
         web_mq = MessageQueue()
-        web_channel = WebChannel(web_mq, host=ws_host, port=ws_port, password=config.get("web_password"))
+        web_channel = WebChannel(
+            web_mq, host=ws_host, port=ws_port, password=config.get("web_password")
+        )
         try:
             web_channel.start()
         except RuntimeError as e:
@@ -66,9 +95,14 @@ def web_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, Message
             log.error(f"Web channel disabled: {e}")
             web_channel = None
         else:
-            web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
+            web_agent = BackgroundAgent(
+                mq=web_mq,
+                channel=web_channel,
+                max_iterations=runtime.get("max_iterations", 250),
+            )
 
     return web_channel, web_agent, web_mq
+
 
 async def start_server() -> None:
     log.info("Starting server...")
@@ -87,7 +121,9 @@ async def start_server() -> None:
         ChannelType.WEB.value: web_channel_agent(),
     }
 
-    active_channels = {name: s for name, s in channel_setups.items() if s[0] is not None}
+    active_channels = {
+        name: s for name, s in channel_setups.items() if s[0] is not None
+    }
     if not active_channels:
         log.error("No channels configured, exiting...")
         return

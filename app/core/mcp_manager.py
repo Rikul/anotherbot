@@ -33,7 +33,9 @@ async def initialize_mcp() -> None:
     if not mcp_servers:
         return
     if not isinstance(mcp_servers, dict):
-        log.error("mcp_servers.json: 'mcpServers' must be a JSON object mapping server names to configs.")
+        log.error(
+            "mcp_servers.json: 'mcpServers' must be a JSON object mapping server names to configs."
+        )
         return
 
     log.info(f"Initializing {len(mcp_servers)} MCP server(s)...")
@@ -55,15 +57,19 @@ class MCPManager:
 
     async def initialize(self, mcp_servers: dict[str, dict]) -> None:
         self._server_configs = dict(mcp_servers)
-        await asyncio.gather(*(
-            self._connect_server(n, c)
-            for n, c in mcp_servers.items()
-            if not c.get("disabled")
-        ))
+        await asyncio.gather(
+            *(
+                self._connect_server(n, c)
+                for n, c in mcp_servers.items()
+                if not c.get("disabled")
+            )
+        )
 
     async def _connect_server(self, name: str, cfg: dict) -> None:
         if self._SEP in name:
-            log.error(f"MCP server '{name}': invalid name — must not contain '{self._SEP}'.")
+            log.error(
+                f"MCP server '{name}': invalid name — must not contain '{self._SEP}'."
+            )
             return
         try:
             client = self._build_client(cfg)
@@ -118,14 +124,16 @@ class MCPManager:
             tool_count = sum(1 for k in self._specs if k.startswith(prefix))
             transport = "url" if "url" in cfg else "stdio"
             target = cfg.get("url") or cfg.get("command", "?")
-            result.append({
-                "name": name,
-                "connected": name in self._clients,
-                "disabled": bool(cfg.get("disabled")),
-                "transport": transport,
-                "target": target,
-                "tool_count": tool_count,
-            })
+            result.append(
+                {
+                    "name": name,
+                    "connected": name in self._clients,
+                    "disabled": bool(cfg.get("disabled")),
+                    "transport": transport,
+                    "target": target,
+                    "tool_count": tool_count,
+                }
+            )
         return result
 
     def get_tools_for_server(self, server_name: str) -> list[dict]:
@@ -138,7 +146,9 @@ class MCPManager:
     async def call_tool(self, tool_name: str, tool_args: dict) -> str:
         server_name, sep, bare_name = tool_name.partition(self._SEP)
         if not sep:
-            return f"Error: MCP tool '{tool_name}' is not namespaced with '{self._SEP}'."
+            return (
+                f"Error: MCP tool '{tool_name}' is not namespaced with '{self._SEP}'."
+            )
         client = self._clients.get(server_name)
         if client is None:
             return f"Error: MCP server '{server_name}' is not connected."
@@ -156,7 +166,9 @@ class MCPManager:
                 texts = [getattr(part, "text", None) for part in content]
                 texts = [t for t in texts if t is not None]
                 if texts:
-                    return trunc_str_with_ellipsis(MAX_TOOL_RESULT_LENGTH, "\n".join(map(str, texts)))
+                    return trunc_str_with_ellipsis(
+                        MAX_TOOL_RESULT_LENGTH, "\n".join(map(str, texts))
+                    )
 
             data = getattr(result, "data", None)
             if data is not None:

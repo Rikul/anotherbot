@@ -4,7 +4,6 @@ from ..core.tool import Tool
 
 
 class BashTool(Tool):
-
     @staticmethod
     def spec():
         return {
@@ -18,11 +17,11 @@ class BashTool(Tool):
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "The command to execute"
+                            "description": "The command to execute",
                         }
-                    }
-                }
-            }
+                    },
+                },
+            },
         }
 
     @staticmethod
@@ -30,7 +29,14 @@ class BashTool(Tool):
         log.info(f"bash, command: {command}")
 
         try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True, check=False, timeout=30)
+            result = subprocess.run(
+                command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
             output = result.stdout
             if result.stderr:
                 output += f"\n[stderr]\n{result.stderr}"

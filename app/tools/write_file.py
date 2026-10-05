@@ -3,8 +3,8 @@ from ..infra.app_logging import log
 from pathlib import Path
 from ..core.tool import Tool
 
-class WriteFileTool(Tool):
 
+class WriteFileTool(Tool):
     @staticmethod
     def spec():
         return {
@@ -18,15 +18,15 @@ class WriteFileTool(Tool):
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "The path of the file to write to"
+                            "description": "The path of the file to write to",
                         },
                         "content": {
                             "type": "string",
-                            "description": "The content to write to the file"
-                        }
-                    }
-                }
-            }
+                            "description": "The content to write to the file",
+                        },
+                    },
+                },
+            },
         }
 
     @staticmethod

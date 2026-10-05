@@ -21,8 +21,9 @@ APP_DB = PROJECT_HOME / "app.db"
 load_dotenv(PROJECT_HOME / ".env")
 
 
-def get_db_connection(db_path: Path = APP_DB, *, timeout: float = 30.0,
-                       isolation_level: str | None = "") -> sqlite3.Connection:
+def get_db_connection(
+    db_path: Path = APP_DB, *, timeout: float = 30.0, isolation_level: str | None = ""
+) -> sqlite3.Connection:
     """Open a connection to a shared SQLite db (e.g. APP_DB) with settings safe
     for concurrent access from multiple asyncio tasks/channels.
 
@@ -49,11 +50,15 @@ def load() -> None:
     if v := os.environ.get("TELEGRAM_BOT_TOKEN"):
         _config.setdefault("telegram", {})["BOT_TOKEN"] = v
     if v := os.environ.get("TELEGRAM_ALLOW_FROM"):
-        _config.setdefault("telegram", {})["ALLOW_FROM"] = [int(x.strip()) for x in v.split(",") if x.strip()]
+        _config.setdefault("telegram", {})["ALLOW_FROM"] = [
+            int(x.strip()) for x in v.split(",") if x.strip()
+        ]
     if v := os.environ.get("DISCORD_BOT_TOKEN"):
         _config.setdefault("discord", {})["TOKEN"] = v
     if v := os.environ.get("DISCORD_ALLOW_FROM"):
-        _config.setdefault("discord", {})["ALLOW_FROM"] = [int(x.strip()) for x in v.split(",") if x.strip()]
+        _config.setdefault("discord", {})["ALLOW_FROM"] = [
+            int(x.strip()) for x in v.split(",") if x.strip()
+        ]
     if v := os.environ.get("WEBSOCKET_HOST"):
         _config.setdefault("websocket", {})["HOST"] = v
     if v := os.environ.get("WEBSOCKET_PORT"):
@@ -84,9 +89,11 @@ def load() -> None:
 def get(key: str, default=None):
     return _config.get(key, default)
 
+
 def set(key: str, value) -> None:
     _config[key] = value
-    
+
+
 def __getattr__(name: str):
     if name in _config:
         return _config[name]

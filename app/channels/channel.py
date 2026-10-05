@@ -1,14 +1,15 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 
+
 class ChannelType(Enum):
     CLI = "cli"
     TELEGRAM = "telegram"
     DISCORD = "discord"
     WEB = "web"
 
-class Channel(ABC):
 
+class Channel(ABC):
     @abstractmethod
     async def send_message(self, message) -> None:
         pass

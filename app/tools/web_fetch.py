@@ -2,8 +2,8 @@ import subprocess
 from ..infra.app_logging import log
 from ..core.tool import Tool
 
-class WebFetchTool(Tool):
 
+class WebFetchTool(Tool):
     @staticmethod
     def spec():
         return {
@@ -16,12 +16,12 @@ class WebFetchTool(Tool):
                     "properties": {
                         "url": {
                             "type": "string",
-                            "description": "The URL of the web page to fetch"
+                            "description": "The URL of the web page to fetch",
                         }
                     },
-                    "required": ["url"]
-                }
-            }
+                    "required": ["url"],
+                },
+            },
         }
 
     @staticmethod
@@ -34,7 +34,7 @@ class WebFetchTool(Tool):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                timeout=10
+                timeout=10,
             )
             if result.returncode != 0:
                 return f"Error fetching URL {url}: {result.stderr.strip()}"

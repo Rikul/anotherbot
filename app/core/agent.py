@@ -35,7 +35,7 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
     except Exception as e:
         log.error(f"Error loading system prompt: {e}")
 
-    conv_id   = ctx.get("conversation_id", "")
+    conv_id = ctx.get("conversation_id", "")
     conv_name = ctx.get("conversation_name", "")
     conv_line = f"\n- Conversation: [{conv_id}] {conv_name}" if conv_id else ""
 
@@ -59,7 +59,6 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 
 
 class Agent(ABC):
-
     def __init__(self, max_iterations: int = 250) -> None:
         self.client = Client().get_client()
         self.messages: list[dict] = []
@@ -68,7 +67,7 @@ class Agent(ABC):
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
             self.messages = self.messages[-MAX_CONTEXT_MESSAGES:]
-    
+
     @staticmethod
     def _serialize_assistant_msg(msg) -> dict:
         d = {"role": msg.role, "content": msg.content}
@@ -79,7 +78,6 @@ class Agent(ABC):
         if reasoning:
             d["reasoning_content"] = reasoning
         return d
-
 
     @staticmethod
     def _as_list(value) -> list:
@@ -94,9 +92,13 @@ class Agent(ABC):
                         f"metadata['files'] entries must be paths, got {type(item).__name__}"
                     )
             return list(value)
-        raise TypeError(f"metadata['files'] must be a path or list of paths, got {type(value).__name__}")
+        raise TypeError(
+            f"metadata['files'] must be a path or list of paths, got {type(value).__name__}"
+        )
 
-    _MAX_COMBINED_ATTACHMENT_BYTES = 5 * 1024 * 1024  # 5 MB combined across all attachments
+    _MAX_COMBINED_ATTACHMENT_BYTES = (
+        5 * 1024 * 1024
+    )  # 5 MB combined across all attachments
 
     @classmethod
     def _attachment_part(cls, attachment: str) -> dict:
@@ -111,7 +113,7 @@ class Agent(ABC):
             raise PermissionError(f"Cannot read attachment: {path}") from e
 
         log.info(f"Encoding attachment {path} ({mime_type}, {len(raw)} bytes)")
-        
+
         data_url = f"data:{mime_type};base64,{base64.b64encode(raw).decode('ascii')}"
 
         if mime_type.startswith("image/"):
@@ -186,8 +188,11 @@ class Agent(ABC):
         """Return True to break out of the loop early."""
         return False
 
-    async def _auto_name(self, store, conv_id: int, messages: list[dict], name_runtime_key: str) -> None:
+    async def _auto_name(
+        self, store, conv_id: int, messages: list[dict], name_runtime_key: str
+    ) -> None:
         from .helper_agent import HelperAgent  # lazy — helper_agent imports Agent
+
         transcript = "\n".join(
             f"{m['role']}: {m['content'][:200]}" for m in messages[:4]
         )
@@ -209,7 +214,10 @@ class Agent(ABC):
     # --- shared tool dispatch ---
 
     async def handle_tool_call(self, tool_call) -> str:
-        from .tool_calls import run_tool_async  # lazy — tool_calls imports scheduled_tasks which imports Agent
+        from .tool_calls import (
+            run_tool_async,
+        )  # lazy — tool_calls imports scheduled_tasks which imports Agent
+
         tool_name = tool_call.function.name
         try:
             tool_args = json.loads((tool_call.function.arguments or "").strip() or "{}")
@@ -232,9 +240,9 @@ class Agent(ABC):
             iteration += 1
             log.info("chat.completions.create...")
             chat = await self.client.chat.completions.create(
-                model = runtime.get("model", "deepseek/deepseek-v4.1-flash"),
-                messages = messages,
-                tools = tool_specs,
+                model=runtime.get("model", "deepseek/deepseek-v4.1-flash"),
+                messages=messages,
+                tools=tool_specs,
             )
 
             if not chat.choices:
@@ -250,23 +258,39 @@ class Agent(ABC):
             if assistant_message.tool_calls is not None:
                 messages.append(self._serialize_assistant_msg(assistant_message))
                 await self._on_thinking(assistant_message.content)
-                results = await asyncio.gather(*[
-                    self.handle_tool_call(tc) for tc in assistant_message.tool_calls
-                ])
+                results = await asyncio.gather(
+                    *[self.handle_tool_call(tc) for tc in assistant_message.tool_calls]
+                )
                 for tc, result in zip(assistant_message.tool_calls, results):
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "name": tc.function.name, "content": result})
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "name": tc.function.name,
+                            "content": result,
+                        }
+                    )
                     log.info(f"{result[:250]}...")
             else:
                 messages.append(self._serialize_assistant_msg(assistant_message))
                 await self._on_response(assistant_message.content)
-                if finish_reason not in ("stop", "length") and finish_reason is not None:
-                    log.warning(f"Unexpected finish_reason={finish_reason!r}, treating as terminal")
+                if (
+                    finish_reason not in ("stop", "length")
+                    and finish_reason is not None
+                ):
+                    log.warning(
+                        f"Unexpected finish_reason={finish_reason!r}, treating as terminal"
+                    )
                 break
 
             if self._should_stop():
                 break
 
-        return assistant_message.content.strip() if assistant_message and assistant_message.content else ""
+        return (
+            assistant_message.content.strip()
+            if assistant_message and assistant_message.content
+            else ""
+        )
 
     @abstractmethod
     async def agent_loop(self, message: str, metadata: dict = None) -> str:

@@ -5,7 +5,6 @@ from .agent import Agent
 
 
 class HelperAgent(Agent):
-
     def __init__(self, system_prompt: str = None, max_iterations: int = 50) -> None:
         super().__init__(max_iterations)
         if system_prompt:
@@ -16,6 +15,9 @@ class HelperAgent(Agent):
         return await self.agent_loop(prompt)
 
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
-        from .tool_calls import helper_tool_specs  # lazy — avoids circular import via scheduled_tasks
+        from .tool_calls import (
+            helper_tool_specs,
+        )  # lazy — avoids circular import via scheduled_tasks
+
         self.messages.append(self._build_user_message(message, metadata))
         return await self._loop(self.messages, helper_tool_specs)

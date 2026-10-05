@@ -121,7 +121,9 @@ class WebAuthMiddleware:
     async def _handle_websocket(self, scope, receive, send) -> None:
         headers = Headers(scope=scope)
         if not self._same_origin(headers):
-            log.warning(f"Rejected cross-origin WebSocket from {headers.get('origin')!r}")
+            log.warning(
+                f"Rejected cross-origin WebSocket from {headers.get('origin')!r}"
+            )
         elif self._is_authenticated(headers):
             await self.app(scope, receive, send)
             return
@@ -135,7 +137,9 @@ class WebAuthMiddleware:
         method = scope["method"]
 
         if method not in ("GET", "HEAD", "OPTIONS") and not self._same_origin(headers):
-            await Response("Cross-origin request rejected", status_code=403)(scope, receive, send)
+            await Response("Cross-origin request rejected", status_code=403)(
+                scope, receive, send
+            )
             return
 
         if path == "/login":
@@ -149,7 +153,9 @@ class WebAuthMiddleware:
         elif path == "/" and method in ("GET", "HEAD"):
             response = RedirectResponse("/login", status_code=303)
         else:
-            response = JSONResponse({"error": "authentication required"}, status_code=401)
+            response = JSONResponse(
+                {"error": "authentication required"}, status_code=401
+            )
         await response(scope, receive, send)
 
     async def _login(self, scope, receive, method: str, headers: Headers) -> Response:

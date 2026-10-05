@@ -3,6 +3,7 @@ from __future__ import annotations
 from ..config import PROJECT_HOME
 from .app_logging import log
 
+
 def ensure_home_dir() -> None:
     import os
 

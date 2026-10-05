@@ -1,6 +1,7 @@
 from .channel import Channel
 from dataclasses import dataclass, field
 
+
 @dataclass
 class IncomingMessage:
     content: str

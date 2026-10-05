@@ -1,6 +1,7 @@
 from ..infra.app_logging import log
 from ..core.tool import Tool
 
+
 class ReadFileTool(Tool):
     @staticmethod
     def spec():
@@ -14,20 +15,20 @@ class ReadFileTool(Tool):
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "The path to the file to read"
+                            "description": "The path to the file to read",
                         },
                         "offset": {
                             "type": "integer",
-                            "description": "Byte offset to start reading from (default: 0)"
+                            "description": "Byte offset to start reading from (default: 0)",
                         },
                         "size": {
                             "type": "integer",
-                            "description": "Maximum number of bytes to read (default: read to end of file)"
-                        }
+                            "description": "Maximum number of bytes to read (default: read to end of file)",
+                        },
                     },
-                    "required": ["file_path"]
-                }
-            }
+                    "required": ["file_path"],
+                },
+            },
         }
 
     @staticmethod

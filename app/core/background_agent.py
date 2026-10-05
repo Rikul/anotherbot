@@ -16,8 +16,12 @@ _MAX_EMPTY_RETRIES = 5
 
 
 class BackgroundAgent(Agent):
-
-    def __init__(self, mq: MessageQueue = None, channel: Channel = None, max_iterations: int = 250) -> None:
+    def __init__(
+        self,
+        mq: MessageQueue = None,
+        channel: Channel = None,
+        max_iterations: int = 250,
+    ) -> None:
         super().__init__(max_iterations)
         self.mq = mq
         self.channel = channel
@@ -37,7 +41,9 @@ class BackgroundAgent(Agent):
         self.conversation_id: int = conv["id"]
         runtime.set(f"conversation_id:{self._channel_str}", conv["id"])
         runtime.set(f"conversation_name:{self._channel_str}", conv["name"])
-        self.messages.extend(self._store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES))
+        self.messages.extend(
+            self._store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES)
+        )
 
         self._reply_metadata: dict = {}
         self._empty_retries: int = 0
@@ -45,25 +51,81 @@ class BackgroundAgent(Agent):
         # Lazy import to avoid circular: commands imports runtime which is fine,
         # but conversation commands need self reference so we build registry here.
         from ..channels.commands import (
-            CommandRegistry, BotCommand, help_cmd, make_status_cmd, model_cmd, trace_cmd,
-            list_conversations_cmd, new_conversation_cmd, load_conversation_cmd,
-            fork_conversation_cmd, rename_conversation_cmd, export_conversation_cmd,
+            CommandRegistry,
+            BotCommand,
+            help_cmd,
+            make_status_cmd,
+            model_cmd,
+            trace_cmd,
+            list_conversations_cmd,
+            new_conversation_cmd,
+            load_conversation_cmd,
+            fork_conversation_cmd,
+            rename_conversation_cmd,
+            export_conversation_cmd,
             mcp_cmd,
         )
+
         self.registry = CommandRegistry()
         ch = self._channel_str
-        self.registry.register(BotCommand("model",  "Get or set model. Usage: /model [name]", model_cmd))
-        self.registry.register(BotCommand("trace",  "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd))
-        self.registry.register(BotCommand("status", "Show bot status.", make_status_cmd(ch)))
-        self.registry.register(BotCommand("stop",   "Pause the bot.", self._stop_cmd))
-        self.registry.register(BotCommand("list",   "List conversations. Usage: /list [all]", list_conversations_cmd(self._store, ch)))
-        self.registry.register(BotCommand("new",    "Start a new conversation.", new_conversation_cmd(self)))
-        self.registry.register(BotCommand("load",   "Load a conversation. Usage: /load <id>", load_conversation_cmd(self)))
-        self.registry.register(BotCommand("fork",   "Fork a conversation. Usage: /fork [id]", fork_conversation_cmd(self)))
-        self.registry.register(BotCommand("rename", "Rename a conversation. Usage: /rename <id> <name>", rename_conversation_cmd(self._store, ch)))
-        self.registry.register(BotCommand("export", "Export a conversation to JSON. Usage: /export [id]", export_conversation_cmd(self._store, ch)))
-        self.registry.register(BotCommand("mcp",  "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()))
-        self.registry.register(BotCommand("help", "Show available commands.", help_cmd(self.registry)))
+        self.registry.register(
+            BotCommand("model", "Get or set model. Usage: /model [name]", model_cmd)
+        )
+        self.registry.register(
+            BotCommand("trace", "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd)
+        )
+        self.registry.register(
+            BotCommand("status", "Show bot status.", make_status_cmd(ch))
+        )
+        self.registry.register(BotCommand("stop", "Pause the bot.", self._stop_cmd))
+        self.registry.register(
+            BotCommand(
+                "list",
+                "List conversations. Usage: /list [all]",
+                list_conversations_cmd(self._store, ch),
+            )
+        )
+        self.registry.register(
+            BotCommand("new", "Start a new conversation.", new_conversation_cmd(self))
+        )
+        self.registry.register(
+            BotCommand(
+                "load",
+                "Load a conversation. Usage: /load <id>",
+                load_conversation_cmd(self),
+            )
+        )
+        self.registry.register(
+            BotCommand(
+                "fork",
+                "Fork a conversation. Usage: /fork [id]",
+                fork_conversation_cmd(self),
+            )
+        )
+        self.registry.register(
+            BotCommand(
+                "rename",
+                "Rename a conversation. Usage: /rename <id> <name>",
+                rename_conversation_cmd(self._store, ch),
+            )
+        )
+        self.registry.register(
+            BotCommand(
+                "export",
+                "Export a conversation to JSON. Usage: /export [id]",
+                export_conversation_cmd(self._store, ch),
+            )
+        )
+        self.registry.register(
+            BotCommand(
+                "mcp",
+                "Show MCP server status. Usage: /mcp [tools [<server>]]",
+                mcp_cmd(),
+            )
+        )
+        self.registry.register(
+            BotCommand("help", "Show available commands.", help_cmd(self.registry))
+        )
 
     async def _stop_cmd(self, args: str = "") -> str:
         self.channel.stopped = True
@@ -71,7 +133,9 @@ class BackgroundAgent(Agent):
 
     def _switch_conversation(self, conv: dict) -> None:
         self.conversation_id = conv["id"]
-        self.messages = self._store.load_messages(conv["id"], limit=MAX_CONTEXT_MESSAGES)
+        self.messages = self._store.load_messages(
+            conv["id"], limit=MAX_CONTEXT_MESSAGES
+        )
         runtime.set(f"conversation_id:{self._channel_str}", conv["id"])
         runtime.set(f"conversation_name:{self._channel_str}", conv["name"])
 
@@ -79,24 +143,46 @@ class BackgroundAgent(Agent):
         if self.mq and content:
             text = content.strip().rstrip(":").strip()
             if text:
-                await self.mq.outgoing_msg(OutgoingMessage(content=text, channel=self.channel, metadata=self._reply_metadata))
+                await self.mq.outgoing_msg(
+                    OutgoingMessage(
+                        content=text,
+                        channel=self.channel,
+                        metadata=self._reply_metadata,
+                    )
+                )
 
     async def _on_tool_start(self, tool_name: str, tool_args: dict) -> None:
         if self.mq:
-            first_arg = str(next(iter(tool_args.values()), ""))[:50] if tool_args else ""
+            first_arg = (
+                str(next(iter(tool_args.values()), ""))[:50] if tool_args else ""
+            )
             status = f"> {tool_name} [{first_arg}]..."
-            await self.mq.outgoing_msg(OutgoingMessage(content=status, channel=self.channel, metadata=self._reply_metadata))
+            await self.mq.outgoing_msg(
+                OutgoingMessage(
+                    content=status, channel=self.channel, metadata=self._reply_metadata
+                )
+            )
 
     async def _on_response(self, content: str | None) -> None:
         if self.mq and content and content.strip():
-            await self.mq.outgoing_msg(OutgoingMessage(content=content.strip(), channel=self.channel, metadata=self._reply_metadata))
+            await self.mq.outgoing_msg(
+                OutgoingMessage(
+                    content=content.strip(),
+                    channel=self.channel,
+                    metadata=self._reply_metadata,
+                )
+            )
 
     async def _on_no_choices(self) -> None:
         self._empty_retries += 1
         if self._empty_retries > _MAX_EMPTY_RETRIES:
-            raise RuntimeError(f"No choices in API response after {_MAX_EMPTY_RETRIES} retries")
-        wait = min(2 ** self._empty_retries, 60)
-        log.warning(f"No choices in API response, retrying in {wait}s (attempt {self._empty_retries}/{_MAX_EMPTY_RETRIES})")
+            raise RuntimeError(
+                f"No choices in API response after {_MAX_EMPTY_RETRIES} retries"
+            )
+        wait = min(2**self._empty_retries, 60)
+        log.warning(
+            f"No choices in API response, retrying in {wait}s (attempt {self._empty_retries}/{_MAX_EMPTY_RETRIES})"
+        )
         await asyncio.sleep(wait)
 
     def _should_stop(self) -> bool:
@@ -105,6 +191,7 @@ class BackgroundAgent(Agent):
     async def process_incoming(self) -> None:
         log.info("BackgroundAgent started processing incoming messages...")
         from ..tools.todo import init_task_todos
+
         init_task_todos()  # per-channel todo list (this coroutine runs as its own task)
         while True:
             msg = await self.mq.incoming.get()
@@ -114,15 +201,25 @@ class BackgroundAgent(Agent):
                     cmd_name = parts[0].lower()
                     args = parts[1] if len(parts) > 1 else ""
                     result = await self.registry.execute(cmd_name, args)
-                    reply = result if result is not None else f"Unknown command: /{cmd_name}"
-                    await self.mq.outgoing_msg(OutgoingMessage(
-                        content=reply, channel=self.channel, metadata=msg.metadata
-                    ))
+                    reply = (
+                        result
+                        if result is not None
+                        else f"Unknown command: /{cmd_name}"
+                    )
+                    await self.mq.outgoing_msg(
+                        OutgoingMessage(
+                            content=reply, channel=self.channel, metadata=msg.metadata
+                        )
+                    )
                 else:
                     await self.agent_loop(msg.content, msg.metadata)
             except Exception as e:
                 log.error(f"Agent loop error: {e}")
-                await self.mq.outgoing_msg(OutgoingMessage(content=str(e), channel=self.channel, metadata=msg.metadata))
+                await self.mq.outgoing_msg(
+                    OutgoingMessage(
+                        content=str(e), channel=self.channel, metadata=msg.metadata
+                    )
+                )
 
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         self._trim_messages()
@@ -134,18 +231,23 @@ class BackgroundAgent(Agent):
         self.history.add_message("user", placeholder_content, self.conversation_id)
 
         conv = self._store.get(self.conversation_id)
-        system_context = get_default_sys_prompt({
-            "channel": self._channel_str,
-            "conversation_id": self.conversation_id,
-            "conversation_name": conv["name"] if conv else "New Conversation",
-        })
-        system = [{"role": "system", "content": system_context}] if system_context else []
+        system_context = get_default_sys_prompt(
+            {
+                "channel": self._channel_str,
+                "conversation_id": self.conversation_id,
+                "conversation_name": conv["name"] if conv else "New Conversation",
+            }
+        )
+        system = (
+            [{"role": "system", "content": system_context}] if system_context else []
+        )
         session_messages = system + self.messages[:] + [user_msg]
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
         if runtime.get("trace"):
             from ..infra.tracer import write_trace
+
             path = write_trace(session_messages)
             if path:
                 runtime.set("last_trace", path.name)
@@ -162,7 +264,9 @@ class BackgroundAgent(Agent):
             if conv and conv["name"] == "New Conversation":
                 asyncio.create_task(
                     self._auto_name(
-                        self._store, self.conversation_id, list(self.messages),
+                        self._store,
+                        self.conversation_id,
+                        list(self.messages),
                         f"conversation_name:{self._channel_str}",
                     )
                 )

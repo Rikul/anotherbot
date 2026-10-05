@@ -11,7 +11,6 @@ from ..channels.channel import ChannelType
 
 
 class CliAgent(Agent):
-
     def __init__(self, max_iterations: int = 250, auto_approve: bool = False) -> None:
         super().__init__(max_iterations)
         self.auto_approve = auto_approve
@@ -28,11 +27,15 @@ class CliAgent(Agent):
         self.conversation_id: int = conv["id"]
         runtime.set("conversation_id", conv["id"])
         runtime.set("conversation_name", conv["name"])
-        self.messages.extend(self._store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES))
+        self.messages.extend(
+            self._store.load_messages(self.conversation_id, limit=MAX_CONTEXT_MESSAGES)
+        )
 
     def _switch_conversation(self, conv: dict) -> None:
         self.conversation_id = conv["id"]
-        self.messages = self._store.load_messages(conv["id"], limit=MAX_CONTEXT_MESSAGES)
+        self.messages = self._store.load_messages(
+            conv["id"], limit=MAX_CONTEXT_MESSAGES
+        )
         runtime.set("conversation_id", conv["id"])
         runtime.set("conversation_name", conv["name"])
 
@@ -42,6 +45,7 @@ class CliAgent(Agent):
 
     async def _check_permission(self, tool_name: str, tool_args: dict) -> bool:
         from .cli import ask_permission
+
         if self.auto_approve:
             return True
         return ask_permission(tool_name, tool_args)
@@ -58,18 +62,23 @@ class CliAgent(Agent):
         self.history.add_message("user", placeholder_content, self.conversation_id)
 
         conv = self._store.get(self.conversation_id)
-        system_context = get_default_sys_prompt({
-            "channel": self._channel_str,
-            "conversation_id": self.conversation_id,
-            "conversation_name": conv["name"] if conv else "New Conversation",
-        })
-        system = [{"role": "system", "content": system_context}] if system_context else []
+        system_context = get_default_sys_prompt(
+            {
+                "channel": self._channel_str,
+                "conversation_id": self.conversation_id,
+                "conversation_name": conv["name"] if conv else "New Conversation",
+            }
+        )
+        system = (
+            [{"role": "system", "content": system_context}] if system_context else []
+        )
         session_messages = system + self.messages[:] + [user_msg]
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
         if runtime.get("trace"):
             from ..infra.tracer import write_trace
+
             write_trace(session_messages)
 
         self.messages.append({"role": "user", "content": placeholder_content})
@@ -81,7 +90,12 @@ class CliAgent(Agent):
             conv = self._store.get(self.conversation_id)
             if conv and conv["name"] == "New Conversation":
                 asyncio.create_task(
-                    self._auto_name(self._store, self.conversation_id, list(self.messages), "conversation_name")
+                    self._auto_name(
+                        self._store,
+                        self.conversation_id,
+                        list(self.messages),
+                        "conversation_name",
+                    )
                 )
 
         return final_content

@@ -34,7 +34,7 @@ class TelegramChannel(Channel):
 
     def clear_stopped(self) -> None:
         self.stopped = False
-    
+
     @property
     def channel_type(self) -> ChannelType:
         return ChannelType.TELEGRAM
@@ -54,7 +54,9 @@ class TelegramChannel(Channel):
                 "⚠ An error occurred, please try again."
             )
 
-    async def command_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def command_handler(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ) -> None:
         user_id = update.effective_user.id if update.effective_user else None
         if user_id is None or (self.allow_from and user_id not in self.allow_from):
             log.warning(
@@ -64,7 +66,7 @@ class TelegramChannel(Channel):
                 "Sorry, you are not authorized to use this bot."
             )
             return
-    
+
         if update.message and update.message.text:
             content = update.message.text.strip()
             if content.startswith("/"):
@@ -72,15 +74,29 @@ class TelegramChannel(Channel):
                 metadata = {"chat_id": update.effective_chat.id}
                 if cmd_name == "whoami":
                     text = f"Your user ID is {update.effective_user.id} and your name is {update.effective_user.first_name}."
-                    await self.send_message(OutgoingMessage(content=text, channel=ChannelType.TELEGRAM, metadata=metadata))
+                    await self.send_message(
+                        OutgoingMessage(
+                            content=text,
+                            channel=ChannelType.TELEGRAM,
+                            metadata=metadata,
+                        )
+                    )
                     return
                 if cmd_name == "stop":
                     self.stopped = True
-                    await self.send_message(OutgoingMessage(content="Stopped.", channel=ChannelType.TELEGRAM, metadata=metadata))
+                    await self.send_message(
+                        OutgoingMessage(
+                            content="Stopped.",
+                            channel=ChannelType.TELEGRAM,
+                            metadata=metadata,
+                        )
+                    )
                     return
-                await self.mq.incoming.put(IncomingMessage(
-                    content=content, channel=ChannelType.TELEGRAM, metadata=metadata
-                ))
+                await self.mq.incoming.put(
+                    IncomingMessage(
+                        content=content, channel=ChannelType.TELEGRAM, metadata=metadata
+                    )
+                )
 
     async def send_message(self, message: OutgoingMessage) -> None:
         # This function is called by the MessageQueue when there is an outgoing message for this channel
@@ -121,7 +137,9 @@ class TelegramChannel(Channel):
                         metadata={"chat_id": update.effective_chat.id},
                     )
                 )
-                await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING)
+                await context.bot.send_chat_action(
+                    chat_id=update.effective_chat.id, action=constants.ChatAction.TYPING
+                )
             else:
                 await update.message.reply_text("Please send a non-empty message.")
         else:
