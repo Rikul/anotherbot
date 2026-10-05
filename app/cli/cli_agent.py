@@ -8,7 +8,6 @@ from ..channels.channel import ChannelType
 from ..core import runtime
 from ..core.agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
 from ..core.tool_calls import get_all_tool_specs
-from ..infra import tracer
 from ..infra.conversations import ConversationStore
 from ..infra.message_history import MessageHistory
 from ..infra.term_display import ANSI
@@ -31,6 +30,8 @@ class CliAgent(Agent):
     Args:
         auto_approve: run tools without asking.
     """
+
+    trace_label = "cli"
 
     def __init__(self, max_iterations: int = 250, auto_approve: bool = False) -> None:
         super().__init__(max_iterations)
@@ -91,11 +92,11 @@ class CliAgent(Agent):
             [{"role": "system", "content": system_context}] if system_context else []
         )
         session_messages = system + self.messages[:] + [user_msg]
+        self.tracer.start_turn(session_messages, self.conversation_id)
+        if self.tracer.enabled() and self.tracer.path:
+            runtime.set("last_trace", self.tracer.path.name)
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
-
-        if runtime.get("trace"):
-            tracer.write_trace(session_messages)
 
         self.messages.append({"role": "user", "content": placeholder_content})
         self.messages.append({"role": "assistant", "content": final_content})

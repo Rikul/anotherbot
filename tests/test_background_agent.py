@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -308,37 +309,24 @@ async def test_process_incoming_sends_error_to_user_on_agent_loop_failure():
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_calls_write_trace_when_enabled(tmp_path):
+async def test_agent_loop_writes_trace_when_enabled(tmp_path):
     agent, _, _ = make_agent()
-    fake_path = tmp_path / "trace_01012026_120000.json"
-    with patch("app.core.runtime._store", {"trace": True, "tracedir": tmp_path, "model": "m"}):
-        with patch("app.infra.tracer.write_trace", return_value=fake_path) as mock_write:
-            await agent.agent_loop("hello")
-    mock_write.assert_called_once()
-    # write_trace now only receives messages (1 positional arg); tracedir/model come from runtime
-    args = mock_write.call_args[0]
-    assert len(args) == 1
-    assert isinstance(args[0], list)
-
-
-@pytest.mark.asyncio
-async def test_agent_loop_does_not_call_write_trace_when_disabled(tmp_path):
-    agent, _, _ = make_agent()
-    with patch("app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}):
-        with patch("app.infra.tracer.write_trace") as mock_write:
-            await agent.agent_loop("hello")
-    mock_write.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_agent_loop_sets_last_trace_on_success(tmp_path):
-    agent, _, _ = make_agent()
-    fake_path = tmp_path / "trace_01012026_120000.json"
     mock_store = {"trace": True, "tracedir": tmp_path, "model": "m"}
     with patch("app.core.runtime._store", mock_store):
-        with patch("app.infra.tracer.write_trace", return_value=fake_path):
-            await agent.agent_loop("hello")
-    assert mock_store.get("last_trace") == fake_path.name
+        await agent.agent_loop("hello")
+    files = list(tmp_path.glob("trace_telegram_c1_*.jsonl"))
+    assert len(files) == 1
+    assert mock_store["last_trace"] == files[0].name
+    events = [json.loads(line)["event"] for line in files[0].read_text().splitlines()]
+    assert events == ["session", "history", "turn_start", "llm_response", "turn_end"]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_does_not_write_trace_when_disabled(tmp_path):
+    agent, _, _ = make_agent()
+    with patch("app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}):
+        await agent.agent_loop("hello")
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.asyncio

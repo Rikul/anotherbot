@@ -94,6 +94,10 @@ The singleton is shut down via `mcp_manager.shutdown()` in a `try/finally` block
 
 On startup, `load_system_context()` (`app/infra/startup.py`) loads `app/core/sys_instructions.md` and prepends it as the system message to `self.messages`.
 
+### Tracing
+
+`--trace` (or `/trace on`) turns on LLM call tracing to `--tracedir` (default `$ANOTHERBOT_HOME/trace`). Each agent owns a `Tracer` (`app/infra/tracer.py`) that keeps one line-buffered JSONL file open per conversation (`trace_<label>_c<conv_id>_<ts>.jsonl`; `helper` agents get one file per run) and rotates it when the conversation or trace dir changes or tracing is toggled. Events are appended as they happen: `session`, `history` (messages the model already had when the file was opened), `turn_start` (system prompt + user message), `llm_response` (serialized assistant message incl. tool calls/reasoning, usage, latency, finish reason), `tool_result` (with duration), `no_choices`, `stopped`, `turn_end` and `error` (recorded by `Agent._loop` before re-raising). Base64 attachment data URLs are redacted. Tracing failures are logged, never raised.
+
 ### Runtime Settings
 
 `app/core/runtime.py` is an in-memory key-value singleton (`set()` / `get()`) for mutable settings like `model`, `base_url`, and `max_iterations`. Values are populated from `config` (env vars) during startup in `main.py` and can be changed at runtime via the `/model` slash command.
