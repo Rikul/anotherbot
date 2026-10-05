@@ -7,20 +7,12 @@ from .core.background_agent import BackgroundAgent
 from .channels.message_queue import MessageQueue
 from .core.scheduled_tasks import ScheduledTasks
 from .core import runtime
+from .channels.channel import Channel, ChannelType
 
-async def start_server() -> None:
-    log.info("Starting server...")
-
+def telegram_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, MessageQueue | None]:
     telegram_channel = None
     telegram_agent = None
-    discord_channel = None
-    discord_agent = None
-
-    # Change CWD to PROJECT_HOME/workspace to ensure all file operations are relative to this directory
-    # This is important for the agent to read/write files in the workspace
-    workspace_dir = config.PROJECT_HOME / "workspace"
-    workspace_dir.mkdir(parents=True, exist_ok=True)
-    os.chdir(workspace_dir)
+    telegram_mq = None
 
     if config.get("telegram"):
         bot_token = config.telegram.get("BOT_TOKEN")
@@ -32,6 +24,14 @@ async def start_server() -> None:
             telegram_channel = TelegramChannel(telegram_mq, bot_token=bot_token, allow_from=config.telegram.get("ALLOW_FROM", []))
             telegram_channel.start()
             telegram_agent = BackgroundAgent(mq=telegram_mq, channel=telegram_channel, max_iterations=runtime.get("max_iterations", 250))
+    
+    return telegram_channel, telegram_agent, telegram_mq
+
+
+def discord_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, MessageQueue | None]:
+    discord_channel = None
+    discord_agent = None
+    discord_mq = None
 
     if config.get("discord"):
         discord_token = config.discord.get("TOKEN")
@@ -44,8 +44,13 @@ async def start_server() -> None:
             discord_channel.start()
             discord_agent = BackgroundAgent(mq=discord_mq, channel=discord_channel, max_iterations=runtime.get("max_iterations", 250))
 
+    return discord_channel, discord_agent, discord_mq
+
+def web_channel_agent() -> tuple[Channel | None, BackgroundAgent | None, MessageQueue | None]:
     web_channel = None
     web_agent = None
+    web_mq = None
+
     if config.get("websocket"):
         from .channels.web_channel import WebChannel
         ws_config = config.get("websocket")
@@ -63,31 +68,36 @@ async def start_server() -> None:
         else:
             web_agent = BackgroundAgent(mq=web_mq, channel=web_channel, max_iterations=runtime.get("max_iterations", 250))
 
-    if not telegram_channel and not discord_channel and not web_channel:
+    return web_channel, web_agent, web_mq
+
+async def start_server() -> None:
+    log.info("Starting server...")
+
+    # Change CWD to PROJECT_HOME/workspace to ensure all file operations are relative to this directory
+    # This is important for the agent to read/write files in the workspace
+    workspace_dir = config.PROJECT_HOME / "workspace"
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    os.chdir(workspace_dir)
+
+    # Keys must be the string values: ScheduledTasks looks channels up by the
+    # task's delivery_channel string (e.g. "telegram"), and ChannelType is a plain Enum.
+    channel_setups = {
+        ChannelType.TELEGRAM.value: telegram_channel_agent(),
+        ChannelType.DISCORD.value: discord_channel_agent(),
+        ChannelType.WEB.value: web_channel_agent(),
+    }
+
+    active_channels = {name: s for name, s in channel_setups.items() if s[0] is not None}
+    if not active_channels:
         log.error("No channels configured, exiting...")
         return
 
-    channels = {}
-    mqs = {}
-    if telegram_channel:
-        channels["telegram"] = telegram_channel
-        mqs["telegram"] = telegram_mq
-    if discord_channel:
-        channels["discord"] = discord_channel
-        mqs["discord"] = discord_mq
-    if web_channel:
-        from .channels.channel import ChannelType
-        channels[ChannelType.WEB.value] = web_channel
-        mqs[ChannelType.WEB.value] = web_mq
-
+    channels = {name: ch for name, (ch, _, _) in active_channels.items()}
+    mqs = {name: mq for name, (_, _, mq) in active_channels.items()}
     tasks = ScheduledTasks(mqs=mqs, channels=channels)
 
     coros = [tasks.run()]
-    if telegram_channel:
-        coros.extend([telegram_channel.run_polling(), telegram_agent.process_incoming(), telegram_mq.process_outgoing()])
-    if discord_channel:
-        coros.extend([discord_channel.run_polling(), discord_agent.process_incoming(), discord_mq.process_outgoing()])
-    if web_channel:
-        coros.extend([web_channel.run_polling(), web_agent.process_incoming(), web_mq.process_outgoing()])
+    for ch, agent, mq in active_channels.values():
+        coros += [ch.run_polling(), agent.process_incoming(), mq.process_outgoing()]
 
     await asyncio.gather(*coros)

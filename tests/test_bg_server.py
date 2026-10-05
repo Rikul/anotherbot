@@ -241,3 +241,36 @@ async def test_exposed_web_with_password_starts(monkeypatch):
     assert mock_gather.called
     assert len(started) == 1
     assert isinstance(started[0]._asgi_app, WebAuthMiddleware)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_tasks_gets_channels_keyed_by_delivery_channel_string():
+    """ScheduledTasks looks up mqs/channels by the task's delivery_channel string
+    ("telegram", "discord", "web"), so the keys must be plain strings, not ChannelType members."""
+    mock_config = _make_config(telegram_token="tg-token", discord_token="discord-token")
+    mq_instances = []
+
+    def make_mq():
+        mq = MagicMock()
+        mq_instances.append(mq)
+        return mq
+
+    with patch("app.bg_server.config", mock_config), \
+         patch("app.bg_server.os.chdir"), \
+         patch("app.channels.telegram.TelegramChannel") as MockTG, \
+         patch("app.channels.discord.DiscordChannel") as MockDC, \
+         patch("app.bg_server.BackgroundAgent"), \
+         patch("app.bg_server.ScheduledTasks") as MockTasks, \
+         patch("app.bg_server.MessageQueue", side_effect=make_mq), \
+         patch("asyncio.gather", AsyncMock()):
+
+        await start_server()
+
+    kwargs = MockTasks.call_args.kwargs
+    assert set(kwargs["mqs"]) == {"telegram", "discord"}
+    assert set(kwargs["channels"]) == {"telegram", "discord"}
+    assert kwargs["channels"].get("telegram") is MockTG.return_value
+    assert kwargs["channels"].get("discord") is MockDC.return_value
+    tg_mq, dc_mq = mq_instances
+    assert kwargs["mqs"].get("telegram") is tg_mq
+    assert kwargs["mqs"].get("discord") is dc_mq
