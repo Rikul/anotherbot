@@ -170,3 +170,18 @@ async def test_loop_records_error(tmp_path):
     last = _events(path)[-1]
     assert last["event"] == "error"
     assert "boom" in last["error"]
+
+
+@pytest.mark.asyncio
+async def test_loop_skips_trace_work_when_disabled(tmp_path):
+    with patch("app.core.agent.Client"):
+        agent = HelperAgent()
+    msg = MagicMock(tool_calls=None, content="done")
+    chat = MagicMock(choices=[MagicMock(message=msg, finish_reason="stop")])
+    agent.client = MagicMock()
+    agent.client.chat.completions.create = AsyncMock(return_value=chat)
+    with patch("app.core.runtime._store", _store(tmp_path, trace=False)), \
+         patch.object(agent.tracer, "record") as mock_record:
+        await agent.run("hi")
+    mock_record.assert_not_called()
+    chat.usage.model_dump.assert_not_called()
