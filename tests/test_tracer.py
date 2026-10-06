@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
@@ -237,3 +238,172 @@ async def test_tool_result_recorded_before_slower_sibling_finishes(tmp_path):
         release.set()
         await task
         agent.tracer.close()
+
+
+# --- event schema ---
+
+_USAGE = {
+    "completion_tokens": 2706,
+    "prompt_tokens": 26019,
+    "total_tokens": 28725,
+    "completion_tokens_details": {
+        "accepted_prediction_tokens": None,
+        "audio_tokens": 0,
+        "reasoning_tokens": 1319,
+        "rejected_prediction_tokens": None,
+        "image_tokens": 0,
+    },
+    "prompt_tokens_details": {
+        "audio_tokens": 0,
+        "cached_tokens": 25344,
+        "cache_write_tokens": 0,
+        "video_tokens": 0,
+    },
+    "cost": 0.001315242,
+    "is_byok": False,
+    "cost_details": {
+        "upstream_inference_cost": 0.001315242,
+        "upstream_inference_prompt_cost": 0.000503442,
+        "upstream_inference_completions_cost": 0.0008118,
+    },
+}
+
+
+def _completion(message: dict, finish_reason: str):
+    """A real openai ChatCompletion, including OpenRouter-style extra fields."""
+    from openai.types.chat import ChatCompletion
+
+    return ChatCompletion.model_validate(
+        {
+            "id": "gen-1",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "deepseek/deepseek-v4.1-flash",
+            "choices": [
+                {"index": 0, "finish_reason": finish_reason, "message": message}
+            ],
+            "usage": _USAGE,
+        }
+    )
+
+
+_TOOL_CALLS = [
+    {
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "bash", "arguments": '{"command": "git status"}'},
+    },
+    {
+        "id": "call_2",
+        "type": "function",
+        "function": {"name": "read_file", "arguments": '{"path": "README.md"}'},
+    },
+]
+
+
+@pytest.mark.asyncio
+async def test_trace_event_schema(tmp_path):
+    with patch("app.core.agent.Client"):
+        agent = HelperAgent()
+    agent.client = MagicMock()
+    agent.client.chat.completions.create = AsyncMock(
+        side_effect=[
+            _completion(
+                {
+                    "role": "assistant",
+                    "content": "Checking.",
+                    "reasoning": "Need the branch state.",
+                    "tool_calls": _TOOL_CALLS,
+                },
+                "tool_calls",
+            ),
+            _completion(
+                {
+                    "role": "assistant",
+                    "content": "Review complete.",
+                    "reasoning": "Now I have a full picture.",
+                },
+                "stop",
+            ),
+        ]
+    )
+
+    async def fake_run_tool(tool_name, tool_args):
+        return f"{tool_name} output"
+
+    store = _store(tmp_path, model="deepseek/deepseek-v4.1-flash")
+    with patch("app.core.runtime._store", store), \
+         patch("app.core.tool_calls.run_tool", side_effect=fake_run_tool):
+        assert await agent.run("review the branch") == "Review complete."
+
+    (path,) = tmp_path.glob("trace_helper_*.jsonl")
+    events = _events(path)  # every line is valid JSON
+
+    # Every event: an ISO timestamp and an event name.
+    for e in events:
+        assert isinstance(e["event"], str)
+        datetime.fromisoformat(e["ts"])
+    assert [e["event"] for e in events] == [
+        "session", "history", "turn_start",
+        "llm_response", "tool_result", "tool_result", "llm_response",
+        "turn_end",
+    ]
+
+    # llm_response
+    responses = [e for e in events if e["event"] == "llm_response"]
+    for e in responses:
+        assert set(e) == {
+            "ts", "event", "iteration", "model", "duration_s",
+            "finish_reason", "usage", "message",
+        }
+        assert e["model"] == "deepseek/deepseek-v4.1-flash"
+        assert isinstance(e["duration_s"], float) and e["duration_s"] >= 0
+        usage = e["usage"]
+        for key in ("completion_tokens", "prompt_tokens", "total_tokens"):
+            assert usage[key] == _USAGE[key]
+        # Provider-specific usage fields survive serialization.
+        assert usage["cost"] == _USAGE["cost"]
+        assert usage["is_byok"] is False
+        assert usage["cost_details"] == _USAGE["cost_details"]
+        assert usage["completion_tokens_details"]["reasoning_tokens"] == 1319
+        assert usage["completion_tokens_details"]["image_tokens"] == 0
+        assert usage["prompt_tokens_details"]["cached_tokens"] == 25344
+        assert usage["prompt_tokens_details"]["cache_write_tokens"] == 0
+        assert e["message"]["role"] == "assistant"
+
+    first, second = responses
+    assert (first["iteration"], first["finish_reason"]) == (1, "tool_calls")
+    assert (second["iteration"], second["finish_reason"]) == (2, "stop")
+    assert first["message"]["content"] == "Checking."
+    assert first["message"]["reasoning_content"] == "Need the branch state."
+    assert [
+        (tc["id"], tc["type"], tc["function"]["name"], tc["function"]["arguments"])
+        for tc in first["message"]["tool_calls"]
+    ] == [
+        (tc["id"], tc["type"], tc["function"]["name"], tc["function"]["arguments"])
+        for tc in _TOOL_CALLS
+    ]
+    assert second["message"]["content"] == "Review complete."
+    assert second["message"]["reasoning_content"] == "Now I have a full picture."
+    assert "tool_calls" not in second["message"]
+
+    # tool_result
+    results = sorted(
+        (e for e in events if e["event"] == "tool_result"),
+        key=lambda e: e["tool_call_id"],
+    )
+    for e in results:
+        assert set(e) == {
+            "ts", "event", "iteration", "tool_call_id", "name", "duration_s", "content",
+        }
+        assert e["iteration"] == 1
+        assert isinstance(e["duration_s"], float) and e["duration_s"] >= 0
+    assert [(e["tool_call_id"], e["name"], e["content"]) for e in results] == [
+        ("call_1", "bash", "bash output"),
+        ("call_2", "read_file", "read_file output"),
+    ]
+
+    # turn_end
+    end = events[-1]
+    assert set(end) == {"ts", "event", "iterations", "final"}
+    assert (end["iterations"], end["final"]) == (2, "Review complete.")
