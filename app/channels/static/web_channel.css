@@ -223,6 +223,27 @@ body {
     padding: 4px 8px;
     transition: border-color .15s, color .15s;
 }
+#render-toggle {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+#render-toggle button {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 0.75rem;
+    padding: 4px 9px;
+    line-height: 1.4;
+    transition: background .15s, color .15s;
+}
+#render-toggle button + button { border-left: 1px solid var(--border); }
+#render-toggle button:hover { color: var(--accent); }
+/* darker than --accent so 12px white text clears WCAG AA (~6.3:1) in both themes */
+#render-toggle button.active { background: #4f46e5; color: #fff; }
 #theme-btn:hover { border-color: var(--accent); color: var(--accent); }
 #logout-link {
     font-size: 0.8rem;
@@ -290,6 +311,28 @@ body {
 .bubble code { background: var(--surface2); border-radius: 4px; padding: 1px 5px; font-size: .85em; font-family: 'Fira Code','Cascadia Code',monospace; }
 .bubble pre  { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin-top: 6px; }
 .bubble pre code { background: none; padding: 0; }
+
+/* rendered markdown: block elements handle spacing, so drop pre-wrap */
+.bubble.md { white-space: normal; }
+.bubble.md > :first-child { margin-top: 0; }
+.bubble.md > :last-child  { margin-bottom: 0; }
+.bubble.md p, .bubble.md ul, .bubble.md ol, .bubble.md pre,
+.bubble.md blockquote, .bubble.md table { margin: 0 0 .7em; }
+.bubble.md h1, .bubble.md h2, .bubble.md h3,
+.bubble.md h4, .bubble.md h5, .bubble.md h6 { margin: .9em 0 .4em; line-height: 1.3; font-weight: 600; }
+.bubble.md h1 { font-size: 1.3em; }
+.bubble.md h2 { font-size: 1.18em; }
+.bubble.md h3 { font-size: 1.06em; }
+.bubble.md h4, .bubble.md h5, .bubble.md h6 { font-size: 1em; }
+.bubble.md ul, .bubble.md ol { padding-left: 1.4em; }
+.bubble.md li + li { margin-top: .2em; }
+.bubble.md pre { white-space: pre; }
+.bubble.md a { color: var(--accent); }
+.bubble.md blockquote { border-left: 3px solid var(--border); padding-left: .8em; color: var(--text-muted); }
+.bubble.md hr { border: none; border-top: 1px solid var(--border); margin: .9em 0; }
+.bubble.md table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; }
+.bubble.md th, .bubble.md td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
+.bubble.md th { background: var(--surface2); font-weight: 600; }
 
 /* thinking dots — sits between scroll area and input, always above the input box */
 #thinking { display:none; align-self:flex-start; gap:10px; padding: 4px 20px 8px; flex-shrink: 0; }
@@ -446,4 +489,7 @@ body {
     }
     #sidebar.collapsed { box-shadow: none; }
     #input-area { padding-left: 12px; padding-right: 12px; }
+    /* make room for the Markdown/Raw switch: the status dot alone is enough */
+    #header-right { gap: 8px; }
+    #status-text { display: none; }
 }

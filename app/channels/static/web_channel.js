@@ -36,6 +36,68 @@
         applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
     });
 
+    // ---- reply rendering: markdown (default) or raw text ----
+    const renderToggle = document.getElementById('render-toggle');
+    let renderMode = localStorage.getItem('ab-render') === 'raw' ? 'raw' : 'md';
+    function applyRenderMode(mode) {
+        renderMode = mode;
+        localStorage.setItem('ab-render', mode);
+        renderToggle.querySelectorAll('button').forEach(b => {
+            const on = b.dataset.mode === mode;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on);
+        });
+        messagesEl.querySelectorAll('.msg-row.ai .bubble').forEach(renderAiBubble);
+    }
+    renderToggle.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-mode]');
+        if (btn && btn.dataset.mode !== renderMode) applyRenderMode(btn.dataset.mode);
+    });
+
+    const markdownReady = !!(window.marked && window.DOMPurify);
+    // Text-only allowlist: nothing that fetches on render (img, media, iframe,
+    // style/srcset/background attrs). An auto-loaded URL would leak the viewer's
+    // IP to remote hosts, or hit same-origin state-changing GETs like /logout.
+    const MD_SANITIZE = {
+        ALLOWED_TAGS: ['p', 'br', 'hr', 'strong', 'em', 'del', 's', 'code', 'pre', 'blockquote',
+                       'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a',
+                       'table', 'thead', 'tbody', 'tr', 'th', 'td'],
+        ALLOWED_ATTR: ['href', 'title', 'start', 'align'],
+    };
+    if (markdownReady) {
+        // images become plain links: the URL is only fetched if the user clicks it
+        marked.use({ renderer: {
+            image({ href, title, text }) {
+                const t = title ? ` title="${escapeAttr(title)}"` : '';
+                return `<a href="${escapeAttr(href)}"${t}>${escapeHtml(text || href)}</a>`;
+            },
+        } });
+        // links in replies open in a new tab instead of replacing the chat
+        DOMPurify.addHook('afterSanitizeAttributes', node => {
+            if (node.tagName === 'A' && node.hasAttribute('href')) {
+                node.setAttribute('target', '_blank');
+                node.setAttribute('rel', 'noopener noreferrer');
+            }
+        });
+    }
+    function renderMarkdown(text) {
+        return DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }), MD_SANITIZE);
+    }
+    // The original text lives on the bubble so switching modes re-renders it.
+    function renderAiBubble(bubble) {
+        const raw = bubble.dataset.raw ?? '';
+        if (renderMode === 'raw') {
+            bubble.classList.remove('md');
+            bubble.innerHTML = escapeHtml(raw);
+            return;
+        }
+        // Without the vendored libs fall back to the old pre-wrap formatter;
+        // the .md layout class would collapse its newlines.
+        bubble.classList.toggle('md', markdownReady);
+        bubble.innerHTML = markdownReady ? renderMarkdown(raw) : formatMessage(raw);
+    }
+    applyRenderMode(renderMode);
+
     // ---- sidebar toggle ----
     // On narrow screens the sidebar overlays the chat (see CSS), so it starts
     // closed, closes after picking a conversation, and its state isn't persisted.
@@ -224,6 +286,9 @@
     function escapeHtml(t) {
         return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
+    function escapeAttr(t) {
+        return escapeHtml(t).replace(/"/g, '&quot;');
+    }
     function formatMessage(text) {
         text = escapeHtml(text);
         text = text.replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
@@ -238,7 +303,12 @@
         row.className = `msg-row ${role}`;
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.innerHTML = role === 'system' ? escapeHtml(content) : formatMessage(content);
+        if (role === 'ai') {
+            bubble.dataset.raw = content;
+            renderAiBubble(bubble);
+        } else {
+            bubble.innerHTML = role === 'system' ? escapeHtml(content) : formatMessage(content);
+        }
         row.appendChild(bubble);
         messagesEl.appendChild(row);
         scrollBottom();
