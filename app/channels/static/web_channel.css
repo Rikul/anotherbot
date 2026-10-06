@@ -46,7 +46,10 @@ body {
     display: flex;
     flex-direction: column;
     width: 100%;
-    height: 100vh;
+    /* 100vh on mobile is the viewport with browser toolbars hidden, which
+       pushes the input bar under them; dvh tracks the visible viewport. */
+    height: 100%;
+    height: 100dvh;
 }
 
 #body-row {
@@ -298,6 +301,8 @@ body {
 /* ---- input area ---- */
 #input-area {
     padding: 14px 20px;
+    /* keep clear of the iOS home indicator (needs viewport-fit=cover) */
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
     border-top: 1px solid var(--border);
     background: var(--surface);
     display: flex;
@@ -419,3 +424,19 @@ body {
     transition: color .12s;
 }
 .attach-remove:hover { color: #ef4444; }
+
+/* iOS Safari zooms into inputs with font-size < 16px on focus, shifting the layout */
+@media (max-width: 768px) {
+    #msg-input { font-size: 16px; }
+    /* sidebar overlays the chat instead of squeezing it */
+    #body-row { position: relative; }
+    #sidebar {
+        position: absolute;
+        top: 0; bottom: 0; left: 0;
+        z-index: 20;
+        max-width: 85vw;
+        box-shadow: 4px 0 16px rgba(0, 0, 0, .25);
+    }
+    #sidebar.collapsed { box-shadow: none; }
+    #input-area { padding-left: 12px; padding-right: 12px; }
+}

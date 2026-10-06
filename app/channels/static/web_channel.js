@@ -37,13 +37,19 @@
     });
 
     // ---- sidebar toggle ----
-    const sidebarOpen = localStorage.getItem('ab-sidebar') !== 'closed';
+    // On narrow screens the sidebar overlays the chat (see CSS), so it starts
+    // closed, closes after picking a conversation, and its state isn't persisted.
+    const narrowScreen = window.matchMedia('(max-width: 768px)');
+    const sidebarOpen = !narrowScreen.matches && localStorage.getItem('ab-sidebar') !== 'closed';
     if (!sidebarOpen) sidebarEl.classList.add('collapsed');
     toggleBtn.addEventListener('click', () => {
         const collapsed = sidebarEl.classList.toggle('collapsed');
-        localStorage.setItem('ab-sidebar', collapsed ? 'closed' : 'open');
+        if (!narrowScreen.matches) localStorage.setItem('ab-sidebar', collapsed ? 'closed' : 'open');
         if (!collapsed) loadConversations(false);
     });
+    function closeSidebarOnNarrow() {
+        if (narrowScreen.matches) sidebarEl.classList.add('collapsed');
+    }
 
     // ---- auth ----
     // With WEB_PASSWORD set, an expired/missing session makes the API return 401
@@ -119,12 +125,14 @@
         });
         clearMessages();
         loadMessages(id);
+        closeSidebarOnNarrow();
     }
 
     newConvBtn.addEventListener('click', () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         ws.send(JSON.stringify({ type: 'message', content: '/new' }));
         clearMessages();
+        closeSidebarOnNarrow();
         // list refresh is driven by the ws.onmessage handler when server responds with "created"
     });
 
