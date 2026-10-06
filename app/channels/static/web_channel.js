@@ -55,7 +55,23 @@
     });
 
     const markdownReady = !!(window.marked && window.DOMPurify);
+    // Text-only allowlist: nothing that fetches on render (img, media, iframe,
+    // style/srcset/background attrs). An auto-loaded URL would leak the viewer's
+    // IP to remote hosts, or hit same-origin state-changing GETs like /logout.
+    const MD_SANITIZE = {
+        ALLOWED_TAGS: ['p', 'br', 'hr', 'strong', 'em', 'del', 's', 'code', 'pre', 'blockquote',
+                       'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a',
+                       'table', 'thead', 'tbody', 'tr', 'th', 'td'],
+        ALLOWED_ATTR: ['href', 'title', 'start', 'align'],
+    };
     if (markdownReady) {
+        // images become plain links: the URL is only fetched if the user clicks it
+        marked.use({ renderer: {
+            image({ href, title, text }) {
+                const t = title ? ` title="${escapeAttr(title)}"` : '';
+                return `<a href="${escapeAttr(href)}"${t}>${escapeHtml(text || href)}</a>`;
+            },
+        } });
         // links in replies open in a new tab instead of replacing the chat
         DOMPurify.addHook('afterSanitizeAttributes', node => {
             if (node.tagName === 'A' && node.hasAttribute('href')) {
@@ -65,15 +81,20 @@
         });
     }
     function renderMarkdown(text) {
-        if (!markdownReady) return formatMessage(text);
-        return DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }));
+        return DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }), MD_SANITIZE);
     }
     // The original text lives on the bubble so switching modes re-renders it.
     function renderAiBubble(bubble) {
         const raw = bubble.dataset.raw ?? '';
-        const md = renderMode === 'md';
-        bubble.classList.toggle('md', md);
-        bubble.innerHTML = md ? renderMarkdown(raw) : escapeHtml(raw);
+        if (renderMode === 'raw') {
+            bubble.classList.remove('md');
+            bubble.innerHTML = escapeHtml(raw);
+            return;
+        }
+        // Without the vendored libs fall back to the old pre-wrap formatter;
+        // the .md layout class would collapse its newlines.
+        bubble.classList.toggle('md', markdownReady);
+        bubble.innerHTML = markdownReady ? renderMarkdown(raw) : formatMessage(raw);
     }
     applyRenderMode(renderMode);
 
@@ -264,6 +285,9 @@
     // ---- rendering ----
     function escapeHtml(t) {
         return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    function escapeAttr(t) {
+        return escapeHtml(t).replace(/"/g, '&quot;');
     }
     function formatMessage(text) {
         text = escapeHtml(text);

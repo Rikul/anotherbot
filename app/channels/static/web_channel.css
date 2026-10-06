@@ -242,7 +242,8 @@ body {
 }
 #render-toggle button + button { border-left: 1px solid var(--border); }
 #render-toggle button:hover { color: var(--accent); }
-#render-toggle button.active { background: var(--accent); color: #fff; }
+/* darker than --accent so 12px white text clears WCAG AA (~6.3:1) in both themes */
+#render-toggle button.active { background: #4f46e5; color: #fff; }
 #theme-btn:hover { border-color: var(--accent); color: var(--accent); }
 #logout-link {
     font-size: 0.8rem;
@@ -332,7 +333,6 @@ body {
 .bubble.md table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; }
 .bubble.md th, .bubble.md td { border: 1px solid var(--border); padding: 4px 10px; text-align: left; }
 .bubble.md th { background: var(--surface2); font-weight: 600; }
-.bubble.md img { max-width: 100%; }
 
 /* thinking dots — sits between scroll area and input, always above the input box */
 #thinking { display:none; align-self:flex-start; gap:10px; padding: 4px 20px 8px; flex-shrink: 0; }
