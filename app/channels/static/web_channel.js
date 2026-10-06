@@ -36,6 +36,47 @@
         applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
     });
 
+    // ---- reply rendering: markdown (default) or raw text ----
+    const renderToggle = document.getElementById('render-toggle');
+    let renderMode = localStorage.getItem('ab-render') === 'raw' ? 'raw' : 'md';
+    function applyRenderMode(mode) {
+        renderMode = mode;
+        localStorage.setItem('ab-render', mode);
+        renderToggle.querySelectorAll('button').forEach(b => {
+            const on = b.dataset.mode === mode;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-pressed', on);
+        });
+        messagesEl.querySelectorAll('.msg-row.ai .bubble').forEach(renderAiBubble);
+    }
+    renderToggle.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-mode]');
+        if (btn && btn.dataset.mode !== renderMode) applyRenderMode(btn.dataset.mode);
+    });
+
+    const markdownReady = !!(window.marked && window.DOMPurify);
+    if (markdownReady) {
+        // links in replies open in a new tab instead of replacing the chat
+        DOMPurify.addHook('afterSanitizeAttributes', node => {
+            if (node.tagName === 'A' && node.hasAttribute('href')) {
+                node.setAttribute('target', '_blank');
+                node.setAttribute('rel', 'noopener noreferrer');
+            }
+        });
+    }
+    function renderMarkdown(text) {
+        if (!markdownReady) return formatMessage(text);
+        return DOMPurify.sanitize(marked.parse(text, { gfm: true, breaks: true }));
+    }
+    // The original text lives on the bubble so switching modes re-renders it.
+    function renderAiBubble(bubble) {
+        const raw = bubble.dataset.raw ?? '';
+        const md = renderMode === 'md';
+        bubble.classList.toggle('md', md);
+        bubble.innerHTML = md ? renderMarkdown(raw) : escapeHtml(raw);
+    }
+    applyRenderMode(renderMode);
+
     // ---- sidebar toggle ----
     // On narrow screens the sidebar overlays the chat (see CSS), so it starts
     // closed, closes after picking a conversation, and its state isn't persisted.
@@ -238,7 +279,12 @@
         row.className = `msg-row ${role}`;
         const bubble = document.createElement('div');
         bubble.className = 'bubble';
-        bubble.innerHTML = role === 'system' ? escapeHtml(content) : formatMessage(content);
+        if (role === 'ai') {
+            bubble.dataset.raw = content;
+            renderAiBubble(bubble);
+        } else {
+            bubble.innerHTML = role === 'system' ? escapeHtml(content) : formatMessage(content);
+        }
         row.appendChild(bubble);
         messagesEl.appendChild(row);
         scrollBottom();

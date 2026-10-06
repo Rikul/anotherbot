@@ -64,7 +64,7 @@ log = logging.getLogger(__name__)
 
 # Bump when web_channel.css / web_channel.js change, so browsers (Edge caches
 # static assets aggressively) fetch the new copy instead of a stale one.
-_ASSET_VERSION = "7"
+_ASSET_VERSION = "8"
 
 # Paperclip icon for the attach button (inline so it inherits theme colors).
 _PAPERCLIP_SVG = (
@@ -107,6 +107,13 @@ def _build_page(auth_enabled: bool = False) -> Html:
                             Span(id="status-dot"),
                             Span("Connecting…", id="status-text"),
                             id="status",
+                        ),
+                        Div(
+                            Button("Markdown", type="button", data_mode="md"),
+                            Button("Raw", type="button", data_mode="raw"),
+                            id="render-toggle",
+                            role="group",
+                            title="How to show bot replies",
                         ),
                         Button("☾", id="theme-btn", title="Toggle light/dark"),
                         *(
@@ -209,6 +216,9 @@ def _build_page(auth_enabled: bool = False) -> Html:
                 ),
                 id="app",
             ),
+            # Vendored (no CDN) so the UI works offline: markdown parser + HTML sanitizer.
+            Script(src="/static/vendor/marked.min.js?v=15.0.12"),
+            Script(src="/static/vendor/purify.min.js?v=3.2.6"),
             Script(src=f"/static/web_channel.js?v={_ASSET_VERSION}"),
         ),
         lang="en",
