@@ -7,6 +7,7 @@ import mimetypes
 import os
 import platform
 import re
+import time
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +15,7 @@ from pathlib import Path
 from .. import config
 from .client import Client
 from ..infra.app_logging import log
+from ..infra.tracer import Tracer
 from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
@@ -74,10 +76,13 @@ class Agent(ABC):
     agent overrides what).
     """
 
+    trace_label = "agent"
+
     def __init__(self, max_iterations: int = 250) -> None:
         self.client = Client().get_client()
         self.messages: list[dict] = []
         self.max_iterations = max_iterations
+        self.tracer = Tracer(self.trace_label)
 
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
@@ -257,20 +262,79 @@ class Agent(ABC):
 
     # --- shared loop ---
 
+    @staticmethod
+    def _usage(chat) -> dict | None:
+        usage = getattr(chat, "usage", None)
+        return usage.model_dump() if hasattr(usage, "model_dump") else usage
+
+    async def _traced_tool_call(self, tool_call, iteration: int) -> str:
+        start = time.perf_counter()
+        result = await self.handle_tool_call(tool_call)
+        # Record as soon as this call finishes, not after the whole batch, so a
+        # hung sibling tool doesn't hold back results that already completed.
+        if self.tracer.enabled():
+            self.tracer.record(
+                "tool_result",
+                iteration=iteration,
+                tool_call_id=tool_call.id,
+                name=tool_call.function.name,
+                duration_s=round(time.perf_counter() - start, 3),
+                content=result,
+            )
+        return result
+
+    async def _run_tool_calls(
+        self, tool_calls: list, messages: list, iteration: int
+    ) -> None:
+        """Run ``tool_calls`` in parallel and append (and trace) their results."""
+        results = await asyncio.gather(
+            *[self._traced_tool_call(tc, iteration) for tc in tool_calls]
+        )
+        for tc, result in zip(tool_calls, results):
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "name": tc.function.name,
+                    "content": result,
+                }
+            )
+            log.info("%s...", result[:250])
+
     async def _loop(self, messages: list, tool_specs: list) -> str:
+        try:
+            return await self._run_loop(messages, tool_specs)
+        except BaseException as e:
+            if self.tracer.enabled():
+                self.tracer.record("error", error=repr(e))
+            raise
+
+    async def _run_loop(self, messages: list, tool_specs: list) -> str:
         iteration = 0
         assistant_message = None
 
         while iteration < self.max_iterations:
             iteration += 1
             log.info("chat.completions.create...")
+            model = runtime.get("model", "deepseek/deepseek-v4.1-flash")
+            start = time.perf_counter()
             chat = await self.client.chat.completions.create(
-                model=runtime.get("model", "deepseek/deepseek-v4.1-flash"),
+                model=model,
                 messages=messages,
                 tools=tool_specs,
             )
+            duration = time.perf_counter() - start
+
+            tracing = self.tracer.enabled()
 
             if not chat.choices:
+                if tracing:
+                    self.tracer.record(
+                        "no_choices",
+                        iteration=iteration,
+                        model=model,
+                        duration_s=round(duration, 3),
+                    )
                 await self._on_no_choices()
                 continue
 
@@ -280,24 +344,25 @@ class Agent(ABC):
             if not isinstance(finish_reason, str):
                 finish_reason = None
 
-            if assistant_message.tool_calls is not None:
-                messages.append(self._serialize_assistant_msg(assistant_message))
-                await self._on_thinking(assistant_message.content)
-                results = await asyncio.gather(
-                    *[self.handle_tool_call(tc) for tc in assistant_message.tool_calls]
+            serialized = self._serialize_assistant_msg(assistant_message)
+            messages.append(serialized)
+            if tracing:
+                self.tracer.record(
+                    "llm_response",
+                    iteration=iteration,
+                    model=model,
+                    duration_s=round(duration, 3),
+                    finish_reason=finish_reason,
+                    usage=self._usage(chat),
+                    message=serialized,
                 )
-                for tc, result in zip(assistant_message.tool_calls, results):
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "name": tc.function.name,
-                            "content": result,
-                        }
-                    )
-                    log.info("%s...", result[:250])
+
+            if assistant_message.tool_calls is not None:
+                await self._on_thinking(assistant_message.content)
+                await self._run_tool_calls(
+                    assistant_message.tool_calls, messages, iteration
+                )
             else:
-                messages.append(self._serialize_assistant_msg(assistant_message))
                 await self._on_response(assistant_message.content)
                 if (
                     finish_reason not in ("stop", "length")
@@ -310,13 +375,18 @@ class Agent(ABC):
                 break
 
             if self._should_stop():
+                if tracing:
+                    self.tracer.record("stopped", iteration=iteration)
                 break
 
-        return (
+        final = (
             assistant_message.content.strip()
             if assistant_message and assistant_message.content
             else ""
         )
+        if self.tracer.enabled():
+            self.tracer.record("turn_end", iterations=iteration, final=final)
+        return final
 
     @abstractmethod
     async def agent_loop(self, message: str, metadata: dict = None) -> str:

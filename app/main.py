@@ -16,6 +16,7 @@ from .bg_server import start_server
 from .core import runtime
 from .core import mcp_manager as mcp
 from .core.mcp_manager import initialize_mcp
+from .infra import tracer
 
 
 def parse_args():
@@ -112,6 +113,7 @@ async def main():
         else:
             raise ValueError(f"Unknown command: {args.command}")
     finally:
+        tracer.close_all()
         await mcp.mcp_manager.shutdown()
 
 

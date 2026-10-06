@@ -1,4 +1,5 @@
 import asyncio
+import json
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -219,26 +220,22 @@ async def test_agent_loop_breaks_on_length_finish_reason():
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_calls_write_trace_when_enabled(tmp_path):
+async def test_agent_loop_writes_trace_when_enabled(tmp_path):
     agent, _ = make_agent()
-    fake_path = tmp_path / "trace_01012026_120000.json"
     with patch("app.core.runtime._store", {"trace": True, "tracedir": tmp_path, "model": "m"}):
-        with patch("app.infra.tracer.write_trace", return_value=fake_path) as mock_write:
-            await agent.agent_loop("hello")
-    mock_write.assert_called_once()
-    # write_trace now only receives messages (1 positional arg); tracedir/model come from runtime
-    args = mock_write.call_args[0]
-    assert len(args) == 1
-    assert isinstance(args[0], list)
+        await agent.agent_loop("hello")
+    files = list(tmp_path.glob("trace_cli_c1_*.jsonl"))
+    assert len(files) == 1
+    events = [json.loads(line)["event"] for line in files[0].read_text().splitlines()]
+    assert events == ["session", "history", "turn_start", "llm_response", "turn_end"]
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_does_not_call_write_trace_when_disabled(tmp_path):
+async def test_agent_loop_does_not_write_trace_when_disabled(tmp_path):
     agent, _ = make_agent()
     with patch("app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}):
-        with patch("app.infra.tracer.write_trace") as mock_write:
-            await agent.agent_loop("hello")
-    mock_write.assert_not_called()
+        await agent.agent_loop("hello")
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.asyncio

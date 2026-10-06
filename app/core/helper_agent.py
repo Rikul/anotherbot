@@ -13,6 +13,8 @@ class HelperAgent(Agent):
     mutation tools, no MCP tools) to prevent recursion.
     """
 
+    trace_label = "helper"
+
     def __init__(self, system_prompt: str = None, max_iterations: int = 50) -> None:
         super().__init__(max_iterations)
         if system_prompt:
@@ -28,4 +30,8 @@ class HelperAgent(Agent):
         from .tool_calls import helper_tool_specs  # pylint: disable=import-outside-toplevel
 
         self.messages.append(self._build_user_message(message, metadata))
-        return await self._loop(self.messages, helper_tool_specs)
+        self.tracer.start_turn(self.messages)
+        try:
+            return await self._loop(self.messages, helper_tool_specs)
+        finally:
+            self.tracer.close()

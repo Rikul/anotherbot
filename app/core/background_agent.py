@@ -14,7 +14,6 @@ from ..infra.message_history import MessageHistory
 from ..infra.conversations import ConversationStore
 from . import runtime
 from ..channels.commands import BotCommand, build_command_registry
-from ..infra import tracer
 from ..tools.todo import init_task_todos
 
 _MAX_EMPTY_RETRIES = 5
@@ -44,6 +43,7 @@ class BackgroundAgent(Agent):
             raise ValueError("channel must be specified for BackgroundAgent")
 
         self.channel_str = channel.channel_type.value
+        self.tracer.label = self.channel_str
         self.store = ConversationStore()
         self.history = MessageHistory(channel_type=self.channel_str)
 
@@ -188,13 +188,11 @@ class BackgroundAgent(Agent):
             [{"role": "system", "content": system_context}] if system_context else []
         )
         session_messages = system + self.messages[:] + [user_msg]
+        self.tracer.start_turn(session_messages, self.conversation_id)
+        if self.tracer.enabled() and self.tracer.path:
+            runtime.set("last_trace", self.tracer.path.name)
 
         final_content = await self._loop(session_messages, get_all_tool_specs())
-
-        if runtime.get("trace"):
-            path = tracer.write_trace(session_messages)
-            if path:
-                runtime.set("last_trace", path.name)
 
         self.channel.clear_stopped()
 

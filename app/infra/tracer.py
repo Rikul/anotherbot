@@ -1,42 +1,192 @@
-"""Optional LLM call tracing: dumps the messages sent to the model as JSON."""
+"""Optional LLM call tracing: appends the full agent trajectory to JSONL files.
+
+Each agent owns a :class:`Tracer`. While the ``trace`` runtime setting is on,
+the agent records one JSON object per line as the turn runs: the turn's input
+(system prompt + user message), every LLM response (with tool calls, reasoning,
+usage, latency and finish reason), every tool result, and the turn's end or
+error. Events are written as they happen, so a turn that crashes or is stopped
+still leaves a trace.
+
+A trace file is opened by :meth:`Tracer.start_turn` and kept open
+(line-buffered) for an agent's conversation; it is rotated when the
+conversation or trace directory changes, or after tracing is turned off and on
+again (:func:`set_tracing` closes every open trace file when it is turned off).
+A new file starts with a ``session`` event followed by a ``history`` event (the
+conversation the model already had), so each file is a complete,
+self-contained trajectory. Events from a turn that started while tracing was
+off are dropped rather than written to a file without that context.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
+import weakref
 from datetime import datetime
 from pathlib import Path
+from typing import IO
+
 from ..core import runtime
 
 log = logging.getLogger(__name__)
 
+_DATA_URL = re.compile(r"^data:([^;,]*);base64,")
 
-def write_trace(messages: list) -> Path | None:
-    """Write ``messages`` to a timestamped JSON file in the trace directory.
+# Tracers with an open file, so they can be closed when tracing is turned off
+# or the process shuts down.
+_open_tracers: weakref.WeakSet[Tracer] = weakref.WeakSet()
 
-    The directory and model name come from the ``tracedir`` and ``model``
-    runtime settings. Failures are logged, never raised.
 
-    Returns:
-        The path of the trace file, or ``None`` if writing failed.
+def set_tracing(enabled: bool) -> None:
+    """Turn tracing on or off; turning it off closes every open trace file."""
+    runtime.set("trace", enabled)
+    if not enabled:
+        close_all()
+
+
+def close_all() -> None:
+    """Close every open trace file (on shutdown or when tracing is turned off)."""
+    for tracer in list(_open_tracers):
+        tracer.close()
+
+
+def _redact(obj):
+    """Replace base64 ``data:`` URLs (attachments) with a short placeholder."""
+    if isinstance(obj, str):
+        m = _DATA_URL.match(obj)
+        if m:
+            return f"data:{m.group(1)};base64,<{len(obj) - m.end()} chars omitted>"
+        return obj
+    if isinstance(obj, dict):
+        return {k: _redact(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_redact(v) for v in obj]
+    return obj
+
+
+class Tracer:
+    """Writes trace events for one agent to a JSONL file in ``tracedir``.
+
+    Args:
+        label: short name used in trace file names (e.g. the channel).
+
+    All methods are no-ops while tracing is off. Failures are logged once per
+    file and never raised: tracing must never break a turn.
     """
 
-    tracedir: Path = runtime.get("tracedir")
-    model: str = runtime.get("model", "unknown")
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.path: Path | None = None
+        self._file: IO[str] | None = None
+        self._dir: Path | None = None
+        self._conversation_id = None
+        self._failed = False
 
-    try:
-        tracedir.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now().strftime("%m%d%Y_%H%M%S")
-        path = tracedir / f"trace_{ts}.json"
-        data = {
-            "timestamp": datetime.now().isoformat(),
-            "model": model,
-            "messages": messages,
-        }
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, default=str)
-        log.info("Trace written to %s", path)
-        return path
-    except Exception as e:  # pylint: disable=broad-exception-caught  # tracing must never break a turn
-        log.warning("Failed to write trace: %s", e)
-        return None
+    @staticmethod
+    def enabled() -> bool:
+        """Whether the ``trace`` runtime setting is on."""
+        return bool(runtime.get("trace"))
+
+    def start_turn(self, messages: list, conversation_id=None) -> None:
+        """Record the start of a turn.
+
+        Args:
+            messages: the full message list sent to the model for this turn;
+                an optional leading system message, the prior history, and the
+                new user message last.
+            conversation_id: the active conversation, if any. A change rotates
+                the trace file.
+        """
+        if not self.enabled():
+            self.close()
+            return
+        if self._file is not None and (
+            conversation_id != self._conversation_id
+            or runtime.get("tracedir") != self._dir
+        ):
+            self.close()
+        self._conversation_id = conversation_id
+
+        system = (
+            messages[0] if messages and messages[0].get("role") == "system" else None
+        )
+        start = 1 if system else 0
+        history, user = messages[start:-1], messages[-1] if messages else None
+
+        if self._file is None:
+            self._failed = False  # retry a failed open once per turn
+            if not self._open():
+                return
+            self._write("history", messages=history)
+        self._write(
+            "turn_start",
+            model=runtime.get("model", "unknown"),
+            system=system["content"] if system else None,
+            message=user,
+        )
+
+    def record(self, event: str, **data) -> None:
+        """Append one ``event`` with ``data`` to the current turn's trace.
+
+        A no-op unless :meth:`start_turn` opened a file, so a turn that began
+        while tracing was off never writes a file without its context.
+        """
+        if self._file is None or not self.enabled():
+            return
+        self._write(event, **data)
+
+    def close(self) -> None:
+        """Close the current trace file; the next event starts a new one."""
+        if self._file is not None:
+            try:
+                self._file.close()
+            except OSError as e:
+                log.warning("Failed to close trace %s: %s", self.path, e)
+            _open_tracers.discard(self)
+        self._file = None
+        self.path = None
+        self._failed = False
+
+    def _open(self) -> bool:
+        if self._failed:
+            return False
+        tracedir: Path = runtime.get("tracedir")
+        try:
+            tracedir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            conv = (
+                f"_c{self._conversation_id}"
+                if self._conversation_id is not None
+                else ""
+            )
+            path = tracedir / f"trace_{self.label}{conv}_{ts}.jsonl"
+            # Line-buffered: each event is flushed as it is written, without
+            # reopening the file per write.
+            self._file = open(path, "a", encoding="utf-8", buffering=1)  # pylint: disable=consider-using-with  # kept open across turns
+        except Exception as e:  # pylint: disable=broad-exception-caught  # tracing must never break a turn
+            log.warning("Failed to open trace file in %s: %s", tracedir, e)
+            self._failed = True
+            return False
+        self.path = path
+        self._dir = tracedir
+        _open_tracers.add(self)
+        log.info("Tracing to %s", path)
+        self._write(
+            "session",
+            label=self.label,
+            conversation_id=self._conversation_id,
+            model=runtime.get("model", "unknown"),
+        )
+        return True
+
+    def _write(self, event: str, **data) -> None:
+        if self._file is None:
+            return
+        record = {"ts": datetime.now().isoformat(), "event": event, **_redact(data)}
+        try:
+            self._file.write(json.dumps(record, default=str) + "\n")
+        except Exception as e:  # pylint: disable=broad-exception-caught  # tracing must never break a turn
+            log.warning("Failed to write trace %s: %s", self.path, e)
+            self.close()
+            self._failed = True
