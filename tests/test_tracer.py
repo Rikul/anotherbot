@@ -4,7 +4,9 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 from app.core.helper_agent import HelperAgent
-from app.infra.tracer import Tracer
+import asyncio
+
+from app.infra.tracer import Tracer, close_all, set_tracing
 
 
 def _events(path):
@@ -185,3 +187,53 @@ async def test_loop_skips_trace_work_when_disabled(tmp_path):
         await agent.run("hi")
     mock_record.assert_not_called()
     chat.usage.model_dump.assert_not_called()
+
+
+def test_set_tracing_off_closes_open_files_and_on_rotates(tmp_path):
+    store = _store(tmp_path)
+    tracer = Tracer("cli")
+    with patch("app.core.runtime._store", store):
+        tracer.start_turn([{"role": "user", "content": "a"}], conversation_id=1)
+        first = tracer.path
+        set_tracing(False)
+        assert tracer.path is None
+        assert store["trace"] is False
+        set_tracing(True)
+        tracer.start_turn([{"role": "user", "content": "b"}], conversation_id=1)
+        second = tracer.path
+        close_all()
+    assert first != second
+    assert [e["event"] for e in _events(second)][:2] == ["session", "history"]
+
+
+def test_record_does_not_open_a_file_without_start_turn(tmp_path):
+    tracer = Tracer("cli")
+    with patch("app.core.runtime._store", _store(tmp_path)):
+        tracer.record("llm_response", iteration=1)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.asyncio
+async def test_tool_result_recorded_before_slower_sibling_finishes(tmp_path):
+    with patch("app.core.agent.Client"):
+        agent = HelperAgent()
+    release = asyncio.Event()
+
+    async def fake_handle(tc):
+        if tc.id == "slow":
+            await release.wait()
+        return tc.id
+
+    agent.handle_tool_call = fake_handle
+    fast, slow = MagicMock(id="fast"), MagicMock(id="slow")
+    fast.function.name = slow.function.name = "bash"
+    with patch("app.core.runtime._store", _store(tmp_path)):
+        agent.tracer.start_turn([{"role": "user", "content": "go"}])
+        task = asyncio.create_task(agent._run_tool_calls([fast, slow], [], 1))
+        for _ in range(5):
+            await asyncio.sleep(0)
+        recorded = [e.get("tool_call_id") for e in _events(agent.tracer.path)]
+        assert "fast" in recorded and "slow" not in recorded
+        release.set()
+        await task
+        agent.tracer.close()

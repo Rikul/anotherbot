@@ -14,6 +14,7 @@ from typing import Any, Callable, Awaitable, Protocol, TYPE_CHECKING
 from .. import config
 from ..core import mcp_manager as mcp
 from ..core import runtime
+from ..infra import tracer
 
 if TYPE_CHECKING:
     from ..infra.conversations import ConversationStore
@@ -102,10 +103,10 @@ async def trace_cmd(args: str = "") -> str:
     arg = args.strip().lower()
     tracedir = runtime.get("tracedir")
     if arg == "on":
-        runtime.set("trace", True)
+        tracer.set_tracing(True)
         return f"Tracing on. Writing to {tracedir}"
     if arg == "off":
-        runtime.set("trace", False)
+        tracer.set_tracing(False)
         return "Tracing off."
     state = runtime.get("trace", False)
     return f"Tracing is {'on' if state else 'off'}. Dir: {tracedir}"

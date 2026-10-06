@@ -267,20 +267,30 @@ class Agent(ABC):
         usage = getattr(chat, "usage", None)
         return usage.model_dump() if hasattr(usage, "model_dump") else usage
 
-    async def _timed_tool_call(self, tool_call) -> tuple[str, float]:
+    async def _traced_tool_call(self, tool_call, iteration: int) -> str:
         start = time.perf_counter()
         result = await self.handle_tool_call(tool_call)
-        return result, time.perf_counter() - start
+        # Record as soon as this call finishes, not after the whole batch, so a
+        # hung sibling tool doesn't hold back results that already completed.
+        if self.tracer.enabled():
+            self.tracer.record(
+                "tool_result",
+                iteration=iteration,
+                tool_call_id=tool_call.id,
+                name=tool_call.function.name,
+                duration_s=round(time.perf_counter() - start, 3),
+                content=result,
+            )
+        return result
 
     async def _run_tool_calls(
         self, tool_calls: list, messages: list, iteration: int
     ) -> None:
         """Run ``tool_calls`` in parallel and append (and trace) their results."""
         results = await asyncio.gather(
-            *[self._timed_tool_call(tc) for tc in tool_calls]
+            *[self._traced_tool_call(tc, iteration) for tc in tool_calls]
         )
-        tracing = self.tracer.enabled()
-        for tc, (result, duration) in zip(tool_calls, results):
+        for tc, result in zip(tool_calls, results):
             messages.append(
                 {
                     "role": "tool",
@@ -289,15 +299,6 @@ class Agent(ABC):
                     "content": result,
                 }
             )
-            if tracing:
-                self.tracer.record(
-                    "tool_result",
-                    iteration=iteration,
-                    tool_call_id=tc.id,
-                    name=tc.function.name,
-                    duration_s=round(duration, 3),
-                    content=result,
-                )
             log.info("%s...", result[:250])
 
     async def _loop(self, messages: list, tool_specs: list) -> str:

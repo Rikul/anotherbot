@@ -7,11 +7,14 @@ usage, latency and finish reason), every tool result, and the turn's end or
 error. Events are written as they happen, so a turn that crashes or is stopped
 still leaves a trace.
 
-A trace file is opened once and kept open (line-buffered) for an agent's
-conversation; it is rotated when the conversation or trace directory changes,
-or after tracing is turned off and on again. The first event in a new file is
-the conversation history the model already had, so each file is a complete,
-self-contained trajectory.
+A trace file is opened by :meth:`Tracer.start_turn` and kept open
+(line-buffered) for an agent's conversation; it is rotated when the
+conversation or trace directory changes, or after tracing is turned off and on
+again (:func:`set_tracing` closes every open trace file when it is turned off).
+A new file starts with a ``session`` event followed by a ``history`` event (the
+conversation the model already had), so each file is a complete,
+self-contained trajectory. Events from a turn that started while tracing was
+off are dropped rather than written to a file without that context.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import weakref
 from datetime import datetime
 from pathlib import Path
 from typing import IO
@@ -28,6 +32,23 @@ from ..core import runtime
 log = logging.getLogger(__name__)
 
 _DATA_URL = re.compile(r"^data:([^;,]*);base64,")
+
+# Tracers with an open file, so they can be closed when tracing is turned off
+# or the process shuts down.
+_open_tracers: weakref.WeakSet[Tracer] = weakref.WeakSet()
+
+
+def set_tracing(enabled: bool) -> None:
+    """Turn tracing on or off; turning it off closes every open trace file."""
+    runtime.set("trace", enabled)
+    if not enabled:
+        close_all()
+
+
+def close_all() -> None:
+    """Close every open trace file (on shutdown or when tracing is turned off)."""
+    for tracer in list(_open_tracers):
+        tracer.close()
 
 
 def _redact(obj):
@@ -106,10 +127,12 @@ class Tracer:
         )
 
     def record(self, event: str, **data) -> None:
-        """Append one ``event`` with ``data`` to the trace (opening it if needed)."""
-        if not self.enabled():
-            return
-        if self._file is None and not self._open():
+        """Append one ``event`` with ``data`` to the current turn's trace.
+
+        A no-op unless :meth:`start_turn` opened a file, so a turn that began
+        while tracing was off never writes a file without its context.
+        """
+        if self._file is None or not self.enabled():
             return
         self._write(event, **data)
 
@@ -120,6 +143,7 @@ class Tracer:
                 self._file.close()
             except OSError as e:
                 log.warning("Failed to close trace %s: %s", self.path, e)
+            _open_tracers.discard(self)
         self._file = None
         self.path = None
         self._failed = False
@@ -146,6 +170,7 @@ class Tracer:
             return False
         self.path = path
         self._dir = tracedir
+        _open_tracers.add(self)
         log.info("Tracing to %s", path)
         self._write(
             "session",

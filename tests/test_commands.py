@@ -173,6 +173,14 @@ async def test_trace_cmd_off_disables_tracing():
 
 
 @pytest.mark.asyncio
+async def test_trace_cmd_off_closes_open_trace_files():
+    with patch("app.core.runtime._store", {"trace": True, "tracedir": Path("/tmp/traces")}), \
+         patch("app.infra.tracer.close_all") as mock_close_all:
+        await trace_cmd("off")
+    mock_close_all.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_trace_cmd_includes_tracedir_in_response():
     with patch("app.core.runtime._store", {"trace": False, "tracedir": Path("/my/traces")}):
         result = await trace_cmd("on")
