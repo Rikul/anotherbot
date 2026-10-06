@@ -50,6 +50,13 @@
     function closeSidebarOnNarrow() {
         if (narrowScreen.matches) sidebarEl.classList.add('collapsed');
     }
+    // Rotating or resizing across the breakpoint: close the overlay when going
+    // narrow, restore the persisted desktop state when going wide.
+    narrowScreen.addEventListener('change', e => {
+        const collapse = e.matches || localStorage.getItem('ab-sidebar') === 'closed';
+        sidebarEl.classList.toggle('collapsed', collapse);
+        if (!collapse) loadConversations(false);
+    });
 
     // ---- auth ----
     // With WEB_PASSWORD set, an expired/missing session makes the API return 401

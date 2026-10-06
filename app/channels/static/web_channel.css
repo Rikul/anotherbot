@@ -57,6 +57,9 @@ body {
     flex-direction: row;
     flex: 1;
     overflow: hidden;
+    /* landscape notch: inset sidebar, messages and input row together */
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
 }
 
 /* ---- sidebar ---- */
@@ -162,6 +165,10 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 14px 20px;
+    /* viewport-fit=cover: keep controls clear of notches / rounded corners */
+    padding-top: max(14px, env(safe-area-inset-top));
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-shrink: 0;
@@ -432,7 +439,7 @@ body {
     #body-row { position: relative; }
     #sidebar {
         position: absolute;
-        top: 0; bottom: 0; left: 0;
+        top: 0; bottom: 0; left: env(safe-area-inset-left);
         z-index: 20;
         max-width: 85vw;
         box-shadow: 4px 0 16px rgba(0, 0, 0, .25);
