@@ -125,6 +125,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log.info("Exiting...")
         os._exit(0)
-    except Exception as e:  # pylint: disable=broad-exception-caught  # top-level: log and exit non-zero
-        log.error("An error occurred: %s", e)
+    except Exception:  # pylint: disable=broad-exception-caught  # top-level: log and exit non-zero
+        log.exception("Application failed")
         os._exit(1)

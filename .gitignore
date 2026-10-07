@@ -183,3 +183,7 @@ PLAN.md
 .mcp.json
 .repowise
 .vscode
+
+# repowise API keys (local)
+.repowise/.env
+.codex

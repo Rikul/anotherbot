@@ -24,20 +24,37 @@ class AnsiFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         level = self.LEVELS.get(record.levelno, record.levelname)
         msg = record.getMessage()
-        return (
+        formatted = (
             f"{ANSI.DIM}{self.formatTime(record, '%H:%M:%S')}{ANSI.RESET} {level}"
             f" {ANSI.DIM}{record.name} {msg}{ANSI.RESET}"
         )
+        return self._append_exception(record, formatted)
+
+    def _append_exception(self, record: logging.LogRecord, formatted: str) -> str:
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            formatted = f"{formatted}\n{record.exc_text}"
+        if record.stack_info:
+            formatted = f"{formatted}\n{self.formatStack(record.stack_info)}"
+        return formatted
 
 
 class PlainFormatter(logging.Formatter):
     """Log-file formatter: ``YYYY-MM-DD HH:MM:SS LEVEL logger message`` without colours."""
 
     def format(self, record: logging.LogRecord) -> str:
-        return (
+        formatted = (
             f"{self.formatTime(record, '%Y-%m-%d %H:%M:%S')}"
             f" {record.levelname} {record.name} {record.getMessage()}"
         )
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            formatted = f"{formatted}\n{record.exc_text}"
+        if record.stack_info:
+            formatted = f"{formatted}\n{self.formatStack(record.stack_info)}"
+        return formatted
 
 
 def setup_logging(level: int = logging.INFO, console: bool = True):

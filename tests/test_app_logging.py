@@ -1,8 +1,11 @@
 import logging
 import logging.handlers
+import sys
 from unittest.mock import patch
 
-from app.infra.app_logging import setup_logging
+import pytest
+
+from app.infra.app_logging import AnsiFormatter, PlainFormatter, setup_logging
 
 
 def _handlers_passed_to_basic_config(tmp_path, **kwargs) -> list[logging.Handler]:
@@ -26,3 +29,19 @@ def test_setup_logging_console_false_only_logs_to_file(tmp_path):
     assert len(handlers) == 1
     assert isinstance(handlers[0], logging.handlers.RotatingFileHandler)
     assert handlers[0].baseFilename == str(tmp_path / "app.log")
+
+
+@pytest.mark.parametrize("formatter", [AnsiFormatter(), PlainFormatter()])
+def test_formatters_include_exception_traceback(formatter):
+    try:
+        raise ValueError("broken startup")
+    except ValueError:
+        exc_info = sys.exc_info()
+
+    record = logging.LogRecord(
+        "app.main", logging.ERROR, __file__, 1, "Application failed", (), exc_info
+    )
+    formatted = formatter.format(record)
+
+    assert "Traceback (most recent call last)" in formatted
+    assert "ValueError: broken startup" in formatted
