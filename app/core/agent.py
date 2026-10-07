@@ -121,10 +121,13 @@ class Agent(ABC):
         arguments, results and reasoning are dropped (tracing keeps them). The
         final reply is last.
         """
-        assistant = [m for m in turn if m.get("role") == "assistant"]
         entries: list[tuple[str, list[str]]] = []
-        for msg in assistant:
-            if not msg.get("tool_calls"):
+        ended_on_tool_calls = False
+        for msg in turn:
+            if msg.get("role") != "assistant":
+                continue
+            ended_on_tool_calls = bool(msg.get("tool_calls"))
+            if not ended_on_tool_calls:
                 continue
             text = (msg.get("content") or "").strip()
             if text or not entries:
@@ -142,7 +145,7 @@ class Agent(ABC):
             compacted.append({"role": "assistant", "content": content})
         # A turn cut short (stop / max iterations) ends on a tool-call message,
         # whose text is already in the last entry.
-        if not assistant or not assistant[-1].get("tool_calls"):
+        if not ended_on_tool_calls:
             compacted.append({"role": "assistant", "content": final})
         return compacted
 
