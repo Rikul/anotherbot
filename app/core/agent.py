@@ -20,6 +20,18 @@ from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
 
+# Start of the line ``_compact_turn`` appends to an intermediate assistant message.
+TOOL_SUMMARY_PREFIX = "(used tools: "
+_TOOL_SUMMARY_RE = re.compile(r"(?:\n\n|^)\(used tools: [^\n]*\)$")
+
+
+def strip_tool_summary(content: str) -> str:
+    """Remove the ``(used tools: ...)`` line ``Agent._compact_turn`` adds.
+
+    A message that was only a tool summary becomes ``""``.
+    """
+    return _TOOL_SUMMARY_RE.sub("", content)
+
 
 def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9-]", "", name.strip().lower().replace(" ", "-"))[:40]
@@ -99,38 +111,15 @@ class Agent(ABC):
             d["reasoning_content"] = reasoning
         return d
 
-    _TOOL_ARG_PREVIEW = 80
-
-    @classmethod
-    def _format_tool_call(cls, tool_call: dict) -> str:
-        """Render one serialized tool call as ``name(key=value, ...)`` with values truncated."""
-        fn = tool_call.get("function") or {}
-        name = str(fn.get("name") or "?")
-        raw = fn.get("arguments") or ""
-        try:
-            args = json.loads(raw) if raw.strip() else {}
-        except (TypeError, ValueError, AttributeError):
-            args = None
-        if isinstance(args, dict):
-            parts = []
-            for key, value in args.items():
-                text = json.dumps(value, ensure_ascii=False)
-                if len(text) > cls._TOOL_ARG_PREVIEW:
-                    text = text[: cls._TOOL_ARG_PREVIEW] + "…"
-                parts.append(f"{key}={text}")
-            arg_text = ", ".join(parts)
-        else:
-            arg_text = str(raw)[: cls._TOOL_ARG_PREVIEW]
-        return f"{name}({arg_text})"
-
     @classmethod
     def _compact_turn(cls, turn: list[dict], final: str) -> list[dict]:
         """Compact one turn's messages into assistant text messages for history.
 
         ``turn`` is what ``_loop`` appended after the user message. Intermediate
-        assistant text is kept; each tool call becomes a one-line summary
-        (name + truncated args) on the text it followed; tool results and
-        reasoning are dropped (tracing keeps them). The final reply is last.
+        assistant text is kept; the names of the tools called after it go on a
+        final ``(used tools: ...)`` line (see ``strip_tool_summary``). Tool
+        arguments, results and reasoning are dropped (tracing keeps them). The
+        final reply is last.
         """
         assistant = [m for m in turn if m.get("role") == "assistant"]
         entries: list[tuple[str, list[str]]] = []
@@ -140,11 +129,15 @@ class Agent(ABC):
             text = (msg.get("content") or "").strip()
             if text or not entries:
                 entries.append((text, []))
-            entries[-1][1].extend(cls._format_tool_call(tc) for tc in msg["tool_calls"])
+            names = entries[-1][1]
+            for tc in msg["tool_calls"]:
+                name = str((tc.get("function") or {}).get("name") or "?")
+                if name not in names:
+                    names.append(name)
 
         compacted = []
-        for text, calls in entries:
-            summary = f"[tool calls: {'; '.join(calls)}]"
+        for text, names in entries:
+            summary = f"{TOOL_SUMMARY_PREFIX}{', '.join(names)})"
             content = f"{text}\n\n{summary}" if text else summary
             compacted.append({"role": "assistant", "content": content})
         # A turn cut short (stop / max iterations) ends on a tool-call message,

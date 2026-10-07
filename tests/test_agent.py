@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 import app.config as config
 from app.cli.cli_agent import CliAgent as Agent
+from app.core.agent import strip_tool_summary
 
 
 def make_mock_client(tool_calls=None, content="Hello!", finish_reason="stop"):
@@ -435,37 +436,43 @@ def test_compact_turn_keeps_text_and_summarizes_tool_calls():
         {"role": "assistant", "content": "Done."},
     ]
     assert Agent._compact_turn(turn, "Done.") == [
-        {"role": "assistant", "content": 'Let me look.\n\n[tool calls: bash(command="ls"); '
-                                         'read_file(path="a.txt"); bash(command="pwd")]'},
-        {"role": "assistant", "content": "Now checking the date.\n\n[tool calls: get_datetime()]"},
+        {"role": "assistant", "content": "Let me look.\n\n(used tools: bash, read_file)"},
+        {"role": "assistant", "content": "Now checking the date.\n\n(used tools: get_datetime)"},
         {"role": "assistant", "content": "Done."},
     ]
 
 
-def test_compact_turn_tool_only_and_truncation():
-    long = "x" * 200
+def test_compact_turn_tool_only_message():
     turn = [
-        {"role": "assistant", "content": "", "tool_calls": [_tc("write_file", json.dumps({"content": long}))]},
+        {"role": "assistant", "content": "", "tool_calls": [_tc("write_file", '{"content": "x"}')]},
         {"role": "tool", "tool_call_id": "tc1", "name": "write_file", "content": "ok"},
         {"role": "assistant", "content": "Written."},
     ]
-    out = Agent._compact_turn(turn, "Written.")
-    assert len(out) == 2
-    assert out[0]["content"].startswith("[tool calls: write_file(content=\"xxx")
-    assert len(out[0]["content"]) < 120
-    assert out[1] == {"role": "assistant", "content": "Written."}
+    assert Agent._compact_turn(turn, "Written.") == [
+        {"role": "assistant", "content": "(used tools: write_file)"},
+        {"role": "assistant", "content": "Written."},
+    ]
 
 
 def test_compact_turn_cut_short_does_not_duplicate_final():
     turn = [{"role": "assistant", "content": "Working on it", "tool_calls": [_tc("bash", "not json")]}]
     assert Agent._compact_turn(turn, "Working on it") == [
-        {"role": "assistant", "content": "Working on it\n\n[tool calls: bash(not json)]"}
+        {"role": "assistant", "content": "Working on it\n\n(used tools: bash)"}
     ]
 
 
 def test_compact_turn_no_tool_calls():
     turn = [{"role": "assistant", "content": "Hi"}]
     assert Agent._compact_turn(turn, "Hi") == [{"role": "assistant", "content": "Hi"}]
+
+
+def test_strip_tool_summary():
+    assert strip_tool_summary("Let me look.\n\n(used tools: bash, read_file)") == "Let me look."
+    assert strip_tool_summary("(used tools: bash)") == ""
+    assert strip_tool_summary("Done.") == "Done."
+    # Only the trailing summary line is removed, not similar text elsewhere.
+    text = "I (used tools: none) here.\nMore."
+    assert strip_tool_summary(text) == text
 
 
 @pytest.mark.asyncio
@@ -502,11 +509,11 @@ async def test_agent_loop_saves_intermediate_text_and_compacted_tool_calls():
     assert result == "It printed hi."
     assert agent.messages == [
         {"role": "user", "content": "say hi"},
-        {"role": "assistant", "content": 'Checking.\n\n[tool calls: bash(command="echo hi")]'},
+        {"role": "assistant", "content": "Checking.\n\n(used tools: bash)"},
         {"role": "assistant", "content": "It printed hi."},
     ]
     assert [c.args[:2] for c in agent.history.add_message.call_args_list] == [
         ("user", "say hi"),
-        ("assistant", 'Checking.\n\n[tool calls: bash(command="echo hi")]'),
+        ("assistant", "Checking.\n\n(used tools: bash)"),
         ("assistant", "It printed hi."),
     ]

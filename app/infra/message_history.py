@@ -17,7 +17,7 @@ class MessageHistory:
     """Appends a channel's messages to the ``messages`` table in the app database.
 
     Stores the user's text and each turn's assistant text, with tool calls
-    compacted to one-line summaries (no tool results; see
+    reduced to a ``(used tools: ...)`` line (no args or results; see
     ``Agent._compact_turn``). Rows are tagged with the channel and, when known,
     the conversation they belong to; ``ConversationStore`` reads them back.
     """
