@@ -262,6 +262,28 @@ def test_static_css_has_theme_variables():
     assert "--accent:" in content
 
 
+def test_user_and_ai_message_rows_fill_available_width():
+    content = (_STATIC_DIR / "web_channel.css").read_text()
+    assert "max-width: 80%" not in content
+    assert (
+        ".msg-row.user,\n.msg-row.ai {\n"
+        "    align-self: stretch;\n"
+        "    width: 100%;\n"
+        "}"
+    ) in content
+    assert (
+        ".user .bubble,\n.ai .bubble {\n"
+        "    flex: 1;\n"
+        "    min-width: 0;\n"
+        "}"
+    ) in content
+
+
+def test_mobile_hides_composer_placeholder():
+    content = (_STATIC_DIR / "web_channel.css").read_text()
+    mobile_css = content.split("@media (max-width: 768px)", 1)[1]
+    assert "#msg-input::placeholder { color: transparent; }" in mobile_css
+
 
 def test_static_js_has_iife():
     content = (_STATIC_DIR / "web_channel.js").read_text()

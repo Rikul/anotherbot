@@ -226,7 +226,7 @@
     // ---- status ----
     function setStatus(state, text) {
         statusDot.className = state;
-        //statusTxt.textContent = text;
+        statusTxt.textContent = "";
     }
 
     // ---- WebSocket ----

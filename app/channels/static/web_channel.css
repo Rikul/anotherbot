@@ -9,7 +9,7 @@
     --text-muted:  #94a3b8;
     --accent:      #6366f1;
     --accent-h:    #818cf8;
-    --user-bg:     #6366f1;
+    --user-bg:     #323386;
     --ai-bg:       #1e293b;
     --sidebar-w:   260px;
     --radius:      14px;
@@ -25,7 +25,7 @@
     --text-muted:#64748b;
     --accent:    #6366f1;
     --accent-h:  #4f46e5;
-    --user-bg:   #6366f1;
+    --user-bg:   rgb(163, 166, 226);
     --ai-bg:     #f1f5f9;
 }
 
@@ -285,16 +285,22 @@ body {
 .msg-row {
     display: flex;
     gap: 10px;
-    max-width: 80%;
+    max-width: 100%;
     animation: fadeUp .2s ease;
 }
 @keyframes fadeUp {
     from { opacity:0; transform:translateY(8px); }
     to   { opacity:1; transform:translateY(0); }
 }
-.msg-row.user   { align-self: flex-end; }
-.msg-row.ai     { align-self: flex-start; }
-.msg-row.system { align-self: center; }
+.msg-row.user,
+.msg-row.ai {
+    align-self: stretch;
+    width: 100%;
+}
+.msg-row.system {
+    align-self: center;
+    width: auto;
+}
 
 .bubble {
     padding: 10px 14px;
@@ -304,8 +310,13 @@ body {
     max-width: 100%;
     font-size: 0.92rem;
 }
-.user   .bubble { background: var(--user-bg); color: #fff; border-bottom-right-radius: 4px; }
-.ai     .bubble { background: var(--ai-bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; transition: background .2s, border-color .2s; }
+.user .bubble,
+.ai .bubble {
+    flex: 1;
+    min-width: 0;
+}
+.user .bubble { background: var(--user-bg); color: #fff; }
+.ai   .bubble { background: var(--ai-bg); border: 1px solid var(--border); transition: background .2s, border-color .2s; }
 .system .bubble { background: transparent; border: 1px dashed var(--border); color: var(--text-muted); font-size: 0.82rem; padding: 6px 12px; border-radius: 8px; }
 
 .bubble code { background: var(--surface2); border-radius: 4px; padding: 1px 5px; font-size: .85em; font-family: 'Fira Code','Cascadia Code',monospace; }
@@ -478,6 +489,8 @@ body {
 /* iOS Safari zooms into inputs with font-size < 16px on focus, shifting the layout */
 @media (max-width: 768px) {
     #msg-input { font-size: 16px; }
+    #msg-input::placeholder { color: transparent; }
+    #messages { padding: 12px; gap: 12px; }
     /* sidebar overlays the chat instead of squeezing it */
     #body-row { position: relative; }
     #sidebar {
