@@ -46,6 +46,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
+from fasthtml.svg import Svg, Path as SvgPath, Polyline, Rect
 
 from .. import config
 from ..core import runtime
@@ -54,6 +55,7 @@ from .channel import Channel, ChannelType
 from .message import IncomingMessage, OutgoingMessage
 from .message_queue import MessageQueue
 from .web_auth import WebAuthMiddleware, is_loopback_host
+
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +79,26 @@ _PAPERCLIP_SVG = (
 
 
 def _build_page(auth_enabled: bool = False) -> Html:
+
+    def MarkdownIcon(size=16):
+        return Svg(
+            Rect(x="3", y="5", width="18", height="14", rx="2"),
+            SvgPath(d="M7 15V9l3 3 3-3v6"),
+            SvgPath(d="M17 9v4m0 0 2-2m-2 2-2-2"),
+            width=size, height=size, viewBox="0 0 24 24",
+            fill="none", stroke="currentColor", stroke_width="2",
+            stroke_linecap="round", stroke_linejoin="round",
+        )
+
+    def RawIcon(size=16):
+        return Svg(
+            Polyline(points="8 7 3 12 8 17"),
+            Polyline(points="16 7 21 12 16 17"),
+            width=size, height=size, viewBox="0 0 24 24",
+            fill="none", stroke="currentColor", stroke_width="2",
+            stroke_linecap="round", stroke_linejoin="round",
+        )
+
     return Html(
         Head(
             Meta(charset="utf-8"),
@@ -109,8 +131,12 @@ def _build_page(auth_enabled: bool = False) -> Html:
                             id="status",
                         ),
                         Div(
-                            Button("Markdown", type="button", data_mode="md"),
-                            Button("Raw", type="button", data_mode="raw"),
+                            Button(MarkdownIcon(), type="button", data_mode="md",
+                                title="Markdown", aria_label="Markdown",
+                                aria_pressed="true"),
+                            Button(RawIcon(), type="button", data_mode="raw",
+                                title="Raw", aria_label="Raw",
+                                aria_pressed="false"),
                             id="render-toggle",
                             role="group",
                             title="How to show bot replies",
@@ -119,10 +145,11 @@ def _build_page(auth_enabled: bool = False) -> Html:
                         *(
                             [
                                 A(
-                                    "Log out",
+                                    "⍈",
                                     href="/logout",
                                     id="logout-link",
                                     title="Log out",
+                                    aria_label="Log out",
                                 )
                             ]
                             if auth_enabled

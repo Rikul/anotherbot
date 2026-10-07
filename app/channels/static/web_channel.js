@@ -38,6 +38,7 @@
 
     // ---- reply rendering: markdown (default) or raw text ----
     const renderToggle = document.getElementById('render-toggle');
+
     let renderMode = localStorage.getItem('ab-render') === 'raw' ? 'raw' : 'md';
     function applyRenderMode(mode) {
         renderMode = mode;
@@ -49,10 +50,13 @@
         });
         messagesEl.querySelectorAll('.msg-row.ai .bubble').forEach(renderAiBubble);
     }
-    renderToggle.addEventListener('click', e => {
-        const btn = e.target.closest('button[data-mode]');
-        if (btn && btn.dataset.mode !== renderMode) applyRenderMode(btn.dataset.mode);
-    });
+
+    if (renderToggle) {
+        renderToggle.addEventListener('click', e => {
+            const btn = e.target.closest('button[data-mode]');
+            if (btn && btn.dataset.mode !== renderMode) applyRenderMode(btn.dataset.mode);
+        });
+    }
 
     const markdownReady = !!(window.marked && window.DOMPurify);
     // Text-only allowlist: nothing that fetches on render (img, media, iframe,
@@ -222,7 +226,7 @@
     // ---- status ----
     function setStatus(state, text) {
         statusDot.className = state;
-        statusTxt.textContent = text;
+        //statusTxt.textContent = text;
     }
 
     // ---- WebSocket ----
