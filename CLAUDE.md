@@ -70,7 +70,7 @@ The shared loop lives in `Agent._loop()` (`app/core/agent.py`). Subclasses overr
 | `_on_no_choices` | raise | exponential backoff | raise |
 | `_should_stop` | — | `channel.has_stopped` | — |
 
-Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gather`. After each turn, the full message chain (assistant tool-call message + tool results + final response) is saved to `self.messages` at full length. `MessageHistory` (SQLite) stores only user + final assistant text for cross-session persistence.
+Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gather`. After each turn, `Agent._compact_turn()` compacts the chain before it is saved to `self.messages` and `MessageHistory` (SQLite): intermediate assistant text is kept, each tool call collapses to a one-line `[tool calls: name(arg=value…); …]` summary (args truncated to 80 chars) appended to the text it followed, tool results and reasoning are dropped, and the final reply is stored last. Full tool calls/results stay in traces and logs.
 
 ### Tool System
 

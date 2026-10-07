@@ -99,6 +99,60 @@ class Agent(ABC):
             d["reasoning_content"] = reasoning
         return d
 
+    _TOOL_ARG_PREVIEW = 80
+
+    @classmethod
+    def _format_tool_call(cls, tool_call: dict) -> str:
+        """Render one serialized tool call as ``name(key=value, ...)`` with values truncated."""
+        fn = tool_call.get("function") or {}
+        name = str(fn.get("name") or "?")
+        raw = fn.get("arguments") or ""
+        try:
+            args = json.loads(raw) if raw.strip() else {}
+        except (TypeError, ValueError, AttributeError):
+            args = None
+        if isinstance(args, dict):
+            parts = []
+            for key, value in args.items():
+                text = json.dumps(value, ensure_ascii=False)
+                if len(text) > cls._TOOL_ARG_PREVIEW:
+                    text = text[: cls._TOOL_ARG_PREVIEW] + "…"
+                parts.append(f"{key}={text}")
+            arg_text = ", ".join(parts)
+        else:
+            arg_text = str(raw)[: cls._TOOL_ARG_PREVIEW]
+        return f"{name}({arg_text})"
+
+    @classmethod
+    def _compact_turn(cls, turn: list[dict], final: str) -> list[dict]:
+        """Compact one turn's messages into assistant text messages for history.
+
+        ``turn`` is what ``_loop`` appended after the user message. Intermediate
+        assistant text is kept; each tool call becomes a one-line summary
+        (name + truncated args) on the text it followed; tool results and
+        reasoning are dropped (tracing keeps them). The final reply is last.
+        """
+        assistant = [m for m in turn if m.get("role") == "assistant"]
+        entries: list[tuple[str, list[str]]] = []
+        for msg in assistant:
+            if not msg.get("tool_calls"):
+                continue
+            text = (msg.get("content") or "").strip()
+            if text or not entries:
+                entries.append((text, []))
+            entries[-1][1].extend(cls._format_tool_call(tc) for tc in msg["tool_calls"])
+
+        compacted = []
+        for text, calls in entries:
+            summary = f"[tool calls: {'; '.join(calls)}]"
+            content = f"{text}\n\n{summary}" if text else summary
+            compacted.append({"role": "assistant", "content": content})
+        # A turn cut short (stop / max iterations) ends on a tool-call message,
+        # whose text is already in the last entry.
+        if not assistant or not assistant[-1].get("tool_calls"):
+            compacted.append({"role": "assistant", "content": final})
+        return compacted
+
     @staticmethod
     def _as_list(value) -> list:
         if value is None:

@@ -415,3 +415,98 @@ async def test_agent_loop_does_not_persist_history_when_attachment_invalid(tmp_p
     with pytest.raises(FileNotFoundError):
         await agent.agent_loop("hi", metadata={"files": [str(non_file)]})
     agent.history.add_message.assert_not_called()
+
+
+def _tc(name, arguments, tc_id="tc1"):
+    return {"id": tc_id, "type": "function", "function": {"name": name, "arguments": arguments}}
+
+
+def test_compact_turn_keeps_text_and_summarizes_tool_calls():
+    turn = [
+        {"role": "assistant", "content": "Let me look.", "reasoning_content": "secret",
+         "tool_calls": [_tc("bash", '{"command": "ls"}'), _tc("read_file", '{"path": "a.txt"}', "tc2")]},
+        {"role": "tool", "tool_call_id": "tc1", "name": "bash", "content": "huge output"},
+        {"role": "tool", "tool_call_id": "tc2", "name": "read_file", "content": "file body"},
+        {"role": "assistant", "content": None, "tool_calls": [_tc("bash", '{"command": "pwd"}', "tc3")]},
+        {"role": "tool", "tool_call_id": "tc3", "name": "bash", "content": "/x"},
+        {"role": "assistant", "content": "Now checking the date.",
+         "tool_calls": [_tc("get_datetime", "", "tc4")]},
+        {"role": "tool", "tool_call_id": "tc4", "name": "get_datetime", "content": "today"},
+        {"role": "assistant", "content": "Done."},
+    ]
+    assert Agent._compact_turn(turn, "Done.") == [
+        {"role": "assistant", "content": 'Let me look.\n\n[tool calls: bash(command="ls"); '
+                                         'read_file(path="a.txt"); bash(command="pwd")]'},
+        {"role": "assistant", "content": "Now checking the date.\n\n[tool calls: get_datetime()]"},
+        {"role": "assistant", "content": "Done."},
+    ]
+
+
+def test_compact_turn_tool_only_and_truncation():
+    long = "x" * 200
+    turn = [
+        {"role": "assistant", "content": "", "tool_calls": [_tc("write_file", json.dumps({"content": long}))]},
+        {"role": "tool", "tool_call_id": "tc1", "name": "write_file", "content": "ok"},
+        {"role": "assistant", "content": "Written."},
+    ]
+    out = Agent._compact_turn(turn, "Written.")
+    assert len(out) == 2
+    assert out[0]["content"].startswith("[tool calls: write_file(content=\"xxx")
+    assert len(out[0]["content"]) < 120
+    assert out[1] == {"role": "assistant", "content": "Written."}
+
+
+def test_compact_turn_cut_short_does_not_duplicate_final():
+    turn = [{"role": "assistant", "content": "Working on it", "tool_calls": [_tc("bash", "not json")]}]
+    assert Agent._compact_turn(turn, "Working on it") == [
+        {"role": "assistant", "content": "Working on it\n\n[tool calls: bash(not json)]"}
+    ]
+
+
+def test_compact_turn_no_tool_calls():
+    turn = [{"role": "assistant", "content": "Hi"}]
+    assert Agent._compact_turn(turn, "Hi") == [{"role": "assistant", "content": "Hi"}]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_saves_intermediate_text_and_compacted_tool_calls():
+    agent, mock_client = make_agent()
+
+    tool_call = MagicMock()
+    tool_call.id = "tc1"
+    tool_call.function.name = "bash"
+    tool_call.function.arguments = '{"command": "echo hi"}'
+    tool_call.model_dump.return_value = _tc("bash", '{"command": "echo hi"}')
+
+    first = MagicMock()
+    first.tool_calls = [tool_call]
+    first.content = "Checking."
+    first.role = "assistant"
+    first.model_dump.return_value = {}
+    final = MagicMock()
+    final.tool_calls = None
+    final.content = "It printed hi."
+    final.role = "assistant"
+    final.model_dump.return_value = {}
+
+    def response(msg, reason):
+        choice = MagicMock(message=msg, finish_reason=reason)
+        return MagicMock(choices=[choice])
+
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[response(first, "tool_calls"), response(final, "stop")]
+    )
+    with patch("app.core.tool_calls.run_tool", return_value="hi\n"):
+        result = await agent.agent_loop("say hi")
+
+    assert result == "It printed hi."
+    assert agent.messages == [
+        {"role": "user", "content": "say hi"},
+        {"role": "assistant", "content": 'Checking.\n\n[tool calls: bash(command="echo hi")]'},
+        {"role": "assistant", "content": "It printed hi."},
+    ]
+    assert [c.args[:2] for c in agent.history.add_message.call_args_list] == [
+        ("user", "say hi"),
+        ("assistant", 'Checking.\n\n[tool calls: bash(command="echo hi")]'),
+        ("assistant", "It printed hi."),
+    ]

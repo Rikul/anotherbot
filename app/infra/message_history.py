@@ -1,4 +1,4 @@
-"""SQLite-backed log of user / final-assistant messages, per channel."""
+"""SQLite-backed log of user / assistant messages, per channel."""
 
 from __future__ import annotations
 
@@ -16,9 +16,10 @@ def _est_tokens(content: str) -> int:
 class MessageHistory:
     """Appends a channel's messages to the ``messages`` table in the app database.
 
-    Only the user's text and the final assistant reply of each turn are stored
-    (not tool calls). Rows are tagged with the channel and, when known, the
-    conversation they belong to; ``ConversationStore`` reads them back.
+    Stores the user's text and each turn's assistant text, with tool calls
+    compacted to one-line summaries (no tool results; see
+    ``Agent._compact_turn``). Rows are tagged with the channel and, when known,
+    the conversation they belong to; ``ConversationStore`` reads them back.
     """
 
     def __init__(self, channel_type: str, db_path: Path = APP_DB):
