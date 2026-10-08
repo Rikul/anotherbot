@@ -18,7 +18,7 @@ from ..infra.app_logging import log
 from ..infra.tracer import Tracer
 from . import runtime
 
-MAX_CONTEXT_MESSAGES = 1000
+MAX_CONTEXT_MESSAGES = 1500
 
 # Start of the line ``_compact_turn`` appends to an intermediate assistant message.
 TOOL_SUMMARY_PREFIX = "(used tools: "
