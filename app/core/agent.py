@@ -18,7 +18,19 @@ from ..infra.app_logging import log
 from ..infra.tracer import Tracer
 from . import runtime
 
-MAX_CONTEXT_MESSAGES = 1000
+MAX_CONTEXT_MESSAGES = 1500
+
+# Start of the line ``_compact_turn`` appends to an intermediate assistant message.
+TOOL_SUMMARY_PREFIX = "(used tools: "
+_TOOL_SUMMARY_RE = re.compile(r"(?:\n\n|^)\(used tools: [^\n]*\)$")
+
+
+def strip_tool_summary(content: str) -> str:
+    """Remove the ``(used tools: ...)`` line ``Agent._compact_turn`` adds.
+
+    A message that was only a tool summary becomes ``""``.
+    """
+    return _TOOL_SUMMARY_RE.sub("", content)
 
 
 def _slugify(name: str) -> str:
@@ -98,6 +110,44 @@ class Agent(ABC):
         if reasoning:
             d["reasoning_content"] = reasoning
         return d
+
+    @classmethod
+    def _compact_turn(cls, turn: list[dict], final: str) -> list[dict]:
+        """Compact one turn's messages into assistant text messages for history.
+
+        ``turn`` is what ``_loop`` appended after the user message. Intermediate
+        assistant text is kept; the names of the tools called after it go on a
+        final ``(used tools: ...)`` line (see ``strip_tool_summary``). Tool
+        arguments, results and reasoning are dropped (tracing keeps them). The
+        final reply is last.
+        """
+        entries: list[tuple[str, list[str]]] = []
+        ended_on_tool_calls = False
+        for msg in turn:
+            if msg.get("role") != "assistant":
+                continue
+            ended_on_tool_calls = bool(msg.get("tool_calls"))
+            if not ended_on_tool_calls:
+                continue
+            text = (msg.get("content") or "").strip()
+            if text or not entries:
+                entries.append((text, []))
+            names = entries[-1][1]
+            for tc in msg["tool_calls"]:
+                name = str((tc.get("function") or {}).get("name") or "?")
+                if name not in names:
+                    names.append(name)
+
+        compacted = []
+        for text, names in entries:
+            summary = f"{TOOL_SUMMARY_PREFIX}{', '.join(names)})"
+            content = f"{text}\n\n{summary}" if text else summary
+            compacted.append({"role": "assistant", "content": content})
+        # A turn cut short (stop / max iterations) ends on a tool-call message,
+        # whose text is already in the last entry.
+        if not ended_on_tool_calls:
+            compacted.append({"role": "assistant", "content": final})
+        return compacted
 
     @staticmethod
     def _as_list(value) -> list:

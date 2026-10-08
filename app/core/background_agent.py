@@ -192,13 +192,15 @@ class BackgroundAgent(Agent):
         if self.tracer.enabled() and self.tracer.path:
             runtime.set("last_trace", self.tracer.path.name)
 
+        turn_start = len(session_messages)
         final_content = await self._loop(session_messages, get_all_tool_specs())
 
         self.channel.clear_stopped()
 
         self.messages.append({"role": "user", "content": placeholder_content})
-        self.messages.append({"role": "assistant", "content": final_content})
-        self.history.add_message("assistant", final_content, self.conversation_id)
+        for msg in self._compact_turn(session_messages[turn_start:], final_content):
+            self.messages.append(msg)
+            self.history.add_message("assistant", msg["content"], self.conversation_id)
         self.store.touch(self.conversation_id)
 
         if self.store.count_user_messages(self.conversation_id) == 1:
