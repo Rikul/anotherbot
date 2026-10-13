@@ -66,7 +66,7 @@ log = logging.getLogger(__name__)
 
 # Bump when web_channel.css / web_channel.js change, so browsers (Edge caches
 # static assets aggressively) fetch the new copy instead of a stale one.
-_ASSET_VERSION = "10"
+_ASSET_VERSION = "11"
 
 # Paperclip icon for the attach button (inline so it inherits theme colors).
 _PAPERCLIP_SVG = (

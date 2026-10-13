@@ -9,7 +9,7 @@
     --text-muted:  #94a3b8;
     --accent:      #6366f1;
     --accent-h:    #818cf8;
-    --user-bg:     #323386;
+    --user-bg:     #374151;
     --ai-bg:       #1e293b;
     --sidebar-w:   260px;
     --radius:      14px;
@@ -25,7 +25,7 @@
     --text-muted:#64748b;
     --accent:    #6366f1;
     --accent-h:  #4f46e5;
-    --user-bg:   rgb(163, 166, 226);
+    --user-bg:   #f3f4f6;
     --ai-bg:     #f1f5f9;
 }
 
@@ -315,7 +315,7 @@ body {
     flex: 1;
     min-width: 0;
 }
-.user .bubble { background: var(--user-bg); color: #fff; }
+.user .bubble { background: var(--user-bg); color: var(--text); border: 1px solid var(--border); }
 .ai   .bubble { background: var(--ai-bg); border: 1px solid var(--border); transition: background .2s, border-color .2s; }
 .system .bubble { background: transparent; border: 1px dashed var(--border); color: var(--text-muted); font-size: 0.82rem; padding: 6px 12px; border-radius: 8px; }
 
