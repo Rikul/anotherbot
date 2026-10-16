@@ -49,6 +49,13 @@ class Channel(ABC):
     def clear_stopped(self) -> None:
         """Reset the stop flag once the current agent turn has ended."""
 
+    async def on_agent_turn(self, running: bool) -> None:
+        """Called by ``BackgroundAgent`` when an agent turn starts and ends.
+
+        Channels that show a busy state (e.g. a Stop button) override this;
+        the default does nothing.
+        """
+
     @property
     def default_metadata(self) -> dict:
         """Metadata for messages with no reply target, e.g. scheduled-task results."""

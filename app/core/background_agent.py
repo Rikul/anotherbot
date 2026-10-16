@@ -65,12 +65,14 @@ class BackgroundAgent(Agent):
         self.registry = build_command_registry(
             self,
             status_channel=self.channel_str,
-            extra=(BotCommand("stop", "Pause the bot.", self._stop_cmd),),
+            extra=(BotCommand("stop", "Stop the running turn.", self._stop_cmd),),
         )
 
     async def _stop_cmd(self, _args: str = "") -> str:
-        self.channel.stopped = True
-        return "Stopped."
+        # Listed in /help, but every channel answers /stop itself so it can
+        # reach the running turn; a /stop that does get here runs between
+        # turns, and setting the flag now would only cut the next turn short.
+        return "Nothing to stop."
 
     def switch_conversation(self, conv: dict) -> None:
         """Make ``conv`` the channel's active conversation and load its messages."""
@@ -158,7 +160,13 @@ class BackgroundAgent(Agent):
                         )
                     )
                 else:
-                    await self.agent_loop(msg.content, msg.metadata)
+                    # A /stop that arrived while idle must not cut this turn short.
+                    self.channel.clear_stopped()
+                    await self.channel.on_agent_turn(True)
+                    try:
+                        await self.agent_loop(msg.content, msg.metadata)
+                    finally:
+                        await self.channel.on_agent_turn(False)
             except Exception as e:  # pylint: disable=broad-exception-caught  # report it, keep serving
                 log.error("Agent loop error: %s", e)
                 await self.mq.outgoing_msg(

@@ -13,6 +13,7 @@ from app.channels.message_queue import MessageQueue
 _mock_channel = MagicMock()
 _mock_channel.channel_type = ChannelType.TELEGRAM
 _mock_channel.has_stopped = False
+_mock_channel.on_agent_turn = AsyncMock()
 
 
 def make_mock_client(tool_calls=None, content="Hello!", finish_reason="stop"):
@@ -368,3 +369,62 @@ async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
 
     mock_gather.assert_called_once()
     assert len(mock_gather.call_args[0]) == 2
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_reports_turn_start_and_end_and_clears_stale_stop():
+    agent, _, mq = make_agent()
+    channel = MagicMock()
+    channel.channel_type = ChannelType.TELEGRAM
+    channel.has_stopped = False
+    calls = []
+    channel.clear_stopped.side_effect = lambda: calls.append("clear")
+    channel.on_agent_turn = AsyncMock(side_effect=lambda running: calls.append(running))
+    agent.channel = channel
+
+    async def fake_loop(*_args):
+        calls.append("loop")
+    with patch.object(agent, "agent_loop", side_effect=fake_loop):
+        await mq.incoming.put(IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={}))
+        await mq.incoming.put(IncomingMessage(content="/status", channel=ChannelType.TELEGRAM, metadata={}))
+        task = asyncio.create_task(agent.process_incoming())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    # a stop sent while idle is cleared before the turn; commands aren't turns
+    assert calls == ["clear", True, "loop", False]
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_reports_turn_end_even_when_agent_loop_fails():
+    agent, _, mq = make_agent()
+    channel = MagicMock()
+    channel.channel_type = ChannelType.TELEGRAM
+    channel.on_agent_turn = AsyncMock()
+    agent.channel = channel
+
+    with patch.object(agent, "agent_loop", side_effect=RuntimeError("boom")):
+        await mq.incoming.put(IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={}))
+        task = asyncio.create_task(agent.process_incoming())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    assert [c.args for c in channel.on_agent_turn.await_args_list] == [(True,), (False,)]
+
+
+@pytest.mark.asyncio
+async def test_registry_stop_between_turns_does_not_set_the_flag():
+    agent, _, _ = make_agent()
+    channel = MagicMock()
+    channel.stopped = False
+    agent.channel = channel
+    assert await agent.registry.execute("stop") == "Nothing to stop."
+    assert channel.stopped is False
