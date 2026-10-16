@@ -1,15 +1,31 @@
-"""FastHTML web channel — serves a chat UI and a JSON WebSocket endpoint.
+"""Web channel — a JSON HTTP API and WebSocket endpoint for the browser UI.
 
-The channel exposes two endpoints on the same uvicorn server:
+The UI itself is plain HTML/CSS/JS in the ``frontend/`` folder next to this
+module, served as static files by the same uvicorn server. Everything dynamic
+goes through these endpoints:
 
-    GET /          — FastHTML chat UI (HTML page, served to browsers)
-    WS  /ws        — WebSocket endpoint (JSON framing)
+    GET  /api/conversations  — conversations from all channels + the active ID
+    POST /api/conversations/<id>/rename — JSON ``{"name": ...}``
+    GET  /api/conversations/<id>/export — the conversation as a JSON download
+    GET  /api/messages       — messages of ``?conv_id=``
+    GET  /api/status         — model in use and whether login is enabled
+    GET  /api/commands       — slash commands, for the input's autocomplete
+    POST /api/upload         — multipart attachments, returns stored names
+    GET  /api/uploads/<name> — one stored upload (thumbnails, lightbox, downloads)
+    WS   /ws                 — chat (JSON framing)
+
+With ``WEB_PASSWORD`` set, ``WebAuthMiddleware`` adds ``POST /api/login`` and
+``POST /api/logout`` (see ``web_auth``).
 
 WebSocket message framing::
 
-    {"type": "message", "content": "..."}
+    → {"type": "message", "content": "...", "files": ["<stored name>", ...]}
+    ← {"type": "message" | "system", "content": "..."}
+    ← {"type": "busy", "busy": bool, "stopped": bool}
 
-Plain text is also accepted as a convenience.
+Plain text is also accepted as a convenience. ``busy`` frames go to every tab
+when an agent turn starts/ends (and once on connect); ``stopped`` is true when
+a ``/stop`` cut the turn short.
 """
 
 from __future__ import annotations
@@ -17,41 +33,23 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from pathlib import Path
 
 import uvicorn
-from fasthtml.common import (
-    A,
-    Button,
-    Div,
-    Head,
-    Html,
-    Input,
-    Label,
-    Link,
-    Meta,
-    NotStr,
-    Script,
-    Span,
-    Textarea,
-    Title,
-    Body,
-    H1,
-    P,
-    fast_app,
-)
+from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-from starlette.routing import Mount, WebSocketRoute
+from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
-from fasthtml.svg import Svg, Path as SvgPath, Polyline, Rect
 
 from .. import config
 from ..core import runtime
 from ..infra.conversations import ConversationStore
 from .channel import Channel, ChannelType
+from .commands import CommandRegistry, rename_conversation
 from .message import IncomingMessage, OutgoingMessage
 from .message_queue import MessageQueue
 from .web_auth import WebAuthMiddleware, is_loopback_host
@@ -59,198 +57,35 @@ from .web_auth import WebAuthMiddleware, is_loopback_host
 
 log = logging.getLogger(__name__)
 
+# The browser UI (index.html, login.html, CSS, JS, vendored libs).
+FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 
-# --------------------------------------------------------------------------- #
-# FastHTML page builder                                                        #
-# --------------------------------------------------------------------------- #
-
-# Bump when web_channel.css / web_channel.js change, so browsers (Edge caches
-# static assets aggressively) fetch the new copy instead of a stale one.
-_ASSET_VERSION = "11"
-
-# Paperclip icon for the attach button (inline so it inherits theme colors).
-_PAPERCLIP_SVG = (
-    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" '
-    'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
-    'stroke-linejoin="round" aria-hidden="true">'
-    '<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 '
-    '5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>'
-)
+# Browsers (Edge especially) cache static assets aggressively; make them
+# revalidate every time so a changed frontend file is picked up on reload.
+# StaticFiles sends ETag/Last-Modified, so unchanged files cost only a 304.
+_NO_CACHE = {"Cache-Control": "no-cache"}
 
 
-def _build_page(auth_enabled: bool = False) -> Html:
+# Uploads the browser may render inline (thumbnails, lightbox). Anything else,
+# SVG and HTML included (they can carry script), is served as a download.
+_INLINE_IMAGE_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+# Stored upload names are "<uuid4 hex>_<original name>".
+_UPLOAD_PREFIX = re.compile(r"^[0-9a-f]{32}_")
 
-    def MarkdownIcon(size=16):
-        return Svg(
-            Rect(x="3", y="5", width="18", height="14", rx="2"),
-            SvgPath(d="M7 15V9l3 3 3-3v6"),
-            SvgPath(d="M17 9v4m0 0 2-2m-2 2-2-2"),
-            width=size, height=size, viewBox="0 0 24 24",
-            fill="none", stroke="currentColor", stroke_width="2",
-            stroke_linecap="round", stroke_linejoin="round",
-        )
 
-    def RawIcon(size=16):
-        return Svg(
-            Polyline(points="8 7 3 12 8 17"),
-            Polyline(points="16 7 21 12 16 17"),
-            width=size, height=size, viewBox="0 0 24 24",
-            fill="none", stroke="currentColor", stroke_width="2",
-            stroke_linecap="round", stroke_linejoin="round",
-        )
+class _FrontendFiles(StaticFiles):
+    """``StaticFiles`` whose responses carry ``Cache-Control: no-cache``."""
 
-    return Html(
-        Head(
-            Meta(charset="utf-8"),
-            Meta(
-                name="viewport",
-                content="width=device-width, initial-scale=1, viewport-fit=cover, "
-                "interactive-widget=resizes-content",
-            ),
-            Title("anotherbot"),
-            Link(rel="preconnect", href="https://fonts.googleapis.com"),
-            Link(
-                rel="stylesheet",
-                href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap",
-            ),
-            Link(rel="stylesheet", href=f"/static/web_channel.css?v={_ASSET_VERSION}"),
-        ),
-        Body(
-            Div(
-                # ---- Header (full width) ----
-                Div(
-                    Div(
-                        Button("☰", id="sidebar-toggle", title="Toggle sidebar"),
-                        H1("anotherbot"),
-                        id="header-left",
-                    ),
-                    Div(
-                        Div(
-                            Span(id="status-dot"),
-                            Span("Connecting…", id="status-text"),
-                            id="status",
-                        ),
-                        Div(
-                            Button(MarkdownIcon(), type="button", data_mode="md",
-                                title="Markdown", aria_label="Markdown",
-                                aria_pressed="true"),
-                            Button(RawIcon(), type="button", data_mode="raw",
-                                title="Raw", aria_label="Raw",
-                                aria_pressed="false"),
-                            id="render-toggle",
-                            role="group",
-                            title="How to show bot replies",
-                        ),
-                        Button("☾", id="theme-btn", title="Toggle light/dark"),
-                        *(
-                            [
-                                A(
-                                    "⍈",
-                                    href="/logout",
-                                    id="logout-link",
-                                    title="Log out",
-                                    aria_label="Log out",
-                                )
-                            ]
-                            if auth_enabled
-                            else []
-                        ),
-                        id="header-right",
-                    ),
-                    id="header",
-                ),
-                # ---- Body row: sidebar + chat ----
-                Div(
-                    # Sidebar
-                    Div(
-                        Div(
-                            Span("Conversations"),
-                            Button("+ New", id="new-conv-btn"),
-                            id="sidebar-header",
-                        ),
-                        Div(id="conv-list"),
-                        id="sidebar",
-                    ),
-                    # Chat panel
-                    Div(
-                        # Scroll container (outer) + messages (inner flex, bottom-anchored)
-                        Div(
-                            Div(
-                                Div(
-                                    Div("✦", cls="icon"),
-                                    P(
-                                        "Ask me anything, or try /help for available commands."
-                                    ),
-                                    id="empty",
-                                ),
-                                id="messages",
-                            ),
-                            id="messages-wrap",
-                        ),
-                        # Thinking dots — always just above the input box
-                        Div(
-                            Div(
-                                Div(Span(), Span(), Span(), cls="dots"),
-                                cls="thinking-bubble",
-                            ),
-                            id="thinking",
-                        ),
-                        # Selected-attachment preview chips (populated by JS)
-                        Div(id="attachments"),
-                        # Input area
-                        Div(
-                            # Hidden native file picker. A <label for> (not a JS
-                            # click) opens it — native label activation works
-                            # consistently across browsers (Edge included),
-                            # whereas calling input.click() on a display:none
-                            # input is unreliable in Edge. Hide it with an inline
-                            # visually-hidden style (not display:none, and not an
-                            # external CSS class): display:none suppresses the
-                            # `change` event in Edge, and an inline style can't be
-                            # defeated by a stale cached stylesheet.
-                            Input(
-                                type="file",
-                                id="file-input",
-                                multiple=True,
-                                cls="visually-hidden",
-                                style=(
-                                    "position:absolute;width:1px;height:1px;"
-                                    "padding:0;margin:-1px;overflow:hidden;"
-                                    "clip:rect(0,0,0,0);white-space:nowrap;border:0"
-                                ),
-                            ),
-                            Label(
-                                NotStr(_PAPERCLIP_SVG),
-                                id="attach-btn",
-                                title="Attach files",
-                                **{"for": "file-input"},
-                            ),
-                            Textarea(
-                                id="msg-input",
-                                aria_label="Message",
-                                placeholder=(
-                                    "Message anotherbot…  "
-                                    "(Enter to send, Shift+Enter for newline)"
-                                ),
-                                autocomplete="off",
-                                rows="1",
-                            ),
-                            Button("Send", id="send-btn", disabled=True),
-                            id="input-area",
-                        ),
-                        id="main",
-                    ),
-                    id="body-row",
-                ),
-                id="app",
-            ),
-            # Vendored (no CDN) so the UI works offline: markdown parser + HTML sanitizer.
-            Script(src="/static/vendor/marked.min.js?v=15.0.12"),
-            Script(src="/static/vendor/purify.min.js?v=3.2.6"),
-            Script(src=f"/static/web_channel.js?v={_ASSET_VERSION}"),
-        ),
-        lang="en",
-    )
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(_NO_CACHE)
+        return response
 
 
 # --------------------------------------------------------------------------- #
@@ -259,11 +94,11 @@ def _build_page(auth_enabled: bool = False) -> Html:
 
 
 class WebChannel(Channel):
-    """FastHTML web channel.
+    """Web channel.
 
-    Serves the chat UI at ``GET /`` and accepts WebSocket connections at
-    ``WS /ws``.  Multiple concurrent clients are supported — each gets a
-    unique UUID stored in ``_connections``.
+    Serves the ``frontend/`` UI and its JSON API, and accepts WebSocket
+    connections at ``WS /ws``. Multiple concurrent clients are supported —
+    each gets a unique UUID stored in ``_connections``.
     """
 
     def __init__(
@@ -278,13 +113,18 @@ class WebChannel(Channel):
         self.port = port
         self.password = password or None
         self.stopped: bool = False
+        # Whether an agent turn is running, and whether /stop was sent during it.
+        self._turn_running = False
+        self._stop_requested = False
         self._connections: dict[str, WebSocket] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
         self._conn_lock = asyncio.Lock()
         self._upload_dir = config.PROJECT_HOME / "uploads"
-        # Built in start(): the FastHTML app, and what uvicorn serves (the app,
+        # The agent's slash commands, set by bg_server; listed by /api/commands.
+        self.commands: CommandRegistry | None = None
+        # Built in start(): the Starlette app, and what uvicorn serves (the app,
         # wrapped in WebAuthMiddleware when a password is set).
-        self._fasthtml_app = None
+        self._app: Starlette | None = None
         self._asgi_app = None
         mq.register(self, self.send_message)
 
@@ -318,11 +158,11 @@ class WebChannel(Channel):
     # -- Lifecycle ----------------------------------------------------------
 
     def start(self) -> None:
-        """Build the FastHTML app, its routes, and the WebSocket endpoint.
+        """Build the Starlette app: API routes, WebSocket endpoint and frontend.
 
         Raises:
             RuntimeError: if the channel would listen on a non-loopback host
-                without a password.
+                without a password, or ``frontend/`` is missing.
         """
         log.info("Building web channel on %s:%s", self.host, self.port)
 
@@ -336,40 +176,83 @@ class WebChannel(Channel):
                 "Web channel has no password (WEB_PASSWORD unset); localhost access only"
             )
 
-        self._fasthtml_app, rt = fast_app(hdrs=())
-        self._asgi_app = (
-            WebAuthMiddleware(self._fasthtml_app, self.password)
-            if self.password
-            else self._fasthtml_app
+        self._app = Starlette(
+            routes=[
+                Route("/api/conversations", self._conversations_api),
+                Route(
+                    "/api/conversations/{conv_id:int}/rename",
+                    self._rename_api,
+                    methods=["POST"],
+                ),
+                Route("/api/conversations/{conv_id:int}/export", self._export_api),
+                Route("/api/messages", self._messages_api),
+                Route("/api/status", self._status_api),
+                Route("/api/commands", self._commands_api),
+                Route("/api/upload", self._upload_api, methods=["POST"]),
+                Route("/api/uploads/{name}", self._upload_file_api),
+                WebSocketRoute("/ws", self._ws_endpoint),
+                Route("/login", self._login_page),
+                # Last: everything else is a frontend file ("/" → index.html)
+                Mount("/", _FrontendFiles(directory=FRONTEND_DIR, html=True)),
+            ]
         )
-
-        rt("/")(self._index)
-        rt("/api/conversations")(self._conversations_api)
-        rt("/api/messages")(self._messages_api)
-        rt("/api/status")(self._status_api)
-        rt("/api/upload", methods=["POST"])(self._upload_api)
-
-        routes = self._fasthtml_app.router.routes
-        # Low-level Starlette WebSocket route (multi-client management)
-        routes.insert(0, WebSocketRoute("/ws", self._ws_endpoint))
-        # Static assets (CSS, JS)
-        static_dir = Path(__file__).parent / "static"
-        routes.insert(
-            1, Mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        self._asgi_app = (
+            WebAuthMiddleware(self._app, self.password) if self.password else self._app
         )
 
     # -- HTTP routes ----------------------------------------------------------
 
-    def _index(self):
-        """Serve the chat UI page."""
-        return _build_page(auth_enabled=bool(self.password))
+    def _login_page(self, _req: Request):
+        """Serve the login page (only reachable when a password is set)."""
+        if not self.password:
+            return Response(status_code=404)
+        return FileResponse(FRONTEND_DIR / "login.html", headers=_NO_CACHE)
 
-    def _conversations_api(self):
+    def _conversations_api(self, _req: Request):
         """List conversations from all channels plus the web channel's active one."""
         ch = ChannelType.WEB.value
         convs = ConversationStore().list()
         active_id = runtime.get(f"conversation_id:{ch}")
         return JSONResponse({"conversations": convs, "active_id": active_id})
+
+    async def _rename_api(self, req: Request):
+        """Rename a conversation from any channel: ``{"name": ...}`` → ``{"id", "name"}``.
+
+        Done here rather than via ``/rename`` so it doesn't queue behind a
+        running agent turn or post a reply into the chat.
+        """
+        conv_id = req.path_params["conv_id"]
+        try:
+            data = await req.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = None
+        name = data.get("name") if isinstance(data, dict) else None
+        if not isinstance(name, str) or not name.strip():
+            return JSONResponse(
+                {"error": 'Expected JSON {"name": "<non-empty>"}'}, status_code=400
+            )
+        try:
+            persisted = rename_conversation(ConversationStore(), conv_id, name)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        return JSONResponse({"id": conv_id, "name": persisted})
+
+    def _export_api(self, req: Request):
+        """Download a conversation and its messages as a JSON file.
+
+        Unlike ``/export``, nothing is written on the server: the browser may
+        be on another machine (e.g. the app runs in Docker).
+        """
+        conv_id = req.path_params["conv_id"]
+        try:
+            filename, payload = ConversationStore().export_payload(conv_id)
+        except ValueError as e:
+            return JSONResponse({"error": str(e)}, status_code=404)
+        # filename is "<id>-<[a-z0-9-] slug>.json", safe to put in a header as-is
+        return JSONResponse(
+            payload,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     def _messages_api(self, req: Request):
         """Return the messages of the conversation given by ``?conv_id=``."""
@@ -384,10 +267,22 @@ class WebChannel(Channel):
             return Response(status_code=404)
         return JSONResponse({"messages": store.load_messages(conv_id)})
 
-    def _status_api(self):
-        """Return the model currently in use."""
+    def _status_api(self, _req: Request):
+        """Return the model currently in use and whether login is enabled."""
         model = runtime.get("model", config.get("model", "AI"))
-        return JSONResponse({"model": model})
+        return JSONResponse({"model": model, "auth": bool(self.password)})
+
+    def _commands_api(self, _req: Request):
+        """Slash commands for autocomplete: the agent's, plus ``/whoami``.
+
+        ``/whoami`` is answered by this channel, so it isn't in the registry.
+        """
+        cmds = [
+            {"name": c.name, "description": c.description}
+            for c in (self.commands.list() if self.commands else [])
+        ]
+        cmds.append({"name": "whoami", "description": "Show this tab's connection ID."})
+        return JSONResponse({"commands": sorted(cmds, key=lambda c: c["name"])})
 
     async def _upload_api(self, req: Request):
         """Accept one or more multipart files and store them on disk.
@@ -417,6 +312,34 @@ class WebChannel(Channel):
                 {"error": f"Upload exceeds {limit_mb} MB limit"}, status_code=413
             )
         return JSONResponse({"files": saved})
+
+    def _upload_file_api(self, req: Request):
+        """Serve one stored upload, so the UI can show attachments in history.
+
+        Only files directly inside the upload dir are served (basename-only,
+        like ``_resolve_upload_paths``). Uploads share the UI's origin and
+        session, so ``nosniff`` and a sandbox CSP keep the browser from ever
+        running one as a page; non-image files are forced downloads.
+        """
+        resolved = self._resolve_upload_paths([req.path_params["name"]])
+        if not resolved:
+            return Response(status_code=404)
+        path = Path(resolved[0])
+        headers = {
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            # stored names are unique, so the content never changes
+            "Cache-Control": "private, max-age=31536000, immutable",
+        }
+        media_type = _INLINE_IMAGE_TYPES.get(path.suffix.lower())
+        if media_type:
+            return FileResponse(path, media_type=media_type, headers=headers)
+        return FileResponse(
+            path,
+            media_type="application/octet-stream",
+            filename=_UPLOAD_PREFIX.sub("", path.name),
+            headers=headers,
+        )
 
     async def _save_uploads(self, uploads: list) -> list[dict] | None:
         """Write uploaded files to the upload dir.
@@ -458,6 +381,7 @@ class WebChannel(Channel):
 
         async with self._conn_lock:
             self._connections[client_id] = ws
+        await self._safe_send_json(client_id, self._busy_frame(self._turn_running))
 
         try:
             while True:
@@ -479,9 +403,10 @@ class WebChannel(Channel):
         """Parse one WebSocket frame and enqueue it for the agent.
 
         ``/whoami`` is answered inline because it needs the per-connection
-        client ID. All other commands (/help, /status, /stop, /new, /load, …)
-        are forwarded to BackgroundAgent's CommandRegistry for consistency with
-        the Telegram and Discord channels.
+        client ID, and ``/stop`` because the agent's queue is busy with the very
+        turn it should stop (Telegram and Discord do the same). All other
+        commands (/help, /status, /new, /load, …) are forwarded to
+        BackgroundAgent's CommandRegistry.
         """
         content, files = self._extract_message(raw)
         if not content and not files:
@@ -494,6 +419,11 @@ class WebChannel(Channel):
                 await self._safe_send_json(
                     client_id,
                     {"type": "system", "content": f"Connection ID: {client_id}"},
+                )
+                return
+            if cmd and cmd[0].lower() == "stop":
+                await self._safe_send_json(
+                    client_id, {"type": "system", "content": self._request_stop()}
                 )
                 return
 
@@ -521,11 +451,46 @@ class WebChannel(Channel):
 
     # -- Message delivery ---------------------------------------------------
 
+    def _request_stop(self) -> str:
+        """Ask the running turn to stop; returns the reply for the requester.
+
+        The agent loop checks the flag between steps, so the turn ends after
+        the current model call / tool batch. When idle the flag is left alone.
+        """
+        if not self._turn_running:
+            return "Nothing to stop."
+        self.stopped = True
+        self._stop_requested = True
+        return "Stopping after the current step…"
+
+    @staticmethod
+    def _busy_frame(busy: bool, stopped: bool = False) -> dict:
+        return {"type": "busy", "busy": busy, "stopped": stopped}
+
+    async def on_agent_turn(self, running: bool) -> None:
+        """Track the running turn and tell every tab (they share one agent).
+
+        The frame goes through the outgoing queue, so it reaches the browser
+        after the turn's replies rather than overtaking them.
+        """
+        stopped = not running and self._stop_requested
+        self._turn_running = running
+        self._stop_requested = False
+        await self.mq.outgoing_msg(
+            OutgoingMessage(
+                content="",
+                channel=self,  # the queue routes by the registered channel object
+                metadata={"busy_frame": self._busy_frame(running, stopped)},
+            )
+        )
+
     async def send_message(self, message: OutgoingMessage) -> None:
         client_id = message.metadata.get("websocket_id")
         is_command = message.metadata.get("is_command", False)
         msg_type = "system" if is_command else "message"
         payload = {"type": msg_type, "content": message.content}
+        if "busy_frame" in message.metadata:
+            client_id, payload = None, message.metadata["busy_frame"]
         if client_id:
             await self._safe_send_json(client_id, payload)
         else:
@@ -536,19 +501,6 @@ class WebChannel(Channel):
                 await self._safe_send_json(cid, payload)
 
     # -- Helpers ------------------------------------------------------------
-
-    @staticmethod
-    def _extract_content(raw: str) -> str | None:
-        raw = raw.strip()
-        if not raw:
-            return None
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, TypeError):
-            return raw
-        if isinstance(data, dict) and data.get("type") == "message":
-            return str(data.get("content") or "").strip() or None
-        return raw
 
     def _extract_message(self, raw: str) -> tuple[str | None, list[str]]:
         """Parse a raw WebSocket frame into (text, attachment_paths).

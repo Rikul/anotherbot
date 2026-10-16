@@ -274,3 +274,14 @@ async def test_scheduled_tasks_gets_channels_keyed_by_delivery_channel_string():
     tg_mq, dc_mq = mq_instances
     assert kwargs["mqs"].get("telegram") is tg_mq
     assert kwargs["mqs"].get("discord") is dc_mq
+
+
+def test_web_channel_gets_the_agents_command_registry(monkeypatch):
+    import app.config as config
+    from app.bg_server import web_channel_agent
+    monkeypatch.setenv("WEBSOCKET_HOST", "127.0.0.1")
+    config.load()
+    with patch("app.bg_server.BackgroundAgent") as MockAgent:
+        channel, agent, _ = web_channel_agent()
+    assert agent is MockAgent.return_value
+    assert channel.commands is agent.registry  # listed by /api/commands

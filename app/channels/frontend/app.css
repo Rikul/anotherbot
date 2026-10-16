@@ -9,6 +9,7 @@
     --text-muted:  #94a3b8;
     --accent:      #6366f1;
     --accent-h:    #818cf8;
+    --danger:      #f87171;
     --user-bg:     #374151;
     --ai-bg:       #1e293b;
     --sidebar-w:   260px;
@@ -25,6 +26,7 @@
     --text-muted:#64748b;
     --accent:    #6366f1;
     --accent-h:  #4f46e5;
+    --danger:    #dc2626;
     --user-bg:   #f3f4f6;
     --ai-bg:     #f1f5f9;
 }
@@ -119,9 +121,9 @@ body {
 
 .conv-item {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-    padding: 8px 10px;
+    align-items: center;
+    gap: 4px;
+    padding: 8px 6px 8px 10px;
     border-radius: 8px;
     cursor: pointer;
     transition: background .12s;
@@ -131,6 +133,81 @@ body {
 .conv-item:hover { background: var(--surface2); }
 .conv-item.active { background: var(--surface2); }
 .conv-item.active .conv-name { color: var(--accent); }
+.conv-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+/* "⋯" actions button: shown on hover/focus, on the active row, while its
+   menu is open, and always on touch screens (no hover there). */
+.conv-actions-btn {
+    flex-shrink: 0;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity .12s, background .12s, color .12s;
+}
+.conv-item:hover .conv-actions-btn,
+.conv-item.active .conv-actions-btn,
+.conv-actions-btn:focus-visible,
+.conv-actions-btn[aria-expanded="true"] { opacity: 1; }
+.conv-actions-btn:hover,
+.conv-actions-btn[aria-expanded="true"] { background: var(--border); color: var(--text); }
+@media (hover: none) { .conv-actions-btn { opacity: 1; } }
+
+/* Fixed + appended to <body> so #conv-list's overflow can't clip it */
+.conv-menu {
+    position: fixed;
+    z-index: 50;
+    min-width: 130px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
+}
+.conv-menu button {
+    background: none;
+    border: none;
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+    font-family: var(--font);
+    font-size: 0.84rem;
+    padding: 6px 10px;
+    text-align: left;
+}
+.conv-menu button:hover,
+.conv-menu button:focus-visible { background: var(--surface2); outline: none; }
+.conv-menu button.danger { color: var(--danger); }
+/* fixed darker red so white text clears WCAG AA in both themes */
+.conv-menu button.danger.confirming { background: #dc2626; color: #fff; }
+.conv-menu button:disabled { opacity: .45; cursor: default; background: none; }
+
+.conv-rename-input {
+    width: 100%;
+    font-family: var(--font);
+    font-size: 0.86rem;
+    font-weight: 500;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 1px 4px;
+    outline: none;
+}
 .conv-name {
     font-size: 0.86rem;
     font-weight: 500;
@@ -245,12 +322,28 @@ body {
 /* darker than --accent so 12px white text clears WCAG AA (~6.3:1) in both themes */
 #render-toggle button.active { background: #4f46e5; color: #fff; }
 #theme-btn:hover { border-color: var(--accent); color: var(--accent); }
-#logout-link {
+#logout-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: var(--font);
     font-size: 0.8rem;
     color: var(--text-muted);
-    text-decoration: none;
 }
-#logout-link:hover { color: var(--accent); }
+#logout-btn:hover { color: var(--accent); }
+#model-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    font: inherit;
+    color: var(--text-muted);
+    max-width: 240px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#model-btn:hover, #model-btn:focus-visible { color: var(--accent); outline: none; }
 #status-dot {
     width: 8px; height: 8px;
     border-radius: 50%;
@@ -297,6 +390,33 @@ body {
     align-self: stretch;
     width: 100%;
 }
+/* copy button, top-right of each reply (on the row: re-rendering replaces the bubble) */
+.msg-row.ai { position: relative; }
+.ai .bubble { padding-right: 40px; }   /* room for the button, so it never covers text */
+.copy-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .12s, background .12s, color .12s;
+}
+.msg-row.ai:hover .copy-btn,
+.copy-btn:focus-visible,
+.copy-btn.copied { opacity: 1; }
+.copy-btn:hover, .copy-btn:focus-visible { background: var(--surface2); color: var(--text); outline: none; }
+.copy-btn.copied { color: #16a34a; }
+@media (hover: none) { .copy-btn { opacity: 1; } }
 .msg-row.system {
     align-self: center;
     width: auto;
@@ -322,6 +442,93 @@ body {
 .bubble code { background: var(--surface2); border-radius: 4px; padding: 1px 5px; font-size: .85em; font-family: 'Fira Code','Cascadia Code',monospace; }
 .bubble pre  { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; margin-top: 6px; }
 .bubble pre code { background: none; padding: 0; }
+
+/* attachments in user messages: image thumbnails + file chips */
+.msg-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;   /* file chips keep their own height next to thumbnails */
+    gap: 8px;
+    margin-top: 8px;
+    white-space: normal;
+}
+.bubble > .msg-attachments:first-child { margin-top: 0; }
+.msg-thumb {
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    cursor: zoom-in;
+    overflow: hidden;
+    line-height: 0;
+    transition: border-color .15s;
+}
+/* fixed height so the chat doesn't jump when the image arrives */
+.msg-thumb img { display: block; height: 96px; width: auto; min-width: 48px; max-width: 180px; object-fit: cover; }
+.msg-thumb:hover, .msg-thumb:focus-visible { border-color: var(--accent); outline: none; }
+.msg-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 0.84rem;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.msg-file svg { flex-shrink: 0; }
+.msg-file span { overflow: hidden; text-overflow: ellipsis; }
+a.msg-file:hover { border-color: var(--accent); color: var(--accent); }
+span.msg-file { color: var(--text-muted); }
+
+/* lightbox: dark in both themes, like most image viewers */
+.lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, .85);
+}
+.lightbox figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: 100%; }
+.lightbox img {
+    display: block;
+    max-width: calc(100vw - 48px);
+    max-height: calc(100vh - 110px);
+    object-fit: contain;
+    border-radius: 6px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .5);
+}
+.lightbox figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 14px;
+    color: #e2e8f0;
+    font-size: 0.85rem;
+}
+.lightbox-open { color: #a5b4fc; }
+.lightbox-close {
+    position: absolute;
+    top: calc(12px + env(safe-area-inset-top, 0px));
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, .14);
+    color: #fff;
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+.lightbox-close:hover, .lightbox-close:focus-visible { background: rgba(255, 255, 255, .26); outline: none; }
 
 /* rendered markdown: block elements handle spacing, so drop pre-wrap */
 .bubble.md { white-space: normal; }
@@ -361,6 +568,7 @@ body {
 
 /* ---- input area ---- */
 #input-area {
+    position: relative;   /* anchors #cmd-suggest */
     padding: 14px 20px;
     /* keep clear of the iOS home indicator (needs viewport-fit=cover) */
     padding-bottom: max(14px, env(safe-area-inset-bottom));
@@ -371,6 +579,36 @@ body {
     align-items: flex-end;
     flex-shrink: 0;
 }
+/* slash-command autocomplete, floating above the input */
+#cmd-suggest {
+    position: absolute;
+    left: 20px;
+    right: 20px;
+    bottom: calc(100% + 6px);
+    z-index: 20;
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
+}
+.cmd-option {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.86rem;
+    white-space: nowrap;
+    overflow: hidden;
+}
+.cmd-option.selected { background: var(--surface2); }
+.cmd-label { font-weight: 600; color: var(--text); }
+.cmd-hint { color: var(--accent); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+.cmd-detail { color: var(--text-muted); margin-left: auto; overflow: hidden; text-overflow: ellipsis; flex-shrink: 2; min-width: 0; }
 #msg-input {
     flex: 1;
     background: var(--surface2);
@@ -406,6 +644,28 @@ body {
 #send-btn:hover   { background: var(--accent-h); }
 #send-btn:active  { transform: scale(.97); }
 #send-btn:disabled { background: var(--border); cursor: not-allowed; }
+/* Icon button, same footprint as #attach-btn and colours as #send-btn */
+#stop-btn {
+    background: var(--accent);
+    border: none;
+    border-radius: 10px;
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 42px;
+    width: 42px;
+    padding: 0;
+    flex-shrink: 0;
+    transition: background .15s, transform .1s;
+}
+#stop-btn[hidden] { display: none; }   /* display:flex above would override [hidden] */
+#stop-btn:hover:not(:disabled) { background: var(--accent-h); }
+#stop-btn:active:not(:disabled) { transform: scale(.97); }
+#stop-btn:disabled { background: var(--border); color: var(--text-muted); cursor: default; }
+#stop-btn:disabled svg { animation: pulse 1s infinite; }   /* "Stopping…" */
+#stop-btn svg { display: block; }
 
 /* Hide the file input without display:none — keeps it in the layout/event
    tree so its `change` event fires reliably (Edge) when opened via the label. */
@@ -504,5 +764,7 @@ body {
     #input-area { padding-left: 12px; padding-right: 12px; }
     /* make room for the Markdown/Raw switch: the status dot alone is enough */
     #header-right { gap: 8px; }
-    #status-text { display: none; }
+    #model-btn { max-width: 26vw; }
+    #cmd-suggest { left: 12px; right: 12px; }
+    .cmd-detail { display: none; }
 }

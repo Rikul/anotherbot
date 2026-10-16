@@ -4,7 +4,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 
 - **Interactive CLI**: Multi-turn REPL sessions with tool use
 - **Background Agent**: Runs as a persistent bot, receiving and sending messages via channels
-- **Web UI**: Browser-based chat interface served by FastHTML + uvicorn — dark/light theme, collapsible conversation sidebar, full conversation history
+- **Web UI**: Browser-based chat interface (plain HTML/CSS/JS in `app/channels/frontend/`, talking to a Starlette + uvicorn JSON/WebSocket API) — dark/light theme, collapsible conversation sidebar, full conversation history
 - **Telegram Integration**: Built-in Telegram bot — receive messages, respond, run tools, deliver results
 - **Discord Integration**: Discord bot — same agent loop, per-channel message isolation, owner DM fallback for scheduled tasks
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
@@ -122,14 +122,22 @@ WEBSOCKET_HOST=127.0.0.1 WEBSOCKET_PORT=8765 LLM_API_KEY=... ./run.sh background
 
 Then open `http://localhost:8765/` in a browser.
 
+The UI is static HTML/CSS/JS in `app/channels/frontend/` (no build step), served by the same server. It talks to the backend only through JSON over HTTP (`/api/conversations`, `/api/messages`, `/api/status`, `/api/upload`, `/api/login`, `/api/logout`) and JSON frames on the `/ws` WebSocket, so you can edit it and just reload the page.
+
 **Login:** set `WEB_PASSWORD` to require a password. The UI, REST API, uploads and the WebSocket are all behind the login (a signed `HttpOnly` session cookie, valid 30 days; changing the password logs everyone out). Without `WEB_PASSWORD` the web channel only starts when bound to localhost; on any other host it is disabled with an error. The web UI is an admin interface — the agent can run shell commands — so use a long password and put HTTPS in front (e.g. Caddy, Tailscale) if it is reachable over a network.
 
 **Features:**
 - Dark/light theme toggle (persisted in `localStorage`)
+- Current model shown in the header (click it to switch with `/model`)
+- Copy button on every bot reply (copies the original markdown)
+- Slash-command autocomplete: type `/` for commands with their arguments; after `/load`, `/fork`, `/rename`, `/export` or `/delete` it suggests conversations (by ID or name). Tab/Enter accept, arrows move, Escape closes
 - Collapsible sidebar listing conversations from **all** channels (web, Telegram, Discord, CLI), each tagged with a channel badge — click to load history
+- `⋯` menu on each conversation: **Rename** (inline), **Fork** (copies it as "<name> (fork)", "(fork 2)", … and switches to the copy), **Export** (downloads it as JSON), **Delete** (asks for a second click; deleting the open conversation switches to your most recent other one, or starts a new one if none is left)
 - `+ New` button and `/new` command to start a fresh conversation
+- Attach files with the paperclip, or paste them into the message box (screenshots, files copied in a file manager); sent images show as thumbnails (click for a full-size view), other files as download links
 - `/help`, `/status`, `/whoami`, `/stop` answered instantly without an LLM call
-- All other slash commands (`/model`, `/load`, `/fork`, `/rename`, `/export`) forwarded to the agent
+- **Stop** button next to Send while the agent is working (same as `/stop`): the agent finishes its current step — model call or tool batch — then stops
+- All other slash commands (`/model`, `/load`, `/fork`, `/rename`, `/export`, `/delete`) forwarded to the agent
 
 ### Background Agent (Telegram / Discord)
 
@@ -149,7 +157,7 @@ DISCORD_ALLOW_FROM=                  # comma-separated user IDs; empty = allow a
 
 Each channel gets its own message queue and agent. Scheduled task results are delivered to the channel the task was created from; if no context is available, the Discord bot owner is DM'd.
 
-**Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — pause the bot; `/whoami` — show your user ID (Telegram only); `/list`, `/new`, `/load <id>`, `/fork [id]`, `/rename <id> <name>`, `/export [id]` — manage conversation history. `/list` shows only the current channel's conversations; `/load`, `/fork`, `/rename` and `/export` accept any conversation ID, including ones from other channels.
+**Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — stop the running turn; `/whoami` — show your user ID (Telegram only); `/list`, `/new`, `/load <id>`, `/fork [id]`, `/rename <id> <name>`, `/export [id]`, `/delete <id>` — manage conversation history. `/list` shows only the current channel's conversations; `/load`, `/fork`, `/rename`, `/export` and `/delete` accept any conversation ID, including ones from other channels (`/delete` refuses a conversation another channel currently has open).
 
 ### Scheduled Tasks
 

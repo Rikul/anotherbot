@@ -110,6 +110,7 @@ def web_channel_agent() -> tuple[
                 channel=web_channel,
                 max_iterations=runtime.get("max_iterations", 250),
             )
+            web_channel.commands = web_agent.registry  # for the input's autocomplete
 
     return web_channel, web_agent, web_mq
 

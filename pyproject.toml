@@ -10,9 +10,11 @@ dependencies = [
     "ddgs>=9.14.1",
     "geocoder>=1.38.1",
     "discord-py>=2.7.1",
-    "python-fasthtml>=0.14.2",
     "uvicorn[standard]>=0.48.0",
     "fastmcp>=2.0",
+    "starlette>=1.2.1",
+    "itsdangerous>=2.2.0",
+    "python-multipart>=0.0.30",
 ]
 
 [dependency-groups]
@@ -30,7 +32,3 @@ asyncio_mode = "strict"
 
 
 
-[tool.pylint.typecheck]
-# fasthtml.common creates its HTML tag functions (Div, Button, ...) at import time,
-# so pylint can't see them statically.
-ignored-modules = ["fasthtml.common"]

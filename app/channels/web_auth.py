@@ -4,10 +4,14 @@
 ``BaseHTTPMiddleware`` doesn't see WebSocket scopes) that guards every HTTP
 request *and* the ``/ws`` handshake:
 
-* ``GET/POST /login`` and ``GET /logout`` are served by the middleware itself.
+* ``POST /api/login`` (JSON ``{"password": ...}``) and ``POST /api/logout``
+  are served by the middleware itself.
 * A successful login sets a signed, ``HttpOnly``, ``SameSite=Lax`` session
   cookie. The signing key is derived from the password, so changing
   ``WEB_PASSWORD`` logs everyone out.
+* The login page (``/login``) and its assets are public and passed through to
+  the app, which serves them from ``frontend/``; a logged-in ``GET /login``
+  redirects to ``/``.
 * Unauthenticated requests: ``GET /`` redirects to ``/login``, other HTTP
   requests get 401, and WebSocket handshakes are rejected.
 * State-changing requests and WebSocket handshakes must come from the same
@@ -20,15 +24,15 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import html
 import ipaddress
+import json
 import logging
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import urlsplit
 
 from itsdangerous import BadSignature, TimestampSigner
 from starlette.datastructures import Headers
 from starlette.requests import cookie_parser
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import JSONResponse, RedirectResponse, Response
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +41,8 @@ SESSION_MAX_AGE = 30 * 24 * 3600  # 30 days
 _SESSION_VALUE = "web"
 _FAILED_LOGIN_DELAY = 1.0  # seconds; slows down password guessing
 _MAX_LOGIN_BODY = 4096
+# Served to logged-out browsers: the login page and the files it loads.
+_PUBLIC_PATHS = frozenset({"/login", "/login.css", "/login.js"})
 
 
 def is_loopback_host(host: str) -> bool:
@@ -47,32 +53,6 @@ def is_loopback_host(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
-
-
-def _login_page(error: str = "") -> HTMLResponse:
-    err = f'<p class="err">{html.escape(error)}</p>' if error else ""
-    body = f"""<!doctype html>
-<html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>anotherbot — log in</title>
-<style>
-  :root {{ color-scheme: light dark; }}
-  body {{ font-family: system-ui, sans-serif; margin: 0;
-         display: grid; place-items: center; min-height: 100vh; }}
-  form {{ display: flex; flex-direction: column; gap: 12px; width: min(320px, 90vw); }}
-  input, button {{ font: inherit; padding: 10px 12px;
-                   border-radius: 8px; border: 1px solid #8884; }}
-  button {{ cursor: pointer; background: #6366f1; color: #fff; border: none; }}
-  .err {{ color: #dc2626; margin: 0; }}
-</style></head>
-<body><form method="post" action="/login">
-  <h1>anotherbot</h1>
-  {err}
-  <input type="password" name="password" placeholder="Password" autocomplete="current-password" autofocus required>
-  <button type="submit">Log in</button>
-</form></body></html>"""
-    status = 401 if error else 200
-    return HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
 
 
 class WebAuthMiddleware:  # pylint: disable=too-few-public-methods  # ASGI app: only __call__
@@ -152,12 +132,15 @@ class WebAuthMiddleware:  # pylint: disable=too-few-public-methods  # ASGI app: 
             )
             return
 
-        if path == "/login":
+        if path == "/api/login":
             response = await self._login(scope, receive, method, headers)
-        elif path == "/logout":
-            response = RedirectResponse("/login", status_code=303)
-            response.delete_cookie(COOKIE_NAME, path="/")
-        elif self._is_authenticated(headers):
+        elif path == "/api/logout":
+            response = self._logout(method)
+        elif path == "/login" and self._is_authenticated(headers):
+            response = RedirectResponse("/", status_code=303)
+        elif self._is_authenticated(headers) or (
+            path in _PUBLIC_PATHS and method in ("GET", "HEAD")
+        ):
             await self.app(scope, receive, send)
             return
         elif path == "/" and method in ("GET", "HEAD"):
@@ -169,30 +152,34 @@ class WebAuthMiddleware:  # pylint: disable=too-few-public-methods  # ASGI app: 
         await response(scope, receive, send)
 
     async def _login(self, scope, receive, method: str, headers: Headers) -> Response:
-        if method in ("GET", "HEAD"):
-            if self._is_authenticated(headers):
-                return RedirectResponse("/", status_code=303)
-            return _login_page()
         if method != "POST":
-            return Response(status_code=405, headers={"Allow": "GET, POST"})
+            return Response(status_code=405, headers={"Allow": "POST"})
 
         body = b""
         while True:
             message = await receive()
             body += message.get("body", b"")
             if len(body) > _MAX_LOGIN_BODY:
-                return Response("Request too large", status_code=413)
+                return JSONResponse({"error": "Request too large"}, status_code=413)
             if not message.get("more_body"):
                 break
-        password = parse_qs(body.decode("utf-8", "replace")).get("password", [""])[0]
+        try:
+            data = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            data = None
+        password = data.get("password") if isinstance(data, dict) else None
+        if not isinstance(password, str):
+            return JSONResponse(
+                {"error": 'Expected JSON {"password": "..."}'}, status_code=400
+            )
 
         if not self._check_password(password):
             client = (scope.get("client") or ("?",))[0]
             log.warning("Failed web login from %s", client)
             await asyncio.sleep(_FAILED_LOGIN_DELAY)
-            return _login_page("Wrong password.")
+            return JSONResponse({"error": "Wrong password."}, status_code=401)
 
-        response = RedirectResponse("/", status_code=303)
+        response = JSONResponse({"ok": True})
         response.set_cookie(
             COOKIE_NAME,
             self._signer.sign(_SESSION_VALUE).decode(),
@@ -202,4 +189,12 @@ class WebAuthMiddleware:  # pylint: disable=too-few-public-methods  # ASGI app: 
             samesite="lax",  # Strict would drop the session when following links from chat apps
             secure=self._is_https(scope, headers),
         )
+        return response
+
+    @staticmethod
+    def _logout(method: str) -> Response:
+        if method != "POST":
+            return Response(status_code=405, headers={"Allow": "POST"})
+        response = JSONResponse({"ok": True})
+        response.delete_cookie(COOKIE_NAME, path="/")
         return response
