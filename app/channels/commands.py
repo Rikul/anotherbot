@@ -15,6 +15,7 @@ from .. import config
 from ..core import mcp_manager as mcp
 from ..core import runtime
 from ..infra import tracer
+from .channel import ChannelType
 
 if TYPE_CHECKING:
     from ..infra.conversations import ConversationStore
@@ -233,12 +234,30 @@ def fork_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
     return _fork
 
 
-def rename_conversation_cmd(store: ConversationStore, channel: str) -> CommandHandler:
-    """Build ``/rename <id> <name>``.
+def rename_conversation(store: ConversationStore, conv_id: int, name: str) -> str:
+    """Rename a conversation and refresh its cached runtime name everywhere.
 
-    If the renamed conversation is the active one, its cached runtime name is
-    updated too.
+    Every channel (and the CLI) that has ``conv_id`` active gets its
+    ``conversation_name`` runtime key updated, so ``/status`` shows the new name.
+
+    Returns:
+        The name as stored (trimmed, at most 80 chars).
+
+    Raises:
+        ValueError: if the conversation doesn't exist.
     """
+    store.rename(conv_id, name, "")
+    persisted_name = store.get(conv_id)["name"]
+    if runtime.get("conversation_id") == conv_id:
+        runtime.set("conversation_name", persisted_name)
+    for ch in ChannelType:
+        if runtime.get(f"conversation_id:{ch.value}") == conv_id:
+            runtime.set(f"conversation_name:{ch.value}", persisted_name)
+    return persisted_name
+
+
+def rename_conversation_cmd(store: ConversationStore) -> CommandHandler:
+    """Build ``/rename <id> <name>`` (see ``rename_conversation``)."""
 
     async def _rename(args: str = "") -> str:
         parts = args.strip().split(maxsplit=1)
@@ -252,19 +271,54 @@ def rename_conversation_cmd(store: ConversationStore, channel: str) -> CommandHa
         if not new_name:
             return "Name cannot be empty."
         try:
-            store.rename(conv_id, new_name, channel)
+            persisted_name = rename_conversation(store, conv_id, new_name)
         except ValueError as e:
             return str(e)
-
-        persisted_name = store.get(conv_id)["name"]
-        if runtime.get("conversation_id") == conv_id:
-            runtime.set("conversation_name", persisted_name)
-        if channel and runtime.get(f"conversation_id:{channel}") == conv_id:
-            runtime.set(f"conversation_name:{channel}", persisted_name)
-
         return f'Conversation [{conv_id}] renamed to "{persisted_name}"'
 
     return _rename
+
+
+def delete_conversation_cmd(agent: ConversationAgent) -> CommandHandler:
+    """Build ``/delete <id>``: delete a conversation and its messages.
+
+    Deleting the agent's own active conversation switches it to the channel's
+    most recently updated remaining conversation (as on startup), or to a new
+    one if none is left. A conversation that another channel has active is
+    refused: that channel's agent would keep writing messages to the deleted ID.
+    """
+
+    async def _delete(args: str = "") -> str:
+        if not args.strip():
+            return "Usage: /delete <id>"
+        try:
+            conv_id = int(args.strip())
+        except ValueError:
+            return "Invalid id: must be an integer."
+        if agent.store.get(conv_id) is None:
+            return "Conversation not found"
+        for ch in ChannelType:
+            if (
+                ch.value != agent.channel_str
+                and runtime.get(f"conversation_id:{ch.value}") == conv_id
+            ):
+                return (
+                    f"Conversation [{conv_id}] is active in the {ch.value} channel; "
+                    "switch to another conversation there before deleting it."
+                )
+        conv = agent.store.delete(conv_id)
+        reply = f'Deleted conversation [{conv_id}] "{conv["name"]}"'
+        if conv_id == agent.conversation_id:
+            nxt = agent.store.get_last(agent.channel_str)
+            if nxt is not None:
+                reply += f". Switched to conversation [{nxt['id']}] {nxt['name']}"
+            else:
+                nxt = agent.store.get(agent.store.create(agent.channel_str))
+                reply += f". Started new conversation [{nxt['id']}] {nxt['name']}"
+            agent.switch_conversation(nxt)
+        return reply
+
+    return _delete
 
 
 def export_conversation_cmd(store: ConversationStore, channel: str) -> CommandHandler:
@@ -302,7 +356,7 @@ def build_command_registry(
 
     Args:
         agent: the agent whose conversations /list, /new, /load, /fork,
-            /rename and /export manage.
+            /rename, /export and /delete manage.
         status_channel: channel name whose conversation /status reports;
             empty means the CLI's un-namespaced runtime keys.
         extra: channel-specific commands, registered after /status.
@@ -336,12 +390,17 @@ def build_command_registry(
         BotCommand(
             "rename",
             "Rename a conversation. Usage: /rename <id> <name>",
-            rename_conversation_cmd(store, channel),
+            rename_conversation_cmd(store),
         ),
         BotCommand(
             "export",
             "Export a conversation to JSON. Usage: /export [id]",
             export_conversation_cmd(store, channel),
+        ),
+        BotCommand(
+            "delete",
+            "Delete a conversation and its messages. Usage: /delete <id>",
+            delete_conversation_cmd(agent),
         ),
         BotCommand(
             "mcp", "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()

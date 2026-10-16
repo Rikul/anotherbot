@@ -288,3 +288,126 @@ async def test_mcp_tools_for_unknown_server():
 async def test_mcp_tools_for_server_without_tools():
     mgr = _mcp_manager_mock(statuses=[{"name": "mem"}])
     assert await _run_mcp("tools mem", mgr) == "Server 'mem' has no tools."
+
+
+# --- /rename and rename_conversation ---
+
+@pytest.mark.asyncio
+async def test_rename_cmd_updates_cached_name_for_every_channel_with_it_active(tmp_path):
+    from app.channels.commands import rename_conversation_cmd
+    from app.infra.conversations import ConversationStore
+    store = ConversationStore(db_path=tmp_path / "t.db")
+    cid = store.create("telegram", "Old")
+    other = store.create("web", "Other")
+    runtime_store = {"conversation_id:telegram": cid, "conversation_id:web": cid,
+                     "conversation_id:discord": other, "conversation_name:discord": "Other"}
+    with patch("app.core.runtime._store", runtime_store):
+        reply = await rename_conversation_cmd(store)(f"{cid}  New name ")
+    assert reply == f'Conversation [{cid}] renamed to "New name"'
+    assert store.get(cid)["name"] == "New name"
+    assert runtime_store["conversation_name:telegram"] == "New name"
+    assert runtime_store["conversation_name:web"] == "New name"
+    assert runtime_store["conversation_name:discord"] == "Other"  # different conversation
+
+
+@pytest.mark.asyncio
+async def test_rename_cmd_reports_missing_conversation(tmp_path):
+    from app.channels.commands import rename_conversation_cmd
+    from app.infra.conversations import ConversationStore
+    store = ConversationStore(db_path=tmp_path / "t.db")
+    assert await rename_conversation_cmd(store)("99 Name") == "Conversation 99 not found"
+
+
+# --- /delete ---
+
+class _FakeAgent:
+    def __init__(self, store, channel, active_id):
+        self.store, self.channel_str, self.conversation_id = store, channel, active_id
+
+    def switch_conversation(self, conv):
+        self.conversation_id = conv["id"]
+
+
+@pytest.mark.asyncio
+async def test_delete_cmd_deletes_inactive_conversation(tmp_path):
+    from app.channels.commands import delete_conversation_cmd
+    from app.infra.conversations import ConversationStore
+    store = ConversationStore(db_path=tmp_path / "t.db")
+    active, other = store.create("web", "Active"), store.create("telegram", "Old chat")
+    agent = _FakeAgent(store, "web", active)
+    with patch("app.core.runtime._store", {"conversation_id:web": active}):
+        reply = await delete_conversation_cmd(agent)(str(other))
+    assert reply == f'Deleted conversation [{other}] "Old chat"'
+    assert store.get(other) is None and agent.conversation_id == active
+
+
+@pytest.mark.asyncio
+async def test_delete_cmd_on_channels_last_conversation_starts_a_new_one(tmp_path):
+    from app.channels.commands import delete_conversation_cmd
+    from app.infra.conversations import ConversationStore
+    store = ConversationStore(db_path=tmp_path / "t.db")
+    active = store.create("web", "Active")
+    agent = _FakeAgent(store, "web", active)
+    with patch("app.core.runtime._store", {"conversation_id:web": active}):
+        reply = await delete_conversation_cmd(agent)(str(active))
+    assert store.get(active) is None
+    assert agent.conversation_id != active
+    new = store.get(agent.conversation_id)
+    assert new["channel"] == "web" and new["name"] == "New Conversation"
+    assert reply == (f'Deleted conversation [{active}] "Active". '
+                     f"Started new conversation [{new['id']}] New Conversation")
+
+
+@pytest.mark.asyncio
+async def test_delete_cmd_on_own_active_switches_to_channels_most_recent(tmp_path):
+    import time
+    from app.channels.commands import delete_conversation_cmd
+    from app.infra.conversations import ConversationStore
+    store = ConversationStore(db_path=tmp_path / "t.db")
+    recent = store.create("web", "Recent")
+    older = store.create("web", "Older")
+    active = store.create("web", "Active")
+    time.sleep(0.01)
+    store.touch(recent)  # most recently updated web conversation
+    time.sleep(0.01)
+    store.create("telegram", "Newest but telegram")
+    agent = _FakeAgent(store, "web", active)
+    with patch("app.core.runtime._store", {"conversation_id:web": active}):
+        reply = await delete_conversation_cmd(agent)(str(active))
+    assert reply == f'Deleted conversation [{active}] "Active". Switched to conversation [{recent}] Recent'
+    assert agent.conversation_id == recent
+    assert store.get(active) is None and store.get(older) is not None
+    assert [c["name"] for c in store.list("web")] == ["Recent", "Older"]  # nothing new created
+
+
+@pytest.mark.asyncio
+async def test_delete_cmd_refuses_conversation_active_in_another_channel(tmp_path):
+    from app.channels.commands import delete_conversation_cmd
+    from app.infra.conversations import ConversationStore
+    store = ConversationStore(db_path=tmp_path / "t.db")
+    mine, theirs = store.create("web", "Mine"), store.create("telegram", "Theirs")
+    agent = _FakeAgent(store, "web", mine)
+    with patch("app.core.runtime._store", {"conversation_id:web": mine,
+                                           "conversation_id:telegram": theirs}):
+        reply = await delete_conversation_cmd(agent)(str(theirs))
+    assert "active in the telegram channel" in reply
+    assert store.get(theirs) is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args,expected", [("", "Usage: /delete <id>"),
+                                           ("abc", "Invalid id: must be an integer."),
+                                           ("99", "Conversation not found")])
+async def test_delete_cmd_bad_args(tmp_path, args, expected):
+    from app.channels.commands import delete_conversation_cmd
+    from app.infra.conversations import ConversationStore
+    store = ConversationStore(db_path=tmp_path / "t.db")
+    agent = _FakeAgent(store, "web", store.create("web"))
+    assert await delete_conversation_cmd(agent)(args) == expected
+
+
+def test_delete_is_in_the_standard_registry():
+    from unittest.mock import MagicMock
+    from app.channels.commands import build_command_registry
+    agent = MagicMock(channel_str="web")
+    assert "delete" in [c.name for c in build_command_registry(agent).list()]
