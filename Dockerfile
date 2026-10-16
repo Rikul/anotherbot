@@ -16,7 +16,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 WORKDIR /app
 
-COPY pyproject.toml uv.lock ./
+# .python-version pins the interpreter uv downloads (Debian's python3 is too
+# old for requires-python); without it uv picks the newest CPython, which may
+# lack prebuilt wheels (e.g. httptools) and need a C compiler.
+COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --no-dev --frozen
 
 COPY app/ ./app/
