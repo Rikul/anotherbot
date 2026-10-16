@@ -12,6 +12,9 @@ from pathlib import Path
 from ..config import APP_DB, PROJECT_HOME, get_db_connection
 from .app_logging import log
 
+# "<base> (fork)" or "<base> (fork N)"; group 1 is the base, group 2 is N.
+_FORK_SUFFIX = re.compile(r"^(.*) \(fork(?: (\d+))?\)$")
+
 
 @contextlib.contextmanager
 def _fk_conn(db_path: Path):
@@ -239,8 +242,30 @@ class ConversationStore:
                 (now, conversation_id),
             )
 
+    @staticmethod
+    def _fork_name(conn, name: str) -> str:
+        """Name for a fork of ``name``: ``"<name> (fork)"``, then ``(fork 2)``, …
+
+        Forking a fork numbers it rather than stacking suffixes, using the
+        highest number already taken for that base name. The default name is
+        kept as is, so an unnamed fork can still be auto-named later.
+        """
+        if name == "New Conversation":
+            return name
+        m = _FORK_SUFFIX.match(name)
+        base = m.group(1) if m else name
+        taken = 0
+        for (existing,) in conn.execute("SELECT name FROM conversations"):
+            em = _FORK_SUFFIX.match(existing)
+            if em and em.group(1) == base:
+                taken = max(taken, int(em.group(2) or 1))
+        suffix = " (fork)" if taken == 0 else f" (fork {taken + 1})"
+        return base[: 80 - len(suffix)].rstrip() + suffix
+
     def fork(self, conversation_id: int, channel: str) -> int:
         """Copy a conversation and all its messages into a new conversation for ``channel``.
+
+        The copy is named ``"<name> (fork)"`` (see ``_fork_name``).
 
         Returns:
             The new conversation's ID; its ``parent_id`` points at the original.
@@ -257,7 +282,13 @@ class ConversationStore:
             new_id = conn.execute(
                 "INSERT INTO conversations (name, channel, parent_id, created_at, updated_at) "
                 "VALUES (?,?,?,?,?)",
-                (conv["name"], channel, conversation_id, now, now),
+                (
+                    self._fork_name(conn, conv["name"]),
+                    channel,
+                    conversation_id,
+                    now,
+                    now,
+                ),
             ).lastrowid
             conn.execute(
                 """INSERT INTO messages
@@ -268,6 +299,32 @@ class ConversationStore:
                 (channel, new_id, conversation_id),
             )
         return new_id
+
+    def delete(self, conversation_id: int) -> dict:
+        """Delete a conversation and its messages, in one transaction.
+
+        Forks of it keep their own copied messages; their ``parent_id`` is
+        cleared so the foreign key doesn't block the delete.
+
+        Returns:
+            The deleted conversation's row (as from ``get``).
+
+        Raises:
+            ValueError: if the conversation doesn't exist.
+        """
+        conv = self.get(conversation_id)
+        if conv is None:
+            raise ValueError(f"Conversation {conversation_id} not found")
+        with _fk_conn(self.db_path) as conn:
+            conn.execute(
+                "UPDATE conversations SET parent_id=NULL WHERE parent_id=?",
+                (conversation_id,),
+            )
+            conn.execute(
+                "DELETE FROM messages WHERE conversation_id=?", (conversation_id,)
+            )
+            conn.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
+        return conv
 
     def load_messages(self, conversation_id: int, limit: int = 1000) -> list[dict]:
         """Return the conversation's last ``limit`` messages, oldest first.
@@ -290,6 +347,27 @@ class ConversationStore:
                 (conversation_id,),
             ).fetchone()[0]
 
+    def export_payload(self, conversation_id: int) -> tuple[str, dict]:
+        """Build a conversation's JSON export without writing it anywhere.
+
+        Returns:
+            ``(filename, payload)``: the ``<id>-<slug>.json`` name (slug is
+            ``[a-z0-9-]`` only) and the conversation row plus its messages.
+
+        Raises:
+            ValueError: if the conversation doesn't exist.
+        """
+        conv = self.get(conversation_id)
+        if conv is None:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        messages = self.load_messages(conversation_id)
+        slug = (
+            re.sub(r"[^a-z0-9-]", "", conv["name"].lower().replace(" ", "-"))[:40]
+            or "conversation"
+        )
+        return f"{conversation_id}-{slug}.json", {**conv, "messages": messages}
+
     def export(self, conversation_id: int, channel: str) -> Path:
         """Write the conversation and its messages to ``PROJECT_HOME/conversations`` as JSON.
 
@@ -301,20 +379,9 @@ class ConversationStore:
         Raises:
             ValueError: if the conversation doesn't exist.
         """
-        conv = self.get(conversation_id)
-        if conv is None:
-            raise ValueError(f"Conversation {conversation_id} not found")
-
-        messages = self.load_messages(conversation_id)
-        payload = {**conv, "messages": messages}
-
+        filename, payload = self.export_payload(conversation_id)
         export_dir = PROJECT_HOME / "conversations"
         export_dir.mkdir(parents=True, exist_ok=True)
-        slug = (
-            re.sub(r"[^a-z0-9-]", "", conv["name"].lower().replace(" ", "-"))[:40]
-            or "conversation"
-        )
-        filename = f"{conversation_id}-{slug}.json"
         path = export_dir / filename
         with open(path, "w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)

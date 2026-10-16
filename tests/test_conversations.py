@@ -192,6 +192,42 @@ def test_fork_rejects_missing_conversation(store):
         store.fork(9999, "cli")
 
 
+def test_fork_gets_a_distinct_numbered_name(store):
+    cid = store.create("telegram", "Rome trip")
+    first = store.fork(cid, "web")
+    second = store.fork(cid, "web")
+    assert store.get(cid)["name"] == "Rome trip"
+    assert store.get(first)["name"] == "Rome trip (fork)"
+    assert store.get(second)["name"] == "Rome trip (fork 2)"
+
+
+def test_forking_a_fork_numbers_instead_of_stacking(store):
+    cid = store.create("web", "Rome trip")
+    fork1 = store.fork(cid, "web")
+    fork2 = store.fork(fork1, "web")
+    fork3 = store.fork(fork2, "web")
+    assert store.get(fork2)["name"] == "Rome trip (fork 2)"
+    assert store.get(fork3)["name"] == "Rome trip (fork 3)"
+
+
+def test_fork_numbering_uses_highest_taken_and_exact_base(store):
+    store.create("web", "Rome trip (fork 5)")
+    store.create("web", "Rome trip extended (fork 9)")  # different base
+    cid = store.create("web", "Rome trip")
+    assert store.get(store.fork(cid, "web"))["name"] == "Rome trip (fork 6)"
+
+
+def test_fork_of_default_name_stays_default_for_auto_naming(store):
+    cid = store.create("web")
+    assert store.get(store.fork(cid, "web"))["name"] == "New Conversation"
+
+
+def test_fork_name_fits_80_chars(store):
+    cid = store.create("web", "x" * 80)
+    name = store.get(store.fork(cid, "web"))["name"]
+    assert len(name) == 80 and name.endswith(" (fork)")
+
+
 # --- load_messages ordering ---
 
 def test_load_messages_ordered_by_timestamp_then_id(store, db):
@@ -340,3 +376,52 @@ def test_export_writes_json(store, db, tmp_path):
     data = json.loads(path.read_text())
     assert data["name"] == "Test Export"
     assert data["channel"] == "cli"
+
+
+def test_export_payload_builds_filename_and_messages_without_writing(store, db, tmp_path):
+    from app.infra.message_history import MessageHistory
+    cid = store.create("web", "Trip Plan: Rome!")
+    MessageHistory("web", db_path=db).add_message("user", "hi", cid)
+    from app.infra import conversations
+    with patch.object(conversations, "PROJECT_HOME", tmp_path):
+        filename, payload = store.export_payload(cid)
+    assert filename == f"{cid}-trip-plan-rome.json"
+    assert payload["id"] == cid and payload["name"] == "Trip Plan: Rome!"
+    assert payload["messages"] == [{"role": "user", "content": "hi"}]
+    assert not (tmp_path / "conversations").exists()
+
+
+def test_export_payload_rejects_missing_conversation(store):
+    with pytest.raises(ValueError, match="not found"):
+        store.export_payload(999)
+
+
+# --- delete ---
+
+def test_delete_removes_conversation_and_its_messages_only(store, db):
+    from app.infra.message_history import MessageHistory
+    keep = store.create("web", "Keep")
+    gone = store.create("telegram", "Gone")
+    history = MessageHistory("web", db_path=db)
+    history.add_message("user", "keep me", keep)
+    history.add_message("user", "delete me", gone)
+    deleted = store.delete(gone)
+    assert deleted["id"] == gone and deleted["name"] == "Gone"
+    assert store.get(gone) is None
+    assert store.load_messages(gone) == []
+    assert store.load_messages(keep) == [{"role": "user", "content": "keep me"}]
+
+
+def test_delete_source_of_a_fork_keeps_the_fork(store, db):
+    from app.infra.message_history import MessageHistory
+    src = store.create("web", "Source")
+    MessageHistory("web", db_path=db).add_message("user", "hi", src)
+    fork = store.fork(src, "web")
+    store.delete(src)  # must not trip the parent_id foreign key
+    assert store.get(fork)["parent_id"] is None
+    assert store.load_messages(fork) == [{"role": "user", "content": "hi"}]
+
+
+def test_delete_rejects_missing_conversation(store):
+    with pytest.raises(ValueError, match="not found"):
+        store.delete(999)
