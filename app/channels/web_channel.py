@@ -7,7 +7,8 @@ goes through these endpoints:
     GET  /api/conversations  — conversations from all channels + the active ID
     POST /api/conversations/<id>/rename — JSON ``{"name": ...}``
     GET  /api/conversations/<id>/export — the conversation as a JSON download
-    GET  /api/messages       — messages of ``?conv_id=``
+    GET  /api/messages       — messages of ``?conv_id=`` (with row IDs)
+    GET  /api/messages/<id>/trajectory — a turn's trajectory as a JSON download
     GET  /api/status         — model in use and whether login is enabled
     GET  /api/commands       — slash commands, for the input's autocomplete
     POST /api/upload         — multipart attachments, returns stored names
@@ -22,10 +23,12 @@ WebSocket message framing::
     → {"type": "message", "content": "...", "files": ["<stored name>", ...]}
     ← {"type": "message" | "system", "content": "..."}
     ← {"type": "busy", "busy": bool, "stopped": bool}
+    ← {"type": "trajectory", "message_id": int, "conversation_id": int}
 
 Plain text is also accepted as a convenience. ``busy`` frames go to every tab
 when an agent turn starts/ends (and once on connect); ``stopped`` is true when
-a ``/stop`` cut the turn short.
+a ``/stop`` cut the turn short. A ``trajectory`` frame follows a turn's last
+reply (to the tab that sent the message) once its trajectory is stored.
 """
 
 from __future__ import annotations
@@ -186,6 +189,9 @@ class WebChannel(Channel):
                 ),
                 Route("/api/conversations/{conv_id:int}/export", self._export_api),
                 Route("/api/messages", self._messages_api),
+                Route(
+                    "/api/messages/{message_id:int}/trajectory", self._trajectory_api
+                ),
                 Route("/api/status", self._status_api),
                 Route("/api/commands", self._commands_api),
                 Route("/api/upload", self._upload_api, methods=["POST"]),
@@ -265,7 +271,24 @@ class WebChannel(Channel):
         store = ConversationStore()
         if not store.get(conv_id):
             return Response(status_code=404)
-        return JSONResponse({"messages": store.load_messages(conv_id)})
+        return JSONResponse({"messages": store.load_messages(conv_id, with_meta=True)})
+
+    def _trajectory_api(self, req: Request):
+        """Download one turn's trajectory (keyed by its final reply's message ID)."""
+        message_id = req.path_params["message_id"]
+        data = ConversationStore().get_trajectory(message_id)
+        if data is None:
+            return JSONResponse({"error": "No trajectory for this message"}, 404)
+        conv_id = data.get("conversation_id")
+        filename = (
+            f"trajectory-{int(conv_id)}-{message_id}.json"
+            if isinstance(conv_id, int)
+            else f"trajectory-{message_id}.json"
+        )
+        return JSONResponse(
+            data,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
     def _status_api(self, _req: Request):
         """Return the model currently in use and whether login is enabled."""
@@ -484,6 +507,28 @@ class WebChannel(Channel):
             )
         )
 
+    async def on_trajectory_saved(
+        self, message_id: int, conversation_id: int, metadata: dict
+    ) -> None:
+        """Tell the tab that sent the message its reply can now be downloaded.
+
+        Sent through the outgoing queue so it arrives after the reply itself.
+        """
+        await self.mq.outgoing_msg(
+            OutgoingMessage(
+                content="",
+                channel=self,
+                metadata={
+                    **(metadata or {}),
+                    "trajectory_frame": {
+                        "type": "trajectory",
+                        "message_id": message_id,
+                        "conversation_id": conversation_id,
+                    },
+                },
+            )
+        )
+
     async def send_message(self, message: OutgoingMessage) -> None:
         client_id = message.metadata.get("websocket_id")
         is_command = message.metadata.get("is_command", False)
@@ -491,6 +536,8 @@ class WebChannel(Channel):
         payload = {"type": msg_type, "content": message.content}
         if "busy_frame" in message.metadata:
             client_id, payload = None, message.metadata["busy_frame"]
+        elif "trajectory_frame" in message.metadata:
+            payload = message.metadata["trajectory_frame"]
         if client_id:
             await self._safe_send_json(client_id, payload)
         else:

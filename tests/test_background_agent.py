@@ -14,6 +14,7 @@ _mock_channel = MagicMock()
 _mock_channel.channel_type = ChannelType.TELEGRAM
 _mock_channel.has_stopped = False
 _mock_channel.on_agent_turn = AsyncMock()
+_mock_channel.on_trajectory_saved = AsyncMock()
 
 
 def make_mock_client(tool_calls=None, content="Hello!", finish_reason="stop"):
@@ -253,6 +254,7 @@ async def test_agent_loop_clears_stopped_after_completion():
     local_channel = MagicMock()
     local_channel.channel_type = ChannelType.TELEGRAM
     local_channel.has_stopped = False
+    local_channel.on_trajectory_saved = AsyncMock()
 
     with patch("app.core.agent.Client") as MockClient:
         MockClient.return_value.get_client.return_value = make_mock_client()
@@ -428,3 +430,67 @@ async def test_registry_stop_between_turns_does_not_set_the_flag():
     agent.channel = channel
     assert await agent.registry.execute("stop") == "Nothing to stop."
     assert channel.stopped is False
+
+
+# --- trajectories ---
+
+@pytest.mark.asyncio
+async def test_agent_loop_saves_turn_trajectory_and_notifies_channel(tmp_path):
+    """A turn's tool calls, tool results and per-call usage are stored against
+    the final assistant message, and the channel hears about it."""
+    from openai.types.chat import ChatCompletion
+    from app.infra.conversations import ConversationStore
+    from app.infra.message_history import MessageHistory
+
+    def completion(message, finish_reason, tokens):
+        return ChatCompletion.model_validate({
+            "id": "x", "object": "chat.completion", "created": 0, "model": "m",
+            "choices": [{"index": 0, "finish_reason": finish_reason, "message": message}],
+            "usage": {"prompt_tokens": tokens, "completion_tokens": 1, "total_tokens": tokens + 1},
+        })
+
+    tool_msg = {"role": "assistant", "content": None, "tool_calls": [{
+        "id": "tc1", "type": "function",
+        "function": {"name": "bash", "arguments": '{"command": "echo hi"}'}}]}
+    final_msg = {"role": "assistant", "content": "Done."}
+
+    agent, mock_client, _ = make_agent()
+    mock_client.chat.completions.create = AsyncMock(side_effect=[
+        completion(tool_msg, "tool_calls", 10), completion(final_msg, "stop", 20)])
+    store = ConversationStore(db_path=tmp_path / "app.db")
+    cid = store.create("telegram")
+    agent.store = store
+    agent.history = MessageHistory("telegram", db_path=tmp_path / "app.db")
+    agent.conversation_id = cid
+    agent.messages = [{"role": "user", "content": "earlier"}]
+    channel = MagicMock()
+    channel.channel_type = ChannelType.TELEGRAM
+    channel.has_stopped = False
+    channel.on_trajectory_saved = AsyncMock()
+    agent.channel = channel
+
+    with patch("app.core.tool_calls.run_tool", return_value="hi\n"):
+        await agent.agent_loop("run it", {"websocket_id": "c1"})
+
+    msgs = store.load_messages(cid, with_meta=True)
+    reply = msgs[-1]
+    assert reply["content"] == "Done." and reply["has_trajectory"]
+    assert not msgs[0]["has_trajectory"]  # the user message
+    traj = store.get_trajectory(reply["id"])
+    assert traj["conversation_id"] == cid and traj["channel"] == "telegram"
+    assert traj["system_prompt"]
+    assert traj["history_message_count"] == 1
+    assert [m["role"] for m in traj["messages"]] == ["user", "assistant", "tool", "assistant"]
+    assert traj["messages"][0]["content"] == "run it"
+    assert traj["messages"][1]["tool_calls"][0]["function"]["name"] == "bash"
+    assert traj["messages"][2]["content"] == "hi\n"
+    assert [c["finish_reason"] for c in traj["llm_calls"]] == ["tool_calls", "stop"]
+    assert traj["usage_total"]["prompt_tokens"] == 30 and traj["iterations"] == 2
+    channel.on_trajectory_saved.assert_awaited_once_with(reply["id"], cid, {"websocket_id": "c1"})
+
+
+@pytest.mark.asyncio
+async def test_trajectory_save_failure_does_not_break_the_turn():
+    agent, _, _ = make_agent()
+    agent.store.save_trajectory.side_effect = RuntimeError("disk full")
+    assert await agent.agent_loop("hi") == "Hello!"

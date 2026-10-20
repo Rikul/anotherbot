@@ -89,6 +89,21 @@ class ConversationStore:
                     CREATE INDEX IF NOT EXISTS idx_messages_conversation_id
                     ON messages(conversation_id)
                 """)
+                # One row per agent turn, keyed by the turn's final assistant
+                # message: the full message chain (tool calls, tool results,
+                # reasoning) plus per-call model/usage/latency, as JSON.
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS trajectories (
+                        message_id      INTEGER PRIMARY KEY REFERENCES messages(id),
+                        conversation_id INTEGER REFERENCES conversations(id),
+                        data            TEXT    NOT NULL,
+                        created_at      TEXT    NOT NULL
+                    )
+                """)
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_trajectories_conversation_id
+                    ON trajectories(conversation_id)
+                """)
 
             # Phase 2: Migration — BEGIN IMMEDIATE for concurrency safety.
             # The WHERE conversation_id IS NULL guard makes this re-entrant.
@@ -263,7 +278,8 @@ class ConversationStore:
         return base[: 80 - len(suffix)].rstrip() + suffix
 
     def fork(self, conversation_id: int, channel: str) -> int:
-        """Copy a conversation and all its messages into a new conversation for ``channel``.
+        """Copy a conversation, its messages and their trajectories into a new
+        conversation for ``channel``.
 
         The copy is named ``"<name> (fork)"`` (see ``_fork_name``).
 
@@ -290,14 +306,26 @@ class ConversationStore:
                     now,
                 ),
             ).lastrowid
-            conn.execute(
-                """INSERT INTO messages
-                       (channel, role, content, timestamp, est_tokens, conversation_id)
-                   SELECT ?, role, content, timestamp, est_tokens, ?
-                   FROM messages WHERE conversation_id=?
-                   ORDER BY timestamp ASC, id ASC""",
-                (channel, new_id, conversation_id),
-            )
+            rows = conn.execute(
+                """SELECT m.role, m.content, m.timestamp, m.est_tokens, t.data,
+                          t.created_at
+                   FROM messages m LEFT JOIN trajectories t ON t.message_id = m.id
+                   WHERE m.conversation_id=?
+                   ORDER BY m.timestamp ASC, m.id ASC""",
+                (conversation_id,),
+            ).fetchall()
+            for role, content, ts, est, traj, traj_at in rows:
+                msg_id = conn.execute(
+                    "INSERT INTO messages (channel, role, content, timestamp, "
+                    "est_tokens, conversation_id) VALUES (?,?,?,?,?,?)",
+                    (channel, role, content, ts, est, new_id),
+                ).lastrowid
+                if traj is not None:
+                    conn.execute(
+                        "INSERT INTO trajectories (message_id, conversation_id, data, "
+                        "created_at) VALUES (?,?,?,?)",
+                        (msg_id, new_id, traj, traj_at),
+                    )
         return new_id
 
     def delete(self, conversation_id: int) -> dict:
@@ -321,23 +349,69 @@ class ConversationStore:
                 (conversation_id,),
             )
             conn.execute(
+                "DELETE FROM trajectories WHERE conversation_id=? OR message_id IN "
+                "(SELECT id FROM messages WHERE conversation_id=?)",
+                (conversation_id, conversation_id),
+            )
+            conn.execute(
                 "DELETE FROM messages WHERE conversation_id=?", (conversation_id,)
             )
             conn.execute("DELETE FROM conversations WHERE id=?", (conversation_id,))
         return conv
 
-    def load_messages(self, conversation_id: int, limit: int = 1000) -> list[dict]:
+    def load_messages(
+        self, conversation_id: int, limit: int = 1000, with_meta: bool = False
+    ) -> list[dict]:
         """Return the conversation's last ``limit`` messages, oldest first.
 
-        Each is a ``{"role": ..., "content": ...}`` dict.
+        Each is a ``{"role": ..., "content": ...}`` dict (what the agent sends
+        to the model). With ``with_meta`` (for the web UI) each also has its
+        row ``id`` and ``has_trajectory``.
         """
         with _fk_conn(self.db_path) as conn:
             rows = conn.execute(
-                "SELECT role, content FROM messages WHERE conversation_id=? "
-                "ORDER BY timestamp DESC, id DESC LIMIT ?",
+                "SELECT m.role, m.content, m.id, t.message_id IS NOT NULL "
+                "FROM messages m LEFT JOIN trajectories t ON t.message_id = m.id "
+                "WHERE m.conversation_id=? "
+                "ORDER BY m.timestamp DESC, m.id DESC LIMIT ?",
                 (conversation_id, limit),
             ).fetchall()
+        if with_meta:
+            return [
+                {
+                    "role": row[0],
+                    "content": row[1],
+                    "id": row[2],
+                    "has_trajectory": bool(row[3]),
+                }
+                for row in reversed(rows)
+            ]
         return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
+
+    def save_trajectory(
+        self, message_id: int, conversation_id: int | None, data: dict
+    ) -> None:
+        """Store a turn's trajectory against its final assistant message row."""
+        now = datetime.now().isoformat()
+        with _fk_conn(self.db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO trajectories "
+                "(message_id, conversation_id, data, created_at) VALUES (?,?,?,?)",
+                (
+                    message_id,
+                    conversation_id,
+                    json.dumps(data, ensure_ascii=False, default=str),
+                    now,
+                ),
+            )
+
+    def get_trajectory(self, message_id: int) -> dict | None:
+        """Return the trajectory stored for this message, or ``None`` if there is none."""
+        with _fk_conn(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT data FROM trajectories WHERE message_id=?", (message_id,)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
 
     def count_user_messages(self, conversation_id: int) -> int:
         """Return how many user messages the conversation has."""

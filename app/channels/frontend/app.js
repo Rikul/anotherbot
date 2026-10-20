@@ -176,7 +176,8 @@
             if (!messages || !messages.length) return;
             const empty = document.getElementById('empty');
             if (empty) empty.style.display = 'none';
-            messages.forEach(msg => appendMessage(msg.content, msg.role === 'user' ? 'user' : 'ai'));
+            messages.forEach(msg => appendMessage(msg.content, msg.role === 'user' ? 'user' : 'ai',
+                msg.has_trajectory ? msg.id : null));
         } catch (e) { /* ignore */ }
     }
 
@@ -422,18 +423,18 @@
         return true;
     }
 
-    // Export downloads the JSON in the browser (the /export command writes it
-    // on the server instead, which a remote browser can't reach).
-    async function exportConv(id) {
+    // Fetch a JSON attachment and save it in the browser, named by the
+    // server's Content-Disposition. Failures are shown as "<what> failed: …".
+    async function downloadJson(apiUrl, fallbackName, what) {
         try {
-            const res = await fetch(`/api/conversations/${id}/export`);
+            const res = await fetch(apiUrl);
             if (!checkAuth(res)) return;
             if (!res.ok) {
-                appendMessage(`Export failed: ${await errorDetail(res)}`, 'system');
+                appendMessage(`${what} failed: ${await errorDetail(res)}`, 'system');
                 return;
             }
             const disposition = res.headers.get('Content-Disposition') || '';
-            const filename = (/filename="([^"]+)"/.exec(disposition) || [])[1] || `conversation-${id}.json`;
+            const filename = (/filename="([^"]+)"/.exec(disposition) || [])[1] || fallbackName;
             const url = URL.createObjectURL(await res.blob());
             const a = document.createElement('a');
             a.href = url;
@@ -443,8 +444,14 @@
             a.remove();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         } catch (e) {
-            appendMessage('Export failed: server unreachable.', 'system');
+            appendMessage(`${what} failed: server unreachable.`, 'system');
         }
+    }
+
+    // Export downloads the JSON in the browser (the /export command writes it
+    // on the server instead, which a remote browser can't reach).
+    function exportConv(id) {
+        return downloadJson(`/api/conversations/${id}/export`, `conversation-${id}.json`, 'Export');
     }
 
     function loadConv(id) {
@@ -524,8 +531,12 @@
                 const data = JSON.parse(evt.data);
                 if (data.type === 'busy') {
                     onBusy(data);
+                } else if (data.type === 'trajectory') {
+                    // follows the turn's last reply once its trajectory is stored
+                    if (turnReplyRow) addTrajectoryButton(turnReplyRow, data.message_id);
+                    turnReplyRow = null;
                 } else if (data.type === 'message') {
-                    appendMessage(data.content, 'ai');
+                    turnReplyRow = appendMessage(data.content, 'ai');
                     // agent_loop() calls _store.touch() after every response, so the
                     // sidebar's updated_at and message count change — refresh it
                     setTimeout(() => loadConversations(false), 300);
@@ -550,11 +561,14 @@
     let agentBusy = false;
     let pendingTurn = false;
     let stopping = false;
+    // The latest reply row of the running turn: gets the trajectory download.
+    let turnReplyRow = null;
 
     function onBusy({ busy, stopped }) {
         agentBusy = busy;
         if (busy) {
             pendingTurn = false;
+            turnReplyRow = null;
             loadStatus();   // the model is shared: another channel may have changed it
         }
         else stopping = false;
@@ -597,7 +611,9 @@
         text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
         return text;
     }
-    function appendMessage(content, role) {
+    // trajectoryId: message ID whose trajectory can be downloaded (replies only).
+    // Returns the new row.
+    function appendMessage(content, role, trajectoryId = null) {
         const empty = document.getElementById('empty');
         if (empty) empty.style.display = 'none';
 
@@ -609,7 +625,11 @@
             bubble.dataset.raw = content;
             renderAiBubble(bubble);
             // on the row, not in the bubble: re-rendering replaces the bubble's HTML
-            row.appendChild(copyButton(bubble));
+            const actions = document.createElement('div');
+            actions.className = 'msg-actions';
+            actions.appendChild(copyButton(bubble));
+            row.appendChild(actions);
+            if (trajectoryId) addTrajectoryButton(row, trajectoryId);
         } else if (role === 'user') {
             renderUserBubble(bubble, content);
         } else {
@@ -618,6 +638,28 @@
         row.prepend(bubble);
         messagesEl.appendChild(row);
         scrollBottom();
+        return row;
+    }
+
+    // ---- download a reply's trajectory (the turn's tool calls, results, usage) ----
+    const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/>' +
+        '<line x1="12" y1="15" x2="12" y2="3"/></svg>';
+
+    function addTrajectoryButton(row, messageId) {
+        const actions = row.querySelector('.msg-actions');
+        if (!actions || actions.querySelector('.traj-btn')) return;
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'copy-btn traj-btn';
+        btn.innerHTML = DOWNLOAD_ICON;
+        btn.title = 'Download trajectory';
+        btn.setAttribute('aria-label', 'Download trajectory');
+        btn.addEventListener('click', () => downloadJson(
+            `/api/messages/${messageId}/trajectory`, `trajectory-${messageId}.json`, 'Trajectory download'));
+        actions.appendChild(btn);
+        row.classList.add('has-trajectory');
     }
 
     // ---- copy a reply ----

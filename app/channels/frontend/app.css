@@ -390,13 +390,20 @@ body {
     align-self: stretch;
     width: 100%;
 }
-/* copy button, top-right of each reply (on the row: re-rendering replaces the bubble) */
+/* copy (and trajectory download) buttons, stacked top-right of each reply
+   (on the row: re-rendering replaces the bubble) */
 .msg-row.ai { position: relative; }
-.ai .bubble { padding-right: 40px; }   /* room for the button, so it never covers text */
-.copy-btn {
+.ai .bubble { padding-right: 40px; }   /* room for the buttons, so they never cover text */
+.msg-row.ai.has-trajectory .bubble { min-height: 70px; }   /* fits both stacked buttons */
+.msg-actions {
     position: absolute;
     top: 6px;
     right: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.copy-btn {
     width: 28px;
     height: 28px;
     display: flex;

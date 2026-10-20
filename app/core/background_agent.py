@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from .tool_calls import get_all_tool_specs
 from ..infra.app_logging import log
@@ -28,6 +29,8 @@ class BackgroundAgent(Agent):
     Raises:
         ValueError: if no channel is given.
     """
+
+    saves_trajectories = True
 
     def __init__(
         self,
@@ -196,6 +199,8 @@ class BackgroundAgent(Agent):
             [{"role": "system", "content": system_context}] if system_context else []
         )
         session_messages = system + self.messages[:] + [user_msg]
+        turn_start = len(session_messages) - 1
+        started_at = datetime.now()
         self.tracer.start_turn(session_messages, self.conversation_id)
         if self.tracer.enabled() and self.tracer.path:
             runtime.set("last_trace", self.tracer.path.name)
@@ -206,7 +211,21 @@ class BackgroundAgent(Agent):
 
         self.messages.append({"role": "user", "content": placeholder_content})
         self.messages.append({"role": "assistant", "content": final_content})
-        self.history.add_message("assistant", final_content, self.conversation_id)
+        message_id = self.history.add_message(
+            "assistant", final_content, self.conversation_id
+        )
+        self._save_trajectory(
+            store=self.store,
+            message_id=message_id,
+            conversation_id=self.conversation_id,
+            channel=self.channel_str,
+            session_messages=session_messages,
+            turn_start=turn_start,
+            started_at=started_at,
+        )
+        await self.channel.on_trajectory_saved(
+            message_id, self.conversation_id, self._reply_metadata
+        )
         self.store.touch(self.conversation_id)
 
         if self.store.count_user_messages(self.conversation_id) == 1:

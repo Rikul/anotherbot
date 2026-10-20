@@ -513,6 +513,54 @@ def test_export_api_missing_conversation_is_404(api_client):
     assert "not found" in resp.json()["error"]
 
 
+def test_trajectory_api_downloads_json(api_client, tmp_path):
+    from app.infra.message_history import MessageHistory
+    client, store = api_client
+    cid = store.create("telegram", "Chat")
+    mid = MessageHistory("telegram", db_path=tmp_path / "app.db").add_message("assistant", "a", cid)
+    store.save_trajectory(mid, cid, {"conversation_id": cid, "messages": []})
+    resp = client.get(f"/api/messages/{mid}/trajectory")
+    assert resp.status_code == 200
+    assert resp.headers["content-disposition"] == (
+        f'attachment; filename="trajectory-{cid}-{mid}.json"')
+    assert resp.json() == {"conversation_id": cid, "messages": []}
+
+
+def test_trajectory_api_missing_is_404(api_client):
+    client, _ = api_client
+    assert client.get("/api/messages/99/trajectory").status_code == 404
+
+
+def test_messages_api_includes_ids_and_trajectory_flag(api_client, tmp_path):
+    from app.infra.message_history import MessageHistory
+    client, store = api_client
+    cid = store.create("web")
+    mid = MessageHistory("web", db_path=tmp_path / "app.db").add_message("assistant", "a", cid)
+    store.save_trajectory(mid, cid, {})
+    msgs = client.get(f"/api/messages?conv_id={cid}").json()["messages"]
+    assert msgs == [{"role": "assistant", "content": "a", "id": mid, "has_trajectory": True}]
+
+
+@pytest.mark.asyncio
+async def test_trajectory_frame_goes_to_the_requesting_tab_only():
+    ch, mq = make_web_channel()
+    a, b = AsyncMock(), AsyncMock()
+    ch._connections.update({"a": a, "b": b})
+    await ch.on_trajectory_saved(7, 3, {"websocket_id": "a"})
+    msg = mq.outgoing.get_nowait()
+    await ch.send_message(msg)
+    a.send_json.assert_awaited_once_with(
+        {"type": "trajectory", "message_id": 7, "conversation_id": 3})
+    b.send_json.assert_not_awaited()
+
+
+def test_trajectory_button_in_frontend():
+    js = (FRONTEND_DIR / "app.js").read_text()
+    for needle in ("/api/messages/${messageId}/trajectory", "Download trajectory",
+                   "data.type === 'trajectory'", "msg.has_trajectory"):
+        assert needle in js, needle
+
+
 def test_sidebar_actions_in_frontend():
     js = (FRONTEND_DIR / "app.js").read_text()
     for needle in ("/api/conversations/${conv.id}/rename", "/api/conversations/${id}/export",
@@ -693,6 +741,6 @@ def test_commands_api_without_agent_lists_only_whoami():
 
 def test_frontend_has_reply_copy_button_with_http_fallback():
     js = (FRONTEND_DIR / "app.js").read_text()
-    assert "row.appendChild(copyButton(bubble))" in js   # on the row: survives re-rendering
+    assert "actions.appendChild(copyButton(bubble))" in js   # on the row: survives re-rendering
     assert "bubble.dataset.raw" in js                     # copies the markdown source
     assert "document.execCommand('copy')" in js           # no Clipboard API on plain http
