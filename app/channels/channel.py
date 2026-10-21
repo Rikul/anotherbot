@@ -56,6 +56,16 @@ class Channel(ABC):
         the default does nothing.
         """
 
+    async def on_trajectory_saved(
+        self, message_id: int, conversation_id: int, metadata: dict
+    ) -> None:
+        """Called by ``BackgroundAgent`` once a turn's trajectory is stored.
+
+        ``message_id`` is the turn's final assistant message row and
+        ``metadata`` the turn's reply metadata. The web channel uses it to
+        offer a download; the default does nothing.
+        """
+
     @property
     def default_metadata(self) -> dict:
         """Metadata for messages with no reply target, e.g. scheduled-task results."""

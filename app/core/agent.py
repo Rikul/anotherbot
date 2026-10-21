@@ -15,7 +15,7 @@ from pathlib import Path
 from .. import config
 from .client import Client
 from ..infra.app_logging import log
-from ..infra.tracer import Tracer
+from ..infra.tracer import Tracer, redact
 from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
@@ -77,12 +77,17 @@ class Agent(ABC):
     """
 
     trace_label = "agent"
+    # Agents that store each turn's trajectory (see ``_save_trajectory``)
+    # collect per-call stats in ``_llm_calls``; others skip that work.
+    saves_trajectories = False
 
     def __init__(self, max_iterations: int = 250) -> None:
         self.client = Client().get_client()
         self.messages: list[dict] = []
         self.max_iterations = max_iterations
         self.tracer = Tracer(self.trace_label)
+        # Per-call stats (model, latency, usage) of the current turn, for its trajectory.
+        self._llm_calls: list[dict] = []
 
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
@@ -312,6 +317,7 @@ class Agent(ABC):
     async def _run_loop(self, messages: list, tool_specs: list) -> str:
         iteration = 0
         assistant_message = None
+        self._llm_calls = []
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -328,6 +334,7 @@ class Agent(ABC):
             tracing = self.tracer.enabled()
 
             if not chat.choices:
+                self._note_llm_call(iteration, model, duration, no_choices=True)
                 if tracing:
                     self.tracer.record(
                         "no_choices",
@@ -346,6 +353,13 @@ class Agent(ABC):
 
             serialized = self._serialize_assistant_msg(assistant_message)
             messages.append(serialized)
+            self._note_llm_call(
+                iteration,
+                model,
+                duration,
+                finish_reason=finish_reason,
+                usage=lambda: self._usage(chat),
+            )
             if tracing:
                 self.tracer.record(
                     "llm_response",
@@ -387,6 +401,86 @@ class Agent(ABC):
         if self.tracer.enabled():
             self.tracer.record("turn_end", iterations=iteration, final=final)
         return final
+
+    def _note_llm_call(
+        self, iteration: int, model: str, duration: float, *, usage=None, **extra
+    ) -> None:
+        """Add one model call's stats to ``_llm_calls`` (trajectory agents only).
+
+        ``usage`` is a callable, so agents that don't save trajectories skip it.
+        """
+        if not self.saves_trajectories:
+            return
+        stats = {
+            "iteration": iteration,
+            "model": model,
+            "duration_s": round(duration, 3),
+        }
+        stats.update(extra)
+        if usage is not None:
+            stats["usage"] = usage()
+        self._llm_calls.append(stats)
+
+    @staticmethod
+    def _sum_usage(calls: list[dict]) -> dict[str, int]:
+        """Add up the integer token counts of ``calls``' usage dicts."""
+        totals: dict[str, int] = {}
+        for call in calls:
+            for key, value in (call.get("usage") or {}).items():
+                if isinstance(value, int) and not isinstance(value, bool):
+                    totals[key] = totals.get(key, 0) + value
+        return totals
+
+    def _save_trajectory(  # pylint: disable=too-many-arguments
+        self,
+        *,
+        store,
+        message_id: int,
+        conversation_id: int | None,
+        channel: str,
+        session_messages: list[dict],
+        turn_start: int,
+        started_at: datetime,
+    ) -> bool:
+        """Store this turn's trajectory against its final assistant message.
+
+        ``session_messages[turn_start:]`` is the turn itself (user message,
+        assistant tool calls, tool results, final reply); everything before it
+        is the system prompt plus history, kept only as the system prompt and
+        a message count. Attachment data URLs are redacted. Best-effort: a
+        failure is logged, never raised.
+
+        Returns:
+            True if the trajectory was stored.
+        """
+        try:
+            ended_at = datetime.now()
+            system = next(
+                (m["content"] for m in session_messages if m.get("role") == "system"),
+                None,
+            )
+            data = {
+                "version": 1,
+                "message_id": message_id,
+                "conversation_id": conversation_id,
+                "channel": channel,
+                "started_at": started_at.isoformat(),
+                "ended_at": ended_at.isoformat(),
+                "duration_s": round((ended_at - started_at).total_seconds(), 3),
+                "iterations": len(self._llm_calls),
+                "usage_total": self._sum_usage(self._llm_calls),
+                "llm_calls": self._llm_calls,
+                "system_prompt": system,
+                "history_message_count": max(
+                    0, turn_start - (1 if system is not None else 0)
+                ),
+                "messages": redact(session_messages[turn_start:]),
+            }
+            store.save_trajectory(message_id, conversation_id, data)
+            return True
+        except Exception as e:  # pylint: disable=broad-exception-caught  # trajectories are best-effort
+            log.warning("Saving trajectory for message %s failed: %s", message_id, e)
+            return False
 
     @abstractmethod
     async def agent_loop(self, message: str, metadata: dict = None) -> str:

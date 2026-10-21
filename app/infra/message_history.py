@@ -66,18 +66,22 @@ class MessageHistory:
             log.error("Error creating message history database: %s", str(e))
             raise
 
-    def add_message(self, role: str, content: str, conversation_id: int = None):
-        """Insert one message for this channel, with a rough token estimate (chars / 4)."""
+    def add_message(self, role: str, content: str, conversation_id: int = None) -> int:
+        """Insert one message for this channel, with a rough token estimate (chars / 4).
+
+        Returns:
+            The new row's ID (trajectories are keyed by it).
+        """
         timestamp = datetime.now().isoformat()
         est = _est_tokens(content)
         conn = get_db_connection(self.db_path)
         try:
             with conn:
-                conn.execute(
+                row_id = conn.execute(
                     "INSERT INTO messages (channel, role, content, timestamp, "
                     "est_tokens, conversation_id) VALUES (?, ?, ?, ?, ?, ?)",
                     (self.channel, role, content, timestamp, est, conversation_id),
-                )
+                ).lastrowid
         finally:
             conn.close()
         log.info(
@@ -86,6 +90,7 @@ class MessageHistory:
             est,
             content[:30],
         )
+        return row_id
 
     def get_history(self, limit: int = 100) -> list[dict]:
         """Return this channel's last ``limit`` messages, oldest first.

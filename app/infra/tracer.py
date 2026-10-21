@@ -51,7 +51,7 @@ def close_all() -> None:
         tracer.close()
 
 
-def _redact(obj):
+def redact(obj):
     """Replace base64 ``data:`` URLs (attachments) with a short placeholder."""
     if isinstance(obj, str):
         m = _DATA_URL.match(obj)
@@ -59,9 +59,9 @@ def _redact(obj):
             return f"data:{m.group(1)};base64,<{len(obj) - m.end()} chars omitted>"
         return obj
     if isinstance(obj, dict):
-        return {k: _redact(v) for k, v in obj.items()}
+        return {k: redact(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
-        return [_redact(v) for v in obj]
+        return [redact(v) for v in obj]
     return obj
 
 
@@ -183,7 +183,7 @@ class Tracer:
     def _write(self, event: str, **data) -> None:
         if self._file is None:
             return
-        record = {"ts": datetime.now().isoformat(), "event": event, **_redact(data)}
+        record = {"ts": datetime.now().isoformat(), "event": event, **redact(data)}
         try:
             self._file.write(json.dumps(record, default=str) + "\n")
         except Exception as e:  # pylint: disable=broad-exception-caught  # tracing must never break a turn

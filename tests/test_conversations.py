@@ -425,3 +425,51 @@ def test_delete_source_of_a_fork_keeps_the_fork(store, db):
 def test_delete_rejects_missing_conversation(store):
     with pytest.raises(ValueError, match="not found"):
         store.delete(999)
+
+
+# --- trajectories ---
+
+def _reply_with_trajectory(store, db, cid, data=None):
+    from app.infra.message_history import MessageHistory
+    history = MessageHistory("web", db_path=db)
+    history.add_message("user", "q", cid)
+    mid = history.add_message("assistant", "a", cid)
+    store.save_trajectory(mid, cid, data or {"messages": [{"role": "user", "content": "q"}]})
+    return mid
+
+
+def test_save_and_get_trajectory(store, db):
+    cid = store.create("web")
+    mid = _reply_with_trajectory(store, db, cid, {"x": 1})
+    assert store.get_trajectory(mid) == {"x": 1}
+    assert store.get_trajectory(mid + 100) is None
+
+
+def test_load_messages_with_meta_marks_trajectories(store, db):
+    cid = store.create("web")
+    mid = _reply_with_trajectory(store, db, cid)
+    msgs = store.load_messages(cid, with_meta=True)
+    assert [(m["role"], m["has_trajectory"]) for m in msgs] == [("user", False), ("assistant", True)]
+    assert msgs[1]["id"] == mid
+    # without with_meta the agent gets plain role/content dicts
+    assert store.load_messages(cid) == [{"role": "user", "content": "q"},
+                                        {"role": "assistant", "content": "a"}]
+
+
+def test_delete_removes_trajectories(store, db):
+    cid = store.create("web")
+    mid = _reply_with_trajectory(store, db, cid)
+    store.delete(cid)  # must not trip the trajectories -> messages foreign key
+    assert store.get_trajectory(mid) is None
+
+
+def test_fork_copies_trajectories_to_the_new_messages(store, db):
+    cid = store.create("web", "Src")
+    mid = _reply_with_trajectory(store, db, cid, {"x": 1})
+    fork = store.fork(cid, "telegram")
+    msgs = store.load_messages(fork, with_meta=True)
+    assert [m["has_trajectory"] for m in msgs] == [False, True]
+    assert msgs[1]["id"] != mid
+    assert store.get_trajectory(msgs[1]["id"]) == {"x": 1}
+    store.delete(cid)
+    assert store.get_trajectory(msgs[1]["id"]) == {"x": 1}  # the fork keeps its copy
