@@ -54,6 +54,8 @@ uv sync
 
 `background` needs at least one channel: set `WEBSOCKET_HOST=127.0.0.1` in `.env` for the web UI at `http://localhost:8765/`, and/or a Telegram or Discord token.
 
+To load new code (e.g. after a `git pull`) without stopping the bot, send `/restart` from any channel or run `./restart.sh` (the bot can run it itself). Either one lets running turns and scheduled tasks finish (new messages get a "send that again" reply meanwhile), then the process re-executes itself in place with the same PID — so it also works in Docker and under process supervisors — after running `uv sync` for any new dependencies. `restart.sh` returns immediately and logs to `$ANOTHERBOT_HOME/restart.log`; it starts the bot if none is running, and stops and restarts a bot from before this feature.
+
 ## Configuration
 
 All configuration comes from environment variables. Put them in a `.env` file, or set them in the shell or container; real environment variables always win over `.env` values. Two `.env` files are read at startup:
@@ -157,7 +159,7 @@ DISCORD_ALLOW_FROM=                  # comma-separated user IDs; empty = allow a
 
 Each channel gets its own message queue and agent. Scheduled task results are delivered to the channel the task was created from; if no context is available, the Discord bot owner is DM'd.
 
-**Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — stop the running turn; `/whoami` — show your user ID (Telegram only); `/list`, `/new`, `/load <id>`, `/fork [id]`, `/rename <id> <name>`, `/export [id]`, `/delete <id>` — manage conversation history. `/list` shows only the current channel's conversations; `/load`, `/fork`, `/rename`, `/export` and `/delete` accept any conversation ID, including ones from other channels (`/delete` refuses a conversation another channel currently has open).
+**Bot commands:** `/help` — list all commands; `/model [name]` — get or set the model; `/status` — show uptime and current conversation; `/stop` — stop the running turn; `/restart` — restart the bot to load new code (waits for running turns to finish); `/whoami` — show your user ID (Telegram only); `/list`, `/new`, `/load <id>`, `/fork [id]`, `/rename <id> <name>`, `/export [id]`, `/delete <id>` — manage conversation history. `/list` shows only the current channel's conversations; `/load`, `/fork`, `/rename`, `/export` and `/delete` accept any conversation ID, including ones from other channels (`/delete` refuses a conversation another channel currently has open).
 
 ### Scheduled Tasks
 

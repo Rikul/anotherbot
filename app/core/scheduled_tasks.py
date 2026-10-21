@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from ..channels.message import OutgoingMessage
 from ..config import get_db_connection
 from ..infra.app_logging import log
+from ..infra import restart
 from .helper_agent import HelperAgent
 
 TASKS_SYSTEM_PROMPT = """
@@ -272,9 +273,17 @@ class ScheduledTasks:
     async def run_task(self, task: dict) -> str:
         """Run one task with a ``HelperAgent``, record the output, deliver it, and reschedule.
 
+        Counts as a running turn, so a restart waits for it. A run cancelled
+        anyway (restart timeout, shutdown) is recorded as ``cancelled`` and
+        keeps its slot, so it runs again after the restart.
+
         Returns:
             The output (or the error message if the run failed).
         """
+        with restart.turn():
+            return await self._run_task(task)
+
+    async def _run_task(self, task: dict) -> str:
         name, prompt = task["name"], task["prompt"]
         log.info("Running scheduled task '%s'", name)
         start = datetime.now()
@@ -287,6 +296,9 @@ class ScheduledTasks:
             status = "error"
             output = str(e)
             log.error("Scheduled task '%s' failed: %s", name, e)
+        except asyncio.CancelledError:
+            status = "cancelled"
+            raise
         finally:
             duration = (datetime.now() - start).total_seconds()
             self.save_output(
@@ -296,7 +308,8 @@ class ScheduledTasks:
                 status=status,
                 duration_secs=duration,
             )
-            self._after_run(task=task, now=datetime.now())
+            if status != "cancelled":
+                self._after_run(task=task, now=datetime.now())
 
         channel_name = task["delivery_channel"]
         mq = self._mqs.get(channel_name)
@@ -331,7 +344,7 @@ class ScheduledTasks:
                 now = datetime.now()
                 tasks = self.load_tasks()
                 due = [t for t in tasks if t["enabled"] and self._is_due(t, now)]
-                if due:
+                if due and not restart.requested():  # draining for a restart
                     await asyncio.gather(
                         *[self.run_task(t) for t in due], return_exceptions=True
                     )

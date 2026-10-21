@@ -17,6 +17,7 @@ from .core import runtime
 from .core import mcp_manager as mcp
 from .core.mcp_manager import initialize_mcp
 from .infra import tracer
+from .infra import restart
 
 
 def parse_args():
@@ -122,6 +123,8 @@ if __name__ == "__main__":
     try:
         with asyncio.Runner() as runner:
             runner.run(main())
+        if restart.requested():
+            restart.exec_restart()
     except KeyboardInterrupt:
         log.info("Exiting...")
         os._exit(0)

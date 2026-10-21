@@ -1,10 +1,13 @@
 """Background server: starts every configured channel with its own agent and queue."""
 
 import asyncio
+import contextlib
 import os
+import signal
 
 from . import config
 from .infra.app_logging import log
+from .infra import restart
 from .core.background_agent import BackgroundAgent
 from .channels.message_queue import MessageQueue
 from .core.scheduled_tasks import ScheduledTasks
@@ -115,10 +118,21 @@ def web_channel_agent() -> tuple[
     return web_channel, web_agent, web_mq
 
 
-async def start_server() -> None:
-    """Run all configured channels, their agents and the task scheduler until cancelled.
+def _write_pid_file() -> None:
+    """Record this process's PID so restart.sh can signal it."""
+    try:
+        (config.PROJECT_HOME / "background.pid").write_text(f"{os.getpid()}\n")
+    except OSError as e:
+        log.warning("Could not write PID file: %s", e)
 
-    Returns immediately (after logging an error) if no channel is usable.
+
+async def start_server() -> None:
+    """Run all configured channels, their agents and the task scheduler.
+
+    Runs until cancelled or until a restart is requested (``/restart`` or
+    SIGHUP); in the latter case it returns once running turns have finished
+    and ``app.main`` re-executes the process. Returns immediately (after
+    logging an error) if no channel is usable.
     """
     log.info("Starting server...")
 
@@ -151,4 +165,33 @@ async def start_server() -> None:
     for ch, agent, mq in active_channels.values():
         coros += [ch.run_polling(), agent.process_incoming(), mq.process_outgoing()]
 
-    await asyncio.gather(*coros)
+    _write_pid_file()
+    previous_sighup = restart.install_sighup_handler(asyncio.get_running_loop())
+
+    existing = asyncio.all_tasks()
+    server = asyncio.ensure_future(asyncio.gather(*coros))
+    # gather() wraps each coroutine in a task. Cancelling gather resolves as
+    # soon as the first child is cancelled, so keep the tasks to wait for all
+    # of them (e.g. uvicorn closing WebSockets) before restarting.
+    children = asyncio.all_tasks() - existing - {server}
+    restart_wait = asyncio.ensure_future(restart.wait_requested())
+    try:
+        await asyncio.wait({server, restart_wait}, return_when=asyncio.FIRST_COMPLETED)
+        if restart_wait.done():
+            log.info("Restart: waiting for running turns to finish...")
+            await restart.wait_until_idle(list(mqs.values()))
+            server.cancel()
+            # A channel failing while shutting down must not block the restart
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await server
+            if children:
+                await asyncio.wait(children, timeout=15)
+        else:
+            server.result()
+    finally:
+        restart_wait.cancel()
+        server.cancel()
+        # On restart the handler stays until exec_restart(), so a second
+        # SIGHUP during shutdown can't kill the bot.
+        if previous_sighup is not None and not restart.requested():
+            signal.signal(signal.SIGHUP, previous_sighup)

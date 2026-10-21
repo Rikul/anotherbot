@@ -285,3 +285,72 @@ def test_web_channel_gets_the_agents_command_registry(monkeypatch):
         channel, agent, _ = web_channel_agent()
     assert agent is MockAgent.return_value
     assert channel.commands is agent.registry  # listed by /api/commands
+
+
+# --- restart ---
+
+@pytest.mark.asyncio
+async def test_restart_request_cancels_channels_and_returns():
+    """/restart or SIGHUP: start_server waits for idle, stops every channel task and returns."""
+    import asyncio
+    from app.infra import restart
+
+    cancelled = []
+
+    async def forever(name):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.append(name)
+
+    mock_config = _make_config(discord_token="discord-token")
+    with patch("app.bg_server.config", mock_config), \
+         patch("app.bg_server.os.chdir"), \
+         patch("app.channels.discord.DiscordChannel") as MockDC, \
+         patch("app.bg_server.BackgroundAgent") as MockAgent, \
+         patch("app.bg_server.ScheduledTasks") as MockTasks, \
+         patch("app.bg_server.MessageQueue") as MockMQ, \
+         patch("app.bg_server.restart.wait_until_idle", AsyncMock()) as idle:
+        MockDC.return_value.run_polling = lambda: forever("polling")
+        MockAgent.return_value.process_incoming = lambda: forever("incoming")
+        MockTasks.return_value.run = lambda: forever("tasks")
+        MockMQ.return_value.process_outgoing = lambda: forever("outgoing")
+        asyncio.get_running_loop().call_later(0.05, restart.request_restart)
+        await asyncio.wait_for(start_server(), 5)
+
+    idle.assert_awaited_once()
+    assert sorted(cancelled) == ["incoming", "outgoing", "polling", "tasks"]
+    assert restart.requested()
+
+
+@pytest.mark.asyncio
+async def test_sighup_requests_restart():
+    import asyncio
+    import os
+    import signal
+    from app.infra import restart
+
+    mock_config = _make_config(discord_token="discord-token")
+
+    async def gather(*coros, **kwargs):
+        for c in coros:
+            c.close()
+        os.kill(os.getpid(), signal.SIGHUP)
+        await asyncio.Event().wait()
+
+    previous = signal.getsignal(signal.SIGHUP)
+
+    with patch("app.bg_server.config", mock_config), \
+         patch("app.bg_server.os.chdir"), \
+         patch("app.channels.discord.DiscordChannel"), \
+         patch("app.bg_server.BackgroundAgent"), \
+         patch("app.bg_server.ScheduledTasks"), \
+         patch("app.bg_server.MessageQueue"), \
+         patch("app.bg_server.restart.wait_until_idle", AsyncMock()), \
+         patch("asyncio.gather", AsyncMock(side_effect=gather)):
+        try:
+            await asyncio.wait_for(start_server(), 5)
+        finally:
+            signal.signal(signal.SIGHUP, previous)
+
+    assert restart.requested()

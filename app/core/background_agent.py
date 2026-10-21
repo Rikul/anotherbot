@@ -16,6 +16,7 @@ from ..infra.conversations import ConversationStore
 from . import runtime
 from ..channels.commands import BotCommand, build_command_registry
 from ..tools.todo import init_task_todos
+from ..infra import restart
 
 _MAX_EMPTY_RETRIES = 5
 
@@ -68,8 +69,19 @@ class BackgroundAgent(Agent):
         self.registry = build_command_registry(
             self,
             status_channel=self.channel_str,
-            extra=(BotCommand("stop", "Stop the running turn.", self._stop_cmd),),
+            extra=(
+                BotCommand("stop", "Stop the running turn.", self._stop_cmd),
+                BotCommand(
+                    "restart",
+                    "Restart the bot, loading the latest code.",
+                    self._restart_cmd,
+                ),
+            ),
         )
+
+    async def _restart_cmd(self, _args: str = "") -> str:
+        restart.request_restart()
+        return "Restarting... I'll be back in a few seconds."
 
     async def _stop_cmd(self, _args: str = "") -> str:
         # Listed in /help, but every channel answers /stop itself so it can
@@ -163,12 +175,22 @@ class BackgroundAgent(Agent):
                             content=reply, channel=self.channel, metadata=msg.metadata
                         )
                     )
+                elif restart.requested():
+                    # Draining for a restart: don't start work it would cut off.
+                    await self.mq.outgoing_msg(
+                        OutgoingMessage(
+                            content="Restarting, please send that again in a few seconds.",
+                            channel=self.channel,
+                            metadata=msg.metadata,
+                        )
+                    )
                 else:
                     # A /stop that arrived while idle must not cut this turn short.
                     self.channel.clear_stopped()
                     await self.channel.on_agent_turn(True)
                     try:
-                        await self.agent_loop(msg.content, msg.metadata)
+                        with restart.turn():  # a restart waits for this turn
+                            await self.agent_loop(msg.content, msg.metadata)
                     finally:
                         await self.channel.on_agent_turn(False)
             except Exception as e:  # pylint: disable=broad-exception-caught  # report it, keep serving
