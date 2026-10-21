@@ -1,6 +1,7 @@
 import pytest
 
 import app.config as config
+from app.infra import restart
 
 # Every env var app.config.load() reads. Cleared before each test so values from
 # the developer's shell or a .env file (load_dotenv runs when app.main is
@@ -26,4 +27,6 @@ def isolated_config_env(monkeypatch):
     for name in CONFIG_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(config, "_config", dict(config._config))
+    restart.reset()
     yield
+    restart.reset()

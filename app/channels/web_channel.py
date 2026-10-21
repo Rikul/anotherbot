@@ -471,7 +471,15 @@ class WebChannel(Channel):
         server = uvicorn.Server(server_config)
         log.info("Web UI at http://%s:%s/", self.host, self.port)
         log.info("WebSocket at ws://%s:%s/ws", self.host, self.port)
-        await server.serve()
+        serve = asyncio.ensure_future(server.serve())
+        try:
+            await asyncio.shield(serve)
+        except asyncio.CancelledError:
+            # Shut uvicorn down cleanly (closes WebSockets, runs lifespan
+            # shutdown) instead of cancelling it mid-request, e.g. on /restart.
+            server.should_exit = True
+            await serve
+            raise
 
     # -- Message delivery ---------------------------------------------------
 
