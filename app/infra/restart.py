@@ -16,6 +16,7 @@ import contextlib
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -76,18 +77,44 @@ def turn():
         _state.active_turns -= 1
 
 
-async def wait_until_idle(outgoing_queues=(), timeout: float = 300.0) -> None:
-    """Wait (up to ``timeout`` seconds) for running turns to end and replies to be sent."""
+async def wait_until_idle(mqs=(), timeout: float = 300.0) -> None:
+    """Wait (up to ``timeout`` seconds) for running turns to end and replies to be delivered.
+
+    ``mqs`` are the channels' ``MessageQueue``s; new turns are refused while
+    a restart is pending, so this only waits for work already started.
+    """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
-        if _state.active_turns == 0 and all(q.empty() for q in outgoing_queues):
-            break
-        await asyncio.sleep(0.5)
-    else:
-        log.warning("Restarting with %s turn(s) still running", _state.active_turns)
-    # The last dequeued reply may still be in flight.
-    await asyncio.sleep(1)
+        if _state.active_turns == 0 and all(mq.outgoing_idle() for mq in mqs):
+            return
+        await asyncio.sleep(0.2)
+    log.warning("Restarting with %s turn(s) still running", _state.active_turns)
+
+
+def install_sighup_handler(loop: asyncio.AbstractEventLoop):
+    """Make SIGHUP request a restart; returns the previous handler (``None`` if unsupported).
+
+    A plain ``signal.signal`` handler rather than ``loop.add_signal_handler``:
+    the loop resets its handlers to the default (terminate) when it closes,
+    which would let a second SIGHUP during shutdown or ``uv sync`` kill the
+    bot. This one stays installed until ``exec_restart()``.
+    """
+    if not hasattr(signal, "SIGHUP"):
+        return None  # Windows; /restart still works
+
+    def _on_sighup(_signum, _frame):
+        if _state.requested:
+            return  # already restarting
+        try:
+            loop.call_soon_threadsafe(request_restart)
+        except RuntimeError:  # loop already closed: the restart is under way
+            pass
+
+    try:
+        return signal.signal(signal.SIGHUP, _on_sighup)
+    except ValueError:  # not the main thread
+        return None
 
 
 def _sync_dependencies() -> None:
@@ -97,7 +124,17 @@ def _sync_dependencies() -> None:
         return
     try:
         result = subprocess.run(
-            [uv, "sync", "--inexact", "--project", str(PROJECT_DIR)],
+            # Mirror the image build (--no-dev --frozen); --inexact keeps
+            # anything else already installed, e.g. dev tools in a checkout.
+            [
+                uv,
+                "sync",
+                "--frozen",
+                "--no-dev",
+                "--inexact",
+                "--project",
+                str(PROJECT_DIR),
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -112,6 +149,10 @@ def _sync_dependencies() -> None:
 
 def exec_restart() -> None:
     """Replace the current process with a fresh run of the same command line."""
+    if hasattr(signal, "SIGHUP"):
+        # An ignored signal stays ignored across execv, so a SIGHUP can't
+        # kill the new process before start_server() installs its handler.
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
     _sync_dependencies()
     argv = list(sys.orig_argv)
     log.info("Restarting: %s", " ".join(argv))

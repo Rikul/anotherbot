@@ -338,6 +338,8 @@ async def test_sighup_requests_restart():
         os.kill(os.getpid(), signal.SIGHUP)
         await asyncio.Event().wait()
 
+    previous = signal.getsignal(signal.SIGHUP)
+
     with patch("app.bg_server.config", mock_config), \
          patch("app.bg_server.os.chdir"), \
          patch("app.channels.discord.DiscordChannel"), \
@@ -346,6 +348,9 @@ async def test_sighup_requests_restart():
          patch("app.bg_server.MessageQueue"), \
          patch("app.bg_server.restart.wait_until_idle", AsyncMock()), \
          patch("asyncio.gather", AsyncMock(side_effect=gather)):
-        await asyncio.wait_for(start_server(), 5)
+        try:
+            await asyncio.wait_for(start_server(), 5)
+        finally:
+            signal.signal(signal.SIGHUP, previous)
 
     assert restart.requested()

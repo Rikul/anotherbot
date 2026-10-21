@@ -166,11 +166,7 @@ async def start_server() -> None:
         coros += [ch.run_polling(), agent.process_incoming(), mq.process_outgoing()]
 
     _write_pid_file()
-    loop = asyncio.get_running_loop()
-    try:
-        loop.add_signal_handler(signal.SIGHUP, restart.request_restart)
-    except (NotImplementedError, AttributeError, RuntimeError):
-        pass  # no SIGHUP on Windows; /restart still works
+    previous_sighup = restart.install_sighup_handler(asyncio.get_running_loop())
 
     existing = asyncio.all_tasks()
     server = asyncio.ensure_future(asyncio.gather(*coros))
@@ -183,7 +179,7 @@ async def start_server() -> None:
         await asyncio.wait({server, restart_wait}, return_when=asyncio.FIRST_COMPLETED)
         if restart_wait.done():
             log.info("Restart: waiting for running turns to finish...")
-            await restart.wait_until_idle([mq.outgoing for mq in mqs.values()])
+            await restart.wait_until_idle(list(mqs.values()))
             server.cancel()
             # A channel failing while shutting down must not block the restart
             with contextlib.suppress(asyncio.CancelledError, Exception):
@@ -195,5 +191,7 @@ async def start_server() -> None:
     finally:
         restart_wait.cancel()
         server.cancel()
-        with contextlib.suppress(NotImplementedError, AttributeError, RuntimeError):
-            loop.remove_signal_handler(signal.SIGHUP)
+        # On restart the handler stays until exec_restart(), so a second
+        # SIGHUP during shutdown can't kill the bot.
+        if previous_sighup is not None and not restart.requested():
+            signal.signal(signal.SIGHUP, previous_sighup)

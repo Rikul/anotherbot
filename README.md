@@ -54,7 +54,7 @@ uv sync
 
 `background` needs at least one channel: set `WEBSOCKET_HOST=127.0.0.1` in `.env` for the web UI at `http://localhost:8765/`, and/or a Telegram or Discord token.
 
-To load new code (e.g. after a `git pull`) without stopping the bot, send `/restart` from any channel or run `./restart.sh` (the bot can run it itself). Either one lets running turns finish, then the process re-executes itself in place with the same PID — so it also works in Docker and under process supervisors — after running `uv sync` for any new dependencies. `restart.sh` starts the bot if it isn't running.
+To load new code (e.g. after a `git pull`) without stopping the bot, send `/restart` from any channel or run `./restart.sh` (the bot can run it itself). Either one lets running turns and scheduled tasks finish (new messages get a "send that again" reply meanwhile), then the process re-executes itself in place with the same PID — so it also works in Docker and under process supervisors — after running `uv sync` for any new dependencies. `restart.sh` returns immediately and logs to `$ANOTHERBOT_HOME/restart.log`; it starts the bot if none is running, and stops and restarts a bot from before this feature.
 
 ## Configuration
 

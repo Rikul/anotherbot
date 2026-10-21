@@ -467,6 +467,31 @@ async def test_process_incoming_marks_turns_so_restart_waits_for_them():
     assert restart._state.active_turns == 0
 
 
+@pytest.mark.asyncio
+async def test_no_new_turns_while_restart_is_pending():
+    from app.infra import restart
+    agent, _, mq = make_agent()
+    channel = MagicMock()
+    channel.channel_type = ChannelType.TELEGRAM
+    channel.on_agent_turn = AsyncMock()
+    agent.channel = channel
+    restart.request_restart()
+
+    with patch.object(agent, "agent_loop", AsyncMock()) as loop:
+        await mq.incoming.put(IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={}))
+        task = asyncio.create_task(agent.process_incoming())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    loop.assert_not_awaited()
+    reply = mq.outgoing.get_nowait()
+    assert "Restarting" in reply.content
+
+
 # --- trajectories ---
 
 @pytest.mark.asyncio

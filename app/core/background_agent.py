@@ -175,6 +175,15 @@ class BackgroundAgent(Agent):
                             content=reply, channel=self.channel, metadata=msg.metadata
                         )
                     )
+                elif restart.requested():
+                    # Draining for a restart: don't start work it would cut off.
+                    await self.mq.outgoing_msg(
+                        OutgoingMessage(
+                            content="Restarting, please send that again in a few seconds.",
+                            channel=self.channel,
+                            metadata=msg.metadata,
+                        )
+                    )
                 else:
                     # A /stop that arrived while idle must not cut this turn short.
                     self.channel.clear_stopped()

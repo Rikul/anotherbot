@@ -23,6 +23,11 @@ class MessageQueue:
         self.incoming: asyncio.Queue[IncomingMessage] = asyncio.Queue()
         self.outgoing: asyncio.Queue[OutgoingMessage] = asyncio.Queue()
         self._delivery: dict[Channel, DeliveryFn] = {}
+        self._delivering = 0
+
+    def outgoing_idle(self) -> bool:
+        """True when no reply is queued or being delivered."""
+        return self.outgoing.empty() and self._delivering == 0
 
     def register(self, channel: Channel, fn: DeliveryFn):
         """Register ``fn`` as the delivery function for messages addressed to ``channel``."""
@@ -58,9 +63,12 @@ class MessageQueue:
                 )
                 continue
 
+            self._delivering += 1
             try:
                 await fn(message)
             except Exception as e:  # pylint: disable=broad-exception-caught  # keep the delivery loop alive
                 log.error(
                     "Failed to deliver message to channel %s: %s", message.channel, e
                 )
+            finally:
+                self._delivering -= 1
