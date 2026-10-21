@@ -21,14 +21,15 @@ With ``WEB_PASSWORD`` set, ``WebAuthMiddleware`` adds ``POST /api/login`` and
 WebSocket message framing::
 
     → {"type": "message", "content": "...", "files": ["<stored name>", ...]}
-    ← {"type": "message" | "system", "content": "..."}
+    ← {"type": "message" | "system", "content": "...", "final": true?}
     ← {"type": "busy", "busy": bool, "stopped": bool}
     ← {"type": "trajectory", "message_id": int, "conversation_id": int}
 
 Plain text is also accepted as a convenience. ``busy`` frames go to every tab
 when an agent turn starts/ends (and once on connect); ``stopped`` is true when
 a ``/stop`` cut the turn short. A ``trajectory`` frame follows a turn's last
-reply (to the tab that sent the message) once its trajectory is stored.
+reply (to the tab that sent the message) once its trajectory is stored;
+``final`` marks that reply (status lines and thinking text don't have it).
 """
 
 from __future__ import annotations
@@ -534,6 +535,8 @@ class WebChannel(Channel):
         is_command = message.metadata.get("is_command", False)
         msg_type = "system" if is_command else "message"
         payload = {"type": msg_type, "content": message.content}
+        if message.metadata.get("final") and not is_command:
+            payload["final"] = True
         if "busy_frame" in message.metadata:
             client_id, payload = None, message.metadata["busy_frame"]
         elif "trajectory_frame" in message.metadata:

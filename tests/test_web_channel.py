@@ -554,11 +554,23 @@ async def test_trajectory_frame_goes_to_the_requesting_tab_only():
     b.send_json.assert_not_awaited()
 
 
-def test_trajectory_button_in_frontend():
-    js = (FRONTEND_DIR / "app.js").read_text()
-    for needle in ("/api/messages/${messageId}/trajectory", "Download trajectory",
-                   "data.type === 'trajectory'", "msg.has_trajectory"):
-        assert needle in js, needle
+@pytest.mark.asyncio
+async def test_final_flag_reaches_the_browser_only_for_replies():
+    ch, _ = make_web_channel()
+    ws = AsyncMock()
+    ch._connections["c1"] = ws
+    await ch.send_message(OutgoingMessage(
+        content="done", channel=ch, metadata={"websocket_id": "c1", "final": True}))
+    await ch.send_message(OutgoingMessage(
+        content="> bash [ls]...", channel=ch, metadata={"websocket_id": "c1"}))
+    await ch.send_message(OutgoingMessage(
+        content="ok", channel=ch,
+        metadata={"websocket_id": "c1", "is_command": True, "final": True}))
+    assert [c.args[0] for c in ws.send_json.await_args_list] == [
+        {"type": "message", "content": "done", "final": True},
+        {"type": "message", "content": "> bash [ls]..."},
+        {"type": "system", "content": "ok"},
+    ]
 
 
 def test_sidebar_actions_in_frontend():

@@ -532,11 +532,14 @@
                 if (data.type === 'busy') {
                     onBusy(data);
                 } else if (data.type === 'trajectory') {
-                    // follows the turn's last reply once its trajectory is stored
+                    // follows the turn's reply once its trajectory is stored; a turn
+                    // with no reply (stopped, or empty) gets no button anywhere
                     if (turnReplyRow) addTrajectoryButton(turnReplyRow, data.message_id);
                     turnReplyRow = null;
                 } else if (data.type === 'message') {
-                    turnReplyRow = appendMessage(data.content, 'ai');
+                    const row = appendMessage(data.content, 'ai');
+                    // only the turn's reply, not status lines ("> tool [...]") or thinking text
+                    if (data.final) turnReplyRow = row;
                     // agent_loop() calls _store.touch() after every response, so the
                     // sidebar's updated_at and message count change — refresh it
                     setTimeout(() => loadConversations(false), 300);
@@ -561,7 +564,7 @@
     let agentBusy = false;
     let pendingTurn = false;
     let stopping = false;
-    // The latest reply row of the running turn: gets the trajectory download.
+    // The running turn's reply row (a "final" message): gets the trajectory download.
     let turnReplyRow = null;
 
     function onBusy({ busy, stopped }) {

@@ -136,7 +136,7 @@ async def test_agent_loop_sends_outgoing_message():
     msg = await mq.outgoing.get()
     assert msg.content == "Hello!"
     assert msg.channel == _mock_channel
-    assert msg.metadata == {"chat_id": 123}
+    assert msg.metadata == {"chat_id": 123, "final": True}
 
 
 @pytest.mark.asyncio
@@ -493,4 +493,94 @@ async def test_agent_loop_saves_turn_trajectory_and_notifies_channel(tmp_path):
 async def test_trajectory_save_failure_does_not_break_the_turn():
     agent, _, _ = make_agent()
     agent.store.save_trajectory.side_effect = RuntimeError("disk full")
+    channel = MagicMock()
+    channel.has_stopped = False
+    channel.on_trajectory_saved = AsyncMock()
+    agent.channel = channel
     assert await agent.agent_loop("hi") == "Hello!"
+    # nothing was stored, so the UI must not be offered a download
+    channel.on_trajectory_saved.assert_not_awaited()
+
+
+# --- trajectories end to end: BackgroundAgent -> WebChannel -> WebSocket frames ---
+
+def _completion(message, finish_reason):
+    from openai.types.chat import ChatCompletion
+    return ChatCompletion.model_validate({
+        "id": "x", "object": "chat.completion", "created": 0, "model": "m",
+        "choices": [{"index": 0, "finish_reason": finish_reason, "message": message}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    })
+
+
+_TOOL_TURN = {"role": "assistant", "content": "Let me check", "tool_calls": [{
+    "id": "tc1", "type": "function",
+    "function": {"name": "bash", "arguments": '{"command": "echo hi"}'}}]}
+
+
+async def _run_web_turn(tmp_path, responses, stop_after_tools=False, save_fails=False):
+    """Run one turn of a web BackgroundAgent and return the frames its tab receives."""
+    from app.channels.web_channel import WebChannel
+    from app.infra.conversations import ConversationStore
+    from app.infra.message_history import MessageHistory
+
+    mq = MessageQueue()
+    web = WebChannel(mq=mq)
+    ws = AsyncMock()
+    web._connections["tab"] = ws
+    db = tmp_path / "app.db"
+    store = ConversationStore(db_path=db)
+    with patch("app.core.agent.Client") as MockClient, \
+         patch("app.core.background_agent.ConversationStore", return_value=store), \
+         patch("app.core.background_agent.MessageHistory",
+               return_value=MessageHistory("web", db_path=db)):
+        MockClient.return_value.get_client.return_value = MagicMock()
+        agent = BackgroundAgent(mq=mq, channel=web)
+    agent.client.chat.completions.create = AsyncMock(side_effect=responses)
+    if save_fails:
+        store.save_trajectory = MagicMock(side_effect=RuntimeError("disk full"))
+
+    async def run_tool(**_kwargs):
+        if stop_after_tools:
+            web.stopped = True  # /stop arrives while the tool runs
+        return "hi"
+
+    with patch("app.core.tool_calls.run_tool", side_effect=run_tool), \
+         patch.object(agent, "_auto_name", new=AsyncMock()):
+        await agent.agent_loop("check it", {"websocket_id": "tab"})
+    while not mq.outgoing.empty():
+        await web.send_message(mq.outgoing.get_nowait())
+    return [c.args[0] for c in ws.send_json.await_args_list], store
+
+
+@pytest.mark.asyncio
+async def test_web_turn_marks_the_reply_final_and_sends_trajectory_after_it(tmp_path):
+    frames, store = await _run_web_turn(
+        tmp_path, [_completion(_TOOL_TURN, "tool_calls"),
+                   _completion({"role": "assistant", "content": "All good."}, "stop")])
+    assert [(f["type"], f.get("content"), f.get("final")) for f in frames[:-1]] == [
+        ("message", "Let me check", None),            # thinking text: no button
+        ("message", "> bash [echo hi]...", None),     # status line: no button
+        ("message", "All good.", True),               # the reply
+    ]
+    traj = frames[-1]
+    assert traj["type"] == "trajectory"
+    assert store.get_trajectory(traj["message_id"])["messages"][-1]["content"] == "All good."
+
+
+@pytest.mark.asyncio
+async def test_web_turn_without_a_reply_has_no_final_frame(tmp_path):
+    """A stopped turn ends after the tool batch: the UI has no reply row, so it
+    drops the trajectory frame instead of putting the button on a status line."""
+    frames, _ = await _run_web_turn(
+        tmp_path, [_completion(_TOOL_TURN, "tool_calls")], stop_after_tools=True)
+    assert not any(f.get("final") for f in frames)
+
+
+@pytest.mark.asyncio
+async def test_web_turn_with_failed_save_sends_no_trajectory_frame(tmp_path):
+    frames, _ = await _run_web_turn(
+        tmp_path, [_completion({"role": "assistant", "content": "Hi."}, "stop")],
+        save_fails=True)
+    assert [f["type"] for f in frames] == ["message"]
+    assert frames[0]["final"] is True

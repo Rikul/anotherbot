@@ -110,11 +110,12 @@ class BackgroundAgent(Agent):
 
     async def _on_response(self, content: str | None) -> None:
         if self.mq and content and content.strip():
+            # "final" tells the web UI this is the turn's reply, not a status line
             await self.mq.outgoing_msg(
                 OutgoingMessage(
                     content=content.strip(),
                     channel=self.channel,
-                    metadata=self._reply_metadata,
+                    metadata={**self._reply_metadata, "final": True},
                 )
             )
 
@@ -214,7 +215,7 @@ class BackgroundAgent(Agent):
         message_id = self.history.add_message(
             "assistant", final_content, self.conversation_id
         )
-        self._save_trajectory(
+        saved = self._save_trajectory(
             store=self.store,
             message_id=message_id,
             conversation_id=self.conversation_id,
@@ -223,9 +224,10 @@ class BackgroundAgent(Agent):
             turn_start=turn_start,
             started_at=started_at,
         )
-        await self.channel.on_trajectory_saved(
-            message_id, self.conversation_id, self._reply_metadata
-        )
+        if saved:
+            await self.channel.on_trajectory_saved(
+                message_id, self.conversation_id, self._reply_metadata
+            )
         self.store.touch(self.conversation_id)
 
         if self.store.count_user_messages(self.conversation_id) == 1:

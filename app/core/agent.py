@@ -441,7 +441,7 @@ class Agent(ABC):
         session_messages: list[dict],
         turn_start: int,
         started_at: datetime,
-    ) -> None:
+    ) -> bool:
         """Store this turn's trajectory against its final assistant message.
 
         ``session_messages[turn_start:]`` is the turn itself (user message,
@@ -449,6 +449,9 @@ class Agent(ABC):
         is the system prompt plus history, kept only as the system prompt and
         a message count. Attachment data URLs are redacted. Best-effort: a
         failure is logged, never raised.
+
+        Returns:
+            True if the trajectory was stored.
         """
         try:
             ended_at = datetime.now()
@@ -474,8 +477,10 @@ class Agent(ABC):
                 "messages": redact(session_messages[turn_start:]),
             }
             store.save_trajectory(message_id, conversation_id, data)
+            return True
         except Exception as e:  # pylint: disable=broad-exception-caught  # trajectories are best-effort
             log.warning("Saving trajectory for message %s failed: %s", message_id, e)
+            return False
 
     @abstractmethod
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
