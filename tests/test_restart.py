@@ -86,10 +86,12 @@ def test_exec_restart_ignores_sighup_across_exec():
 
     previous = signal.getsignal(signal.SIGHUP)
     try:
-        with patch("app.infra.restart._sync_dependencies"), \
-             patch("app.infra.restart.os.chdir"), \
-             patch("app.infra.restart.logging.shutdown"), \
-             patch("app.infra.restart.os.execv"):
+        with (
+            patch("app.infra.restart._sync_dependencies"),
+            patch("app.infra.restart.os.chdir"),
+            patch("app.infra.restart.logging.shutdown"),
+            patch("app.infra.restart.os.execv"),
+        ):
             restart.exec_restart()
         assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
     finally:
@@ -97,8 +99,10 @@ def test_exec_restart_ignores_sighup_across_exec():
 
 
 def test_sync_dependencies_mirrors_the_image_build():
-    with patch("app.infra.restart.shutil.which", return_value="/usr/bin/uv"), \
-         patch("app.infra.restart.subprocess.run") as run:
+    with (
+        patch("app.infra.restart.shutil.which", return_value="/usr/bin/uv"),
+        patch("app.infra.restart.subprocess.run") as run,
+    ):
         run.return_value.returncode = 0
         restart._sync_dependencies()
     args = run.call_args[0][0]
@@ -107,11 +111,14 @@ def test_sync_dependencies_mirrors_the_image_build():
 
 def test_exec_restart_reexecs_same_command_from_start_dir():
     import signal
+
     previous = signal.getsignal(signal.SIGHUP)
-    with patch("app.infra.restart._sync_dependencies") as sync, \
-         patch("app.infra.restart.os.chdir") as chdir, \
-         patch("app.infra.restart.logging.shutdown"), \
-         patch("app.infra.restart.os.execv") as execv:
+    with (
+        patch("app.infra.restart._sync_dependencies") as sync,
+        patch("app.infra.restart.os.chdir") as chdir,
+        patch("app.infra.restart.logging.shutdown"),
+        patch("app.infra.restart.os.execv") as execv,
+    ):
         restart.exec_restart()
     sync.assert_called_once()
     chdir.assert_called_once_with(restart.START_CWD)
@@ -120,6 +127,8 @@ def test_exec_restart_reexecs_same_command_from_start_dir():
 
 
 def test_sync_dependencies_failure_does_not_raise():
-    with patch("app.infra.restart.shutil.which", return_value="/usr/bin/uv"), \
-         patch("app.infra.restart.subprocess.run", side_effect=OSError("nope")):
+    with (
+        patch("app.infra.restart.shutil.which", return_value="/usr/bin/uv"),
+        patch("app.infra.restart.subprocess.run", side_effect=OSError("nope")),
+    ):
         restart._sync_dependencies()

@@ -7,6 +7,7 @@ import app.config as config
 
 # --- defaults ---
 
+
 def test_load_defaults_without_env_vars():
     config.load()
     assert config.get("model") == "deepseek/deepseek-v4.1-flash"
@@ -35,6 +36,7 @@ def test_empty_env_var_is_ignored(monkeypatch):
 
 
 # --- LLM settings ---
+
 
 def test_llm_model_env(monkeypatch):
     monkeypatch.setenv("LLM_MODEL", "gpt-4o")
@@ -74,6 +76,7 @@ def test_max_iterations_env_invalid_raises(monkeypatch):
 
 # --- Telegram ---
 
+
 def test_telegram_bot_token_env(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "bot123:secret")
     config.load()
@@ -94,6 +97,7 @@ def test_telegram_allow_from_env_single_id(monkeypatch):
 
 # --- Discord ---
 
+
 def test_discord_env(monkeypatch):
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord-token")
     monkeypatch.setenv("DISCORD_ALLOW_FROM", "7,8")
@@ -102,6 +106,7 @@ def test_discord_env(monkeypatch):
 
 
 # --- WebSocket ---
+
 
 def test_websocket_env(monkeypatch):
     monkeypatch.setenv("WEBSOCKET_HOST", "0.0.0.0")
@@ -117,6 +122,7 @@ def test_websocket_port_env_invalid_raises(monkeypatch):
 
 
 # --- get / set / attribute access ---
+
 
 def test_get_returns_default_for_missing_key():
     config.load()
@@ -144,6 +150,7 @@ def test_getattr_raises_for_missing_key():
 
 # --- full env-only startup (Docker) ---
 
+
 def test_docker_scenario_all_env_vars(monkeypatch):
     env = {
         "LLM_API_KEY": "sk-docker",
@@ -163,6 +170,7 @@ def test_docker_scenario_all_env_vars(monkeypatch):
 
 # --- .env loading (runs at import time, so exercised in a fresh interpreter) ---
 
+
 def test_project_home_dotenv_is_loaded(tmp_path):
     import os
     import subprocess
@@ -172,9 +180,15 @@ def test_project_home_dotenv_is_loaded(tmp_path):
     env = {k: v for k, v in os.environ.items() if k not in ("MAX_ITERATIONS",)}
     env["ANOTHERBOT_HOME"] = str(tmp_path)
     out = subprocess.run(
-        [sys.executable, "-c",
-         "import app.config as c; c.load(); print(c.PROJECT_HOME, c.get('max_iterations'))"],
-        env=env, capture_output=True, text=True, check=True,
+        [
+            sys.executable,
+            "-c",
+            "import app.config as c; c.load(); print(c.PROJECT_HOME, c.get('max_iterations'))",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.split()
     assert out == [str(tmp_path), "7"]
 
@@ -187,8 +201,15 @@ def test_real_env_wins_over_project_home_dotenv(tmp_path):
     (tmp_path / ".env").write_text("MAX_ITERATIONS=7\n")
     env = dict(os.environ, ANOTHERBOT_HOME=str(tmp_path), MAX_ITERATIONS="9")
     out = subprocess.run(
-        [sys.executable, "-c", "import app.config as c; c.load(); print(c.get('max_iterations'))"],
-        env=env, capture_output=True, text=True, check=True,
+        [
+            sys.executable,
+            "-c",
+            "import app.config as c; c.load(); print(c.get('max_iterations'))",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
     ).stdout.strip()
     assert out == "9"
 

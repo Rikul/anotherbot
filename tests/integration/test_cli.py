@@ -2,7 +2,7 @@
 
 These tests exercise the full pipeline from ``main()`` all the way through
 ``Agent`` and ``agent_loop``.  Only the external OpenAI HTTP client is
-mocked so that every internal layer (argument parsing, 
+mocked so that every internal layer (argument parsing,
 agent construction, iteration logic, tool dispatch) runs as it would in
 production.
 """
@@ -39,17 +39,20 @@ async def test_cli_with_simple_prompt(capsys, monkeypatch):
     agent_loop, config loaded from env vars, …) run for real.
     """
     mock_openai = MagicMock()
-    mock_openai.chat.completions.create = AsyncMock(return_value=_make_llm_response("Hello, world!"))
+    mock_openai.chat.completions.create = AsyncMock(
+        return_value=_make_llm_response("Hello, world!")
+    )
 
     # Config comes from env vars only; main() runs the real config.load().
     monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setenv("LLM_API_KEY", "sk-test")
 
-    with patch("sys.argv", ["prog", "cli", "-p", "say hello", "--quiet"]), \
-         patch("app.core.agent.Client") as MockClient, \
-         patch("app.cli.cli_agent.get_default_sys_prompt", return_value=""), \
-         patch("app.cli.cli_agent.MessageHistory") as MockHistory:
-
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "say hello", "--quiet"]),
+        patch("app.core.agent.Client") as MockClient,
+        patch("app.cli.cli_agent.get_default_sys_prompt", return_value=""),
+        patch("app.cli.cli_agent.MessageHistory") as MockHistory,
+    ):
         MockClient.return_value.get_client.return_value = mock_openai
         MockHistory.return_value.get_history.return_value = []
         await main()
@@ -69,6 +72,8 @@ async def test_cli_with_simple_prompt(capsys, monkeypatch):
     # The user prompt was included in the messages sent to the model
     messages = call_kwargs["messages"]
     assert any(
-        isinstance(m, dict) and m.get("role") == "user" and "say hello" in m.get("content", "")
+        isinstance(m, dict)
+        and m.get("role") == "user"
+        and "say hello" in m.get("content", "")
         for m in messages
     )

@@ -47,7 +47,7 @@ def test_ask_permission_prints_tool_name_and_args(capsys):
     """Test ask_permission prints tool name and args"""
     with patch("builtins.input", return_value="y"):
         ask_permission("write_file", {"file_path": "/tmp/out.txt", "content": "hello"})
-    
+
     captured = capsys.readouterr()
     assert "write_file" in captured.out
     assert "/tmp/out.txt" in captured.out

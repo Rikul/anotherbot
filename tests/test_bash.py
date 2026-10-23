@@ -1,6 +1,7 @@
 from unittest.mock import patch, MagicMock
 
 from app.tools.bash import BashTool
+
 bash = BashTool.call
 
 
@@ -13,7 +14,9 @@ def test_bash_runs_simple_command():
 
 def test_bash_returns_stderr_on_failure():
     with patch("app.tools.bash.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="", stderr="stderr: No such file or directory\n", returncode=1)
+        mock_run.return_value = MagicMock(
+            stdout="", stderr="stderr: No such file or directory\n", returncode=1
+        )
         result = bash("ls /nonexistent_path_xyz")
     assert result  # should contain some output (error in stderr)
     assert "No such file" in result or "cannot access" in result or "stderr" in result

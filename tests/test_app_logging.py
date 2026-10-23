@@ -9,8 +9,10 @@ from app.infra.app_logging import AnsiFormatter, PlainFormatter, setup_logging
 
 
 def _handlers_passed_to_basic_config(tmp_path, **kwargs) -> list[logging.Handler]:
-    with patch("app.infra.app_logging.LOG_DIR", tmp_path), \
-         patch("logging.basicConfig") as basic_config:
+    with (
+        patch("app.infra.app_logging.LOG_DIR", tmp_path),
+        patch("logging.basicConfig") as basic_config,
+    ):
         setup_logging(**kwargs)
     handlers = basic_config.call_args.kwargs["handlers"]
     for h in handlers:

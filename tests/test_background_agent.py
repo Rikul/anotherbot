@@ -34,8 +34,14 @@ def make_mock_client(tool_calls=None, content="Hello!", finish_reason="stop"):
     return mock_client
 
 
-_MOCK_CONV = {"id": 1, "name": "Test Conv", "channel": "telegram",
-              "parent_id": None, "created_at": "2024-01-01", "updated_at": "2024-01-01"}
+_MOCK_CONV = {
+    "id": 1,
+    "name": "Test Conv",
+    "channel": "telegram",
+    "parent_id": None,
+    "created_at": "2024-01-01",
+    "updated_at": "2024-01-01",
+}
 
 
 def make_agent(max_iterations=10):
@@ -43,7 +49,10 @@ def make_agent(max_iterations=10):
     with patch("app.core.agent.Client") as MockClient:
         mock_openai = make_mock_client()
         MockClient.return_value.get_client.return_value = mock_openai
-        with patch("app.core.background_agent.get_default_sys_prompt", return_value="You are a helpful assistant."):
+        with patch(
+            "app.core.background_agent.get_default_sys_prompt",
+            return_value="You are a helpful assistant.",
+        ):
             with patch("app.core.background_agent.MessageHistory") as MockHistory:
                 MockHistory.return_value.get_history.return_value = []
                 with patch("app.core.background_agent.ConversationStore") as MockStore:
@@ -51,7 +60,9 @@ def make_agent(max_iterations=10):
                     MockStore.return_value.get.return_value = _MOCK_CONV
                     MockStore.return_value.load_messages.return_value = []
                     MockStore.return_value.count_user_messages.return_value = 0
-                    agent = BackgroundAgent(mq=mq, channel=_mock_channel, max_iterations=max_iterations)
+                    agent = BackgroundAgent(
+                        mq=mq, channel=_mock_channel, max_iterations=max_iterations
+                    )
     agent.client = mock_openai
     return agent, mock_openai, mq
 
@@ -80,7 +91,9 @@ def test_agent_initializes_with_empty_messages():
 @pytest.mark.asyncio
 async def test_agent_loop_sends_system_context_to_llm():
     agent, mock_client, _ = make_agent()
-    with patch("app.core.background_agent.get_default_sys_prompt", return_value="system prompt"):
+    with patch(
+        "app.core.background_agent.get_default_sys_prompt", return_value="system prompt"
+    ):
         await agent.agent_loop("hello")
     call_messages = mock_client.chat.completions.create.call_args[1]["messages"]
     assert call_messages[0]["role"] == "system"
@@ -103,14 +116,19 @@ def test_agent_stores_channel_and_mq():
 async def test_agent_loop_adds_user_message():
     agent, _, _ = make_agent()
     await agent.agent_loop("What is 2+2?")
-    assert any(m.get("role") == "user" and m.get("content") == "What is 2+2?" for m in agent.messages)
+    assert any(
+        m.get("role") == "user" and m.get("content") == "What is 2+2?"
+        for m in agent.messages
+    )
 
 
 @pytest.mark.asyncio
 async def test_agent_loop_appends_assistant_message():
     agent, _, _ = make_agent()
     await agent.agent_loop("Hello")
-    agent.history.add_message.assert_called_with("assistant", "Hello!", agent.conversation_id)
+    agent.history.add_message.assert_called_with(
+        "assistant", "Hello!", agent.conversation_id
+    )
     assert agent.messages[-1]["content"] == "Hello!"
 
 
@@ -121,8 +139,12 @@ async def test_agent_loop_raises_on_empty_choices():
     mock_response.choices = []
     mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
 
-    with patch("app.core.background_agent.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
-        with pytest.raises(RuntimeError, match="No choices in API response after 5 retries"):
+    with patch(
+        "app.core.background_agent.asyncio.sleep", new_callable=AsyncMock
+    ) as mock_sleep:
+        with pytest.raises(
+            RuntimeError, match="No choices in API response after 5 retries"
+        ):
             await agent.agent_loop("Hello")
     assert mock_sleep.call_count == 5
 
@@ -193,12 +215,16 @@ async def test_agent_loop_runs_tool_and_sends_final_reply():
     response_plain = MagicMock()
     response_plain.choices = [choice_plain]
 
-    mock_client.chat.completions.create = AsyncMock(side_effect=[response_with_tool, response_plain])
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[response_with_tool, response_plain]
+    )
 
     with patch("app.core.tool_calls.run_tool", return_value="hi\n") as mock_run_tool:
         await agent.agent_loop("say hi", metadata={"chat_id": 42})
 
-    mock_run_tool.assert_called_once_with(tool_name="bash", tool_args={"command": "echo hi"})
+    mock_run_tool.assert_called_once_with(
+        tool_name="bash", tool_args={"command": "echo hi"}
+    )
 
     msg = await mq.outgoing.get()
     assert "> bash" in msg.content
@@ -233,7 +259,9 @@ async def test_agent_loop_sends_inline_content_with_tool_calls():
     response_plain = MagicMock()
     response_plain.choices = [choice_plain]
 
-    mock_client.chat.completions.create = AsyncMock(side_effect=[response_with_tool, response_plain])
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[response_with_tool, response_plain]
+    )
 
     with patch("app.core.tool_calls.run_tool", return_value="hi\n"):
         await agent.agent_loop("run something")
@@ -243,7 +271,7 @@ async def test_agent_loop_sends_inline_content_with_tool_calls():
         messages.append(await mq.outgoing.get())
 
     contents = [m.content for m in messages]
-    assert "Running the command now..." in ''.join(contents)
+    assert "Running the command now..." in "".join(contents)
     assert "done" in contents
 
 
@@ -273,11 +301,16 @@ async def test_agent_loop_clears_stopped_after_completion():
 async def test_process_incoming_dispatches_to_agent_loop():
     agent, mock_client, mq = make_agent()
 
-    incoming = IncomingMessage(content="hello from telegram", channel=ChannelType.TELEGRAM, metadata={"chat_id": 99})
+    incoming = IncomingMessage(
+        content="hello from telegram",
+        channel=ChannelType.TELEGRAM,
+        metadata={"chat_id": 99},
+    )
     await mq.incoming.put(incoming)
 
     # Run process_incoming for one iteration then cancel
     import asyncio
+
     task = asyncio.create_task(agent.process_incoming())
     await asyncio.sleep(0.05)
     task.cancel()
@@ -286,7 +319,10 @@ async def test_process_incoming_dispatches_to_agent_loop():
     except asyncio.CancelledError:
         pass
 
-    assert any(m.get("role") == "user" and m.get("content") == "hello from telegram" for m in agent.messages)
+    assert any(
+        m.get("role") == "user" and m.get("content") == "hello from telegram"
+        for m in agent.messages
+    )
 
 
 @pytest.mark.asyncio
@@ -294,7 +330,9 @@ async def test_process_incoming_sends_error_to_user_on_agent_loop_failure():
     agent, _, mq = make_agent()
 
     with patch.object(agent, "agent_loop", side_effect=RuntimeError("model not found")):
-        incoming = IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={"chat_id": 99})
+        incoming = IncomingMessage(
+            content="hi", channel=ChannelType.TELEGRAM, metadata={"chat_id": 99}
+        )
         await mq.incoming.put(incoming)
 
         task = asyncio.create_task(agent.process_incoming())
@@ -327,7 +365,9 @@ async def test_agent_loop_writes_trace_when_enabled(tmp_path):
 @pytest.mark.asyncio
 async def test_agent_loop_does_not_write_trace_when_disabled(tmp_path):
     agent, _, _ = make_agent()
-    with patch("app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}):
+    with patch(
+        "app.core.runtime._store", {"trace": False, "tracedir": tmp_path, "model": "m"}
+    ):
         await agent.agent_loop("hello")
     assert not list(tmp_path.iterdir())
 
@@ -363,10 +403,14 @@ async def test_agent_loop_gathers_multiple_tool_calls_in_parallel():
     response_final = MagicMock()
     response_final.choices = [choice_final]
 
-    mock_client.chat.completions.create = AsyncMock(side_effect=[response_with_tools, response_final])
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[response_with_tools, response_final]
+    )
 
     with patch("app.core.tool_calls.run_tool", return_value="result"):
-        with patch("app.core.agent.asyncio.gather", wraps=asyncio.gather) as mock_gather:
+        with patch(
+            "app.core.agent.asyncio.gather", wraps=asyncio.gather
+        ) as mock_gather:
             await agent.agent_loop("run two tools")
 
     mock_gather.assert_called_once()
@@ -386,9 +430,16 @@ async def test_process_incoming_reports_turn_start_and_end_and_clears_stale_stop
 
     async def fake_loop(*_args):
         calls.append("loop")
+
     with patch.object(agent, "agent_loop", side_effect=fake_loop):
-        await mq.incoming.put(IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={}))
-        await mq.incoming.put(IncomingMessage(content="/status", channel=ChannelType.TELEGRAM, metadata={}))
+        await mq.incoming.put(
+            IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={})
+        )
+        await mq.incoming.put(
+            IncomingMessage(
+                content="/status", channel=ChannelType.TELEGRAM, metadata={}
+            )
+        )
         task = asyncio.create_task(agent.process_incoming())
         await asyncio.sleep(0.05)
         task.cancel()
@@ -410,7 +461,9 @@ async def test_process_incoming_reports_turn_end_even_when_agent_loop_fails():
     agent.channel = channel
 
     with patch.object(agent, "agent_loop", side_effect=RuntimeError("boom")):
-        await mq.incoming.put(IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={}))
+        await mq.incoming.put(
+            IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={})
+        )
         task = asyncio.create_task(agent.process_incoming())
         await asyncio.sleep(0.05)
         task.cancel()
@@ -419,7 +472,10 @@ async def test_process_incoming_reports_turn_end_even_when_agent_loop_fails():
         except asyncio.CancelledError:
             pass
 
-    assert [c.args for c in channel.on_agent_turn.await_args_list] == [(True,), (False,)]
+    assert [c.args for c in channel.on_agent_turn.await_args_list] == [
+        (True,),
+        (False,),
+    ]
 
 
 @pytest.mark.asyncio
@@ -435,6 +491,7 @@ async def test_registry_stop_between_turns_does_not_set_the_flag():
 @pytest.mark.asyncio
 async def test_restart_command_requests_restart():
     from app.infra import restart
+
     agent, _, _ = make_agent()
     reply = await agent.registry.execute("restart")
     assert reply.startswith("Restarting")
@@ -444,6 +501,7 @@ async def test_restart_command_requests_restart():
 @pytest.mark.asyncio
 async def test_process_incoming_marks_turns_so_restart_waits_for_them():
     from app.infra import restart
+
     agent, _, mq = make_agent()
     channel = MagicMock()
     channel.channel_type = ChannelType.TELEGRAM
@@ -453,8 +511,11 @@ async def test_process_incoming_marks_turns_so_restart_waits_for_them():
 
     async def fake_loop(*_args):
         seen.append(restart._state.active_turns)
+
     with patch.object(agent, "agent_loop", side_effect=fake_loop):
-        await mq.incoming.put(IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={}))
+        await mq.incoming.put(
+            IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={})
+        )
         task = asyncio.create_task(agent.process_incoming())
         await asyncio.sleep(0.05)
         task.cancel()
@@ -470,6 +531,7 @@ async def test_process_incoming_marks_turns_so_restart_waits_for_them():
 @pytest.mark.asyncio
 async def test_no_new_turns_while_restart_is_pending():
     from app.infra import restart
+
     agent, _, mq = make_agent()
     channel = MagicMock()
     channel.channel_type = ChannelType.TELEGRAM
@@ -478,7 +540,9 @@ async def test_no_new_turns_while_restart_is_pending():
     restart.request_restart()
 
     with patch.object(agent, "agent_loop", AsyncMock()) as loop:
-        await mq.incoming.put(IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={}))
+        await mq.incoming.put(
+            IncomingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={})
+        )
         task = asyncio.create_task(agent.process_incoming())
         await asyncio.sleep(0.05)
         task.cancel()
@@ -494,6 +558,7 @@ async def test_no_new_turns_while_restart_is_pending():
 
 # --- trajectories ---
 
+
 @pytest.mark.asyncio
 async def test_agent_loop_saves_turn_trajectory_and_notifies_channel(tmp_path):
     """A turn's tool calls, tool results and per-call usage are stored against
@@ -503,20 +568,43 @@ async def test_agent_loop_saves_turn_trajectory_and_notifies_channel(tmp_path):
     from app.infra.message_history import MessageHistory
 
     def completion(message, finish_reason, tokens):
-        return ChatCompletion.model_validate({
-            "id": "x", "object": "chat.completion", "created": 0, "model": "m",
-            "choices": [{"index": 0, "finish_reason": finish_reason, "message": message}],
-            "usage": {"prompt_tokens": tokens, "completion_tokens": 1, "total_tokens": tokens + 1},
-        })
+        return ChatCompletion.model_validate(
+            {
+                "id": "x",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "m",
+                "choices": [
+                    {"index": 0, "finish_reason": finish_reason, "message": message}
+                ],
+                "usage": {
+                    "prompt_tokens": tokens,
+                    "completion_tokens": 1,
+                    "total_tokens": tokens + 1,
+                },
+            }
+        )
 
-    tool_msg = {"role": "assistant", "content": None, "tool_calls": [{
-        "id": "tc1", "type": "function",
-        "function": {"name": "bash", "arguments": '{"command": "echo hi"}'}}]}
+    tool_msg = {
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [
+            {
+                "id": "tc1",
+                "type": "function",
+                "function": {"name": "bash", "arguments": '{"command": "echo hi"}'},
+            }
+        ],
+    }
     final_msg = {"role": "assistant", "content": "Done."}
 
     agent, mock_client, _ = make_agent()
-    mock_client.chat.completions.create = AsyncMock(side_effect=[
-        completion(tool_msg, "tool_calls", 10), completion(final_msg, "stop", 20)])
+    mock_client.chat.completions.create = AsyncMock(
+        side_effect=[
+            completion(tool_msg, "tool_calls", 10),
+            completion(final_msg, "stop", 20),
+        ]
+    )
     store = ConversationStore(db_path=tmp_path / "app.db")
     cid = store.create("telegram")
     agent.store = store
@@ -540,13 +628,20 @@ async def test_agent_loop_saves_turn_trajectory_and_notifies_channel(tmp_path):
     assert traj["conversation_id"] == cid and traj["channel"] == "telegram"
     assert traj["system_prompt"]
     assert traj["history_message_count"] == 1
-    assert [m["role"] for m in traj["messages"]] == ["user", "assistant", "tool", "assistant"]
+    assert [m["role"] for m in traj["messages"]] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]
     assert traj["messages"][0]["content"] == "run it"
     assert traj["messages"][1]["tool_calls"][0]["function"]["name"] == "bash"
     assert traj["messages"][2]["content"] == "hi\n"
     assert [c["finish_reason"] for c in traj["llm_calls"]] == ["tool_calls", "stop"]
     assert traj["usage_total"]["prompt_tokens"] == 30 and traj["iterations"] == 2
-    channel.on_trajectory_saved.assert_awaited_once_with(reply["id"], cid, {"websocket_id": "c1"})
+    channel.on_trajectory_saved.assert_awaited_once_with(
+        reply["id"], cid, {"websocket_id": "c1"}
+    )
 
 
 @pytest.mark.asyncio
@@ -564,18 +659,35 @@ async def test_trajectory_save_failure_does_not_break_the_turn():
 
 # --- trajectories end to end: BackgroundAgent -> WebChannel -> WebSocket frames ---
 
+
 def _completion(message, finish_reason):
     from openai.types.chat import ChatCompletion
-    return ChatCompletion.model_validate({
-        "id": "x", "object": "chat.completion", "created": 0, "model": "m",
-        "choices": [{"index": 0, "finish_reason": finish_reason, "message": message}],
-        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-    })
+
+    return ChatCompletion.model_validate(
+        {
+            "id": "x",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "m",
+            "choices": [
+                {"index": 0, "finish_reason": finish_reason, "message": message}
+            ],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+    )
 
 
-_TOOL_TURN = {"role": "assistant", "content": "Let me check", "tool_calls": [{
-    "id": "tc1", "type": "function",
-    "function": {"name": "bash", "arguments": '{"command": "echo hi"}'}}]}
+_TOOL_TURN = {
+    "role": "assistant",
+    "content": "Let me check",
+    "tool_calls": [
+        {
+            "id": "tc1",
+            "type": "function",
+            "function": {"name": "bash", "arguments": '{"command": "echo hi"}'},
+        }
+    ],
+}
 
 
 async def _run_web_turn(tmp_path, responses, stop_after_tools=False, save_fails=False):
@@ -590,10 +702,14 @@ async def _run_web_turn(tmp_path, responses, stop_after_tools=False, save_fails=
     web._connections["tab"] = ws
     db = tmp_path / "app.db"
     store = ConversationStore(db_path=db)
-    with patch("app.core.agent.Client") as MockClient, \
-         patch("app.core.background_agent.ConversationStore", return_value=store), \
-         patch("app.core.background_agent.MessageHistory",
-               return_value=MessageHistory("web", db_path=db)):
+    with (
+        patch("app.core.agent.Client") as MockClient,
+        patch("app.core.background_agent.ConversationStore", return_value=store),
+        patch(
+            "app.core.background_agent.MessageHistory",
+            return_value=MessageHistory("web", db_path=db),
+        ),
+    ):
         MockClient.return_value.get_client.return_value = MagicMock()
         agent = BackgroundAgent(mq=mq, channel=web)
     agent.client.chat.completions.create = AsyncMock(side_effect=responses)
@@ -605,8 +721,10 @@ async def _run_web_turn(tmp_path, responses, stop_after_tools=False, save_fails=
             web.stopped = True  # /stop arrives while the tool runs
         return "hi"
 
-    with patch("app.core.tool_calls.run_tool", side_effect=run_tool), \
-         patch.object(agent, "_auto_name", new=AsyncMock()):
+    with (
+        patch("app.core.tool_calls.run_tool", side_effect=run_tool),
+        patch.object(agent, "_auto_name", new=AsyncMock()),
+    ):
         await agent.agent_loop("check it", {"websocket_id": "tab"})
     while not mq.outgoing.empty():
         await web.send_message(mq.outgoing.get_nowait())
@@ -616,16 +734,23 @@ async def _run_web_turn(tmp_path, responses, stop_after_tools=False, save_fails=
 @pytest.mark.asyncio
 async def test_web_turn_marks_the_reply_final_and_sends_trajectory_after_it(tmp_path):
     frames, store = await _run_web_turn(
-        tmp_path, [_completion(_TOOL_TURN, "tool_calls"),
-                   _completion({"role": "assistant", "content": "All good."}, "stop")])
+        tmp_path,
+        [
+            _completion(_TOOL_TURN, "tool_calls"),
+            _completion({"role": "assistant", "content": "All good."}, "stop"),
+        ],
+    )
     assert [(f["type"], f.get("content"), f.get("final")) for f in frames[:-1]] == [
-        ("message", "Let me check", None),            # thinking text: no button
-        ("message", "> bash [echo hi]...", None),     # status line: no button
-        ("message", "All good.", True),               # the reply
+        ("message", "Let me check", None),  # thinking text: no button
+        ("message", "> bash [echo hi]...", None),  # status line: no button
+        ("message", "All good.", True),  # the reply
     ]
     traj = frames[-1]
     assert traj["type"] == "trajectory"
-    assert store.get_trajectory(traj["message_id"])["messages"][-1]["content"] == "All good."
+    assert (
+        store.get_trajectory(traj["message_id"])["messages"][-1]["content"]
+        == "All good."
+    )
 
 
 @pytest.mark.asyncio
@@ -633,14 +758,17 @@ async def test_web_turn_without_a_reply_has_no_final_frame(tmp_path):
     """A stopped turn ends after the tool batch: the UI has no reply row, so it
     drops the trajectory frame instead of putting the button on a status line."""
     frames, _ = await _run_web_turn(
-        tmp_path, [_completion(_TOOL_TURN, "tool_calls")], stop_after_tools=True)
+        tmp_path, [_completion(_TOOL_TURN, "tool_calls")], stop_after_tools=True
+    )
     assert not any(f.get("final") for f in frames)
 
 
 @pytest.mark.asyncio
 async def test_web_turn_with_failed_save_sends_no_trajectory_frame(tmp_path):
     frames, _ = await _run_web_turn(
-        tmp_path, [_completion({"role": "assistant", "content": "Hi."}, "stop")],
-        save_fails=True)
+        tmp_path,
+        [_completion({"role": "assistant", "content": "Hi."}, "stop")],
+        save_fails=True,
+    )
     assert [f["type"] for f in frames] == ["message"]
     assert frames[0]["final"] is True

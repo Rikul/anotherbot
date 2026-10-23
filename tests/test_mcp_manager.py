@@ -14,8 +14,15 @@ def _tool(name, description="d", schema=None):
 
 # --- _result_to_str ---
 
+
 def test_result_to_str_joins_text_parts():
-    result = SimpleNamespace(content=[SimpleNamespace(text="a"), SimpleNamespace(), SimpleNamespace(text="b")])
+    result = SimpleNamespace(
+        content=[
+            SimpleNamespace(text="a"),
+            SimpleNamespace(),
+            SimpleNamespace(text="b"),
+        ]
+    )
     assert MCPManager()._result_to_str(result) == "a\nb"
 
 
@@ -30,11 +37,14 @@ def test_result_to_str_falls_back_to_str_for_unserialisable_data():
 
 
 def test_result_to_str_truncates():
-    result = SimpleNamespace(content=[SimpleNamespace(text="x" * (MAX_TOOL_RESULT_LENGTH + 50))])
+    result = SimpleNamespace(
+        content=[SimpleNamespace(text="x" * (MAX_TOOL_RESULT_LENGTH + 50))]
+    )
     assert len(MCPManager()._result_to_str(result)) <= MAX_TOOL_RESULT_LENGTH + 10
 
 
 # --- connecting servers ---
+
 
 @pytest.mark.asyncio
 async def test_initialize_registers_namespaced_tools_and_status():
@@ -43,8 +53,13 @@ async def test_initialize_registers_namespaced_tools_and_status():
     client.list_tools = AsyncMock(return_value=[_tool("read"), _tool("write")])
     mgr = MCPManager()
     with patch.object(MCPManager, "_build_client", return_value=client):
-        await mgr.initialize({"mem": {"command": "npx"}, "off": {"command": "x", "disabled": True}})
-    assert [s["function"]["name"] for s in mgr.get_tool_specs()] == ["mem__read", "mem__write"]
+        await mgr.initialize(
+            {"mem": {"command": "npx"}, "off": {"command": "x", "disabled": True}}
+        )
+    assert [s["function"]["name"] for s in mgr.get_tool_specs()] == [
+        "mem__read",
+        "mem__write",
+    ]
     assert mgr.is_mcp_tool("mem__read")
     status = {s["name"]: s for s in mgr.get_server_status()}
     assert status["mem"]["connected"] and status["mem"]["tool_count"] == 2
@@ -64,7 +79,13 @@ async def test_bad_server_does_not_stop_others():
 
     mgr = MCPManager()
     with patch.object(MCPManager, "_build_client", side_effect=build):
-        await mgr.initialize({"bad": {"command": "bad"}, "ok": {"command": "ok"}, "a__b": {"command": "ok"}})
+        await mgr.initialize(
+            {
+                "bad": {"command": "bad"},
+                "ok": {"command": "ok"},
+                "a__b": {"command": "ok"},
+            }
+        )
     assert [s["function"]["name"] for s in mgr.get_tool_specs()] == ["ok__t"]
 
 
@@ -82,6 +103,7 @@ async def test_failed_tool_listing_closes_client():
 
 
 # --- calling tools ---
+
 
 @pytest.mark.asyncio
 async def test_call_tool_errors_are_returned_as_text():
@@ -108,13 +130,19 @@ async def test_shutdown_continues_after_close_error():
 
 # --- initialize_mcp config file handling ---
 
+
 @pytest.mark.asyncio
-@pytest.mark.parametrize("content", [b"not json{{", b"\xff\xfe\x00bad", b"[1, 2]", b'{"mcpServers": [1]}'])
+@pytest.mark.parametrize(
+    "content", [b"not json{{", b"\xff\xfe\x00bad", b"[1, 2]", b'{"mcpServers": [1]}']
+)
 async def test_initialize_mcp_bad_files_are_logged_not_raised(tmp_path, content):
     (tmp_path / "mcp_servers.json").write_bytes(content)
     mgr = MagicMock()
     mgr.initialize = AsyncMock()
-    with patch("app.core.mcp_manager.config") as cfg, patch("app.core.mcp_manager.mcp_manager", mgr):
+    with (
+        patch("app.core.mcp_manager.config") as cfg,
+        patch("app.core.mcp_manager.mcp_manager", mgr),
+    ):
         cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()
     mgr.initialize.assert_not_called()

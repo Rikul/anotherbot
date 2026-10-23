@@ -11,6 +11,7 @@ from app.core.mcp_manager import initialize_mcp
 # input_loop
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_input_loop_yields_user_input():
     """Test that input_loop yields user input"""
@@ -18,7 +19,7 @@ async def test_input_loop_yields_user_input():
         results = []
         async for value in input_loop():
             results.append(value)
-    
+
     assert results == ["hello", "world"]
 
 
@@ -29,7 +30,7 @@ async def test_input_loop_skips_empty_input():
         results = []
         async for value in input_loop():
             results.append(value)
-    
+
     assert results == ["hello", "world"]
 
 
@@ -40,7 +41,7 @@ async def test_input_loop_stops_on_eof():
         results = []
         async for value in input_loop():
             results.append(value)
-    
+
     assert results == []
 
 
@@ -51,13 +52,14 @@ async def test_input_loop_stops_on_keyboard_interrupt():
         results = []
         async for value in input_loop():
             results.append(value)
-    
+
     assert results == []
 
 
 # ---------------------------------------------------------------------------
 # Helpers to patch the heavy dependencies used by main()
 # ---------------------------------------------------------------------------
+
 
 def _patch_main(argv, agent_mock=None):
     """Context-manager stack that patches sys.argv and the Agent class.
@@ -80,6 +82,7 @@ def _patch_main(argv, agent_mock=None):
 # ---------------------------------------------------------------------------
 # main() – argument parsing & validation
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_main_calls_agent_loop_with_prompt():
@@ -106,9 +109,11 @@ async def test_main_prompt_runs_once_and_skips_repl():
     agent_mock.agent_loop = AsyncMock()
     input_loop_mock = MagicMock()
 
-    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
-         patch("app.cli.cli.CliAgent", return_value=agent_mock), \
-         patch("app.cli.cli.input_loop", input_loop_mock):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("app.cli.cli.CliAgent", return_value=agent_mock),
+        patch("app.cli.cli.input_loop", input_loop_mock),
+    ):
         await main()
 
     agent_mock.agent_loop.assert_called_once_with("hi")
@@ -119,9 +124,11 @@ async def test_main_prompt_runs_once_and_skips_repl():
 async def test_main_quiet_disables_console_logging():
     """Test that --quiet sets up logging without the console handler"""
     setup_mock = MagicMock()
-    with patch("sys.argv", ["prog", "cli", "-p", "hi", "--quiet"]), \
-         patch("app.main.setup_logging", setup_mock), \
-         patch("app.main.run_cli", AsyncMock()):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi", "--quiet"]),
+        patch("app.main.setup_logging", setup_mock),
+        patch("app.main.run_cli", AsyncMock()),
+    ):
         await main()
 
     _, kwargs = setup_mock.call_args
@@ -132,9 +139,11 @@ async def test_main_quiet_disables_console_logging():
 async def test_main_logs_to_console_by_default():
     """Test that without --quiet the console handler is enabled"""
     setup_mock = MagicMock()
-    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
-         patch("app.main.setup_logging", setup_mock), \
-         patch("app.main.run_cli", AsyncMock()):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("app.main.setup_logging", setup_mock),
+        patch("app.main.run_cli", AsyncMock()),
+    ):
         await main()
 
     _, kwargs = setup_mock.call_args
@@ -145,9 +154,11 @@ async def test_main_logs_to_console_by_default():
 async def test_main_background_logs_to_console():
     """The background subcommand has no --quiet flag and keeps console logging"""
     setup_mock = MagicMock()
-    with patch("sys.argv", ["prog", "background"]), \
-         patch("app.main.setup_logging", setup_mock), \
-         patch("app.main.run_background_agent", AsyncMock()):
+    with (
+        patch("sys.argv", ["prog", "background"]),
+        patch("app.main.setup_logging", setup_mock),
+        patch("app.main.run_background_agent", AsyncMock()),
+    ):
         await main()
 
     _, kwargs = setup_mock.call_args
@@ -160,7 +171,10 @@ async def test_main_quiet_does_not_imply_auto_approve():
     MockAgent = MagicMock()
     MockAgent.return_value.agent_loop = AsyncMock()
 
-    with patch("sys.argv", ["prog", "cli", "-p", "hi", "--quiet"]), patch("app.cli.cli.CliAgent", MockAgent):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi", "--quiet"]),
+        patch("app.cli.cli.CliAgent", MockAgent),
+    ):
         await main()
 
     _, kwargs = MockAgent.call_args
@@ -173,7 +187,10 @@ async def test_main_auto_approve_flag():
     MockAgent = MagicMock()
     MockAgent.return_value.agent_loop = AsyncMock()
 
-    with patch("sys.argv", ["prog", "cli", "-p", "hi", "-y"]), patch("app.cli.cli.CliAgent", MockAgent):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi", "-y"]),
+        patch("app.cli.cli.CliAgent", MockAgent),
+    ):
         await main()
 
     _, kwargs = MockAgent.call_args
@@ -183,8 +200,11 @@ async def test_main_auto_approve_flag():
 def test_silent_flag_removed():
     """--silent was replaced by --quiet and -y"""
     from app.main import parse_args
-    with patch("sys.argv", ["prog", "cli", "-p", "hi", "--silent"]), \
-         pytest.raises(SystemExit):
+
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi", "--silent"]),
+        pytest.raises(SystemExit),
+    ):
         parse_args()
 
 
@@ -193,7 +213,9 @@ async def test_main_returns_early_when_max_iterations_is_zero():
     """Test that main returns early when max_iterations is 0"""
     agent_mock = MagicMock()
     agent_mock.agent_loop = AsyncMock()
-    patches, _ = _patch_main(["-p", "hi", "--max-iterations", "0"], agent_mock=agent_mock)
+    patches, _ = _patch_main(
+        ["-p", "hi", "--max-iterations", "0"], agent_mock=agent_mock
+    )
 
     for p in patches:
         p.start()
@@ -211,7 +233,9 @@ async def test_main_returns_early_when_max_iterations_is_negative():
     """Test that main returns early when max_iterations is negative"""
     agent_mock = MagicMock()
     agent_mock.agent_loop = AsyncMock()
-    patches, _ = _patch_main(["-p", "hi", "--max-iterations", "-5"], agent_mock=agent_mock)
+    patches, _ = _patch_main(
+        ["-p", "hi", "--max-iterations", "-5"], agent_mock=agent_mock
+    )
 
     for p in patches:
         p.start()
@@ -234,9 +258,11 @@ async def test_main_repl_calls_agent_loop_for_each_input():
         for msg in ["first", "second"]:
             yield msg
 
-    with patch("sys.argv", ["prog", "cli"]), \
-         patch("app.cli.cli.CliAgent", return_value=agent_mock), \
-         patch("app.cli.cli.input_loop", fake_input_loop):
+    with (
+        patch("sys.argv", ["prog", "cli"]),
+        patch("app.cli.cli.CliAgent", return_value=agent_mock),
+        patch("app.cli.cli.input_loop", fake_input_loop),
+    ):
         await main()
 
     assert agent_mock.agent_loop.call_count == 2
@@ -254,9 +280,11 @@ async def test_main_repl_dispatches_slash_commands(capsys):
         for msg in ["/nosuchcmd", "/help"]:
             yield msg
 
-    with patch("sys.argv", ["prog", "cli"]), \
-         patch("app.cli.cli.CliAgent", return_value=agent_mock), \
-         patch("app.cli.cli.input_loop", fake_input_loop):
+    with (
+        patch("sys.argv", ["prog", "cli"]),
+        patch("app.cli.cli.CliAgent", return_value=agent_mock),
+        patch("app.cli.cli.input_loop", fake_input_loop),
+    ):
         await main()
 
     agent_mock.agent_loop.assert_not_called()
@@ -269,20 +297,27 @@ async def test_main_repl_dispatches_slash_commands(capsys):
 async def test_main_forwards_cli_args_to_run_cli():
     """Test that main passes parsed CLI args to run_cli"""
     run_cli_mock = AsyncMock()
-    with patch("sys.argv", ["prog", "cli", "-p", "hi", "-y", "-q", "-i", "7"]), \
-         patch("app.main.run_cli", run_cli_mock):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi", "-y", "-q", "-i", "7"]),
+        patch("app.main.run_cli", run_cli_mock),
+    ):
         await main()
 
     run_cli_mock.assert_awaited_once_with(
-        max_iterations=7, auto_approve=True, prompt="hi",
+        max_iterations=7,
+        auto_approve=True,
+        prompt="hi",
     )
 
 
 def test_no_repl_flag_removed():
     """-x/--no-repl was removed; -p alone now exits after the response"""
-    with patch("sys.argv", ["prog", "cli", "-p", "hi", "--no-repl"]), \
-         pytest.raises(SystemExit):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi", "--no-repl"]),
+        pytest.raises(SystemExit),
+    ):
         from app.main import parse_args
+
         parse_args()
 
 
@@ -290,14 +325,17 @@ def test_no_repl_flag_removed():
 # --trace / --tracedir
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_main_trace_defaults_to_false():
     mock_store = {}
     agent_mock = MagicMock()
     agent_mock.agent_loop = AsyncMock()
-    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
-         patch("app.cli.cli.CliAgent", return_value=agent_mock), \
-         patch("app.core.runtime._store", mock_store):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("app.cli.cli.CliAgent", return_value=agent_mock),
+        patch("app.core.runtime._store", mock_store),
+    ):
         await main()
     assert mock_store.get("trace") is False
 
@@ -307,9 +345,14 @@ async def test_main_trace_flag_sets_runtime_true(tmp_path):
     mock_store = {}
     agent_mock = MagicMock()
     agent_mock.agent_loop = AsyncMock()
-    with patch("sys.argv", ["prog", "--trace", "--tracedir", str(tmp_path), "cli", "-p", "hi"]), \
-         patch("app.cli.cli.CliAgent", return_value=agent_mock), \
-         patch("app.core.runtime._store", mock_store):
+    with (
+        patch(
+            "sys.argv",
+            ["prog", "--trace", "--tracedir", str(tmp_path), "cli", "-p", "hi"],
+        ),
+        patch("app.cli.cli.CliAgent", return_value=agent_mock),
+        patch("app.core.runtime._store", mock_store),
+    ):
         await main()
     assert mock_store.get("trace") is True
     assert mock_store.get("tracedir") == tmp_path
@@ -320,9 +363,11 @@ async def test_main_tracedir_defaults_to_project_home_trace():
     mock_store = {}
     agent_mock = MagicMock()
     agent_mock.agent_loop = AsyncMock()
-    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
-         patch("app.cli.cli.CliAgent", return_value=agent_mock), \
-         patch("app.core.runtime._store", mock_store):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("app.cli.cli.CliAgent", return_value=agent_mock),
+        patch("app.core.runtime._store", mock_store),
+    ):
         await main()
     assert "trace" in str(mock_store.get("tracedir"))
 
@@ -331,12 +376,15 @@ async def test_main_tracedir_defaults_to_project_home_trace():
 # initialize_mcp
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_initialize_mcp_no_op_when_file_missing(tmp_path):
     mock_mgr = MagicMock()
     mock_mgr.initialize = AsyncMock()
-    with patch("app.core.mcp_manager.config") as mock_cfg, \
-         patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+    with (
+        patch("app.core.mcp_manager.config") as mock_cfg,
+        patch("app.core.mcp_manager.mcp_manager", mock_mgr),
+    ):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()
     mock_mgr.initialize.assert_not_called()
@@ -348,8 +396,10 @@ async def test_initialize_mcp_calls_initialize_with_server_dict(tmp_path):
     (tmp_path / "mcp_servers.json").write_text(json.dumps({"mcpServers": servers}))
     mock_mgr = MagicMock()
     mock_mgr.initialize = AsyncMock()
-    with patch("app.core.mcp_manager.config") as mock_cfg, \
-         patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+    with (
+        patch("app.core.mcp_manager.config") as mock_cfg,
+        patch("app.core.mcp_manager.mcp_manager", mock_mgr),
+    ):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()
     mock_mgr.initialize.assert_called_once_with(servers)
@@ -360,20 +410,25 @@ async def test_initialize_mcp_handles_malformed_json(tmp_path):
     (tmp_path / "mcp_servers.json").write_text("not json{{")
     mock_mgr = MagicMock()
     mock_mgr.initialize = AsyncMock()
-    with patch("app.core.mcp_manager.config") as mock_cfg, \
-         patch("app.core.mcp_manager.mcp_manager", mock_mgr):
+    with (
+        patch("app.core.mcp_manager.config") as mock_cfg,
+        patch("app.core.mcp_manager.mcp_manager", mock_mgr),
+    ):
         mock_cfg.PROJECT_HOME = str(tmp_path)
         await initialize_mcp()  # must not raise
     mock_mgr.initialize.assert_not_called()
+
 
 @pytest.mark.asyncio
 async def test_main_fails_fast_on_invalid_env(monkeypatch):
     """Invalid config env vars abort startup instead of running with partial config"""
     monkeypatch.setenv("MAX_ITERATIONS", "lots")
     run_cli_mock = AsyncMock()
-    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
-         patch("app.main.run_cli", run_cli_mock), \
-         pytest.raises(ValueError, match="MAX_ITERATIONS"):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("app.main.run_cli", run_cli_mock),
+        pytest.raises(ValueError, match="MAX_ITERATIONS"),
+    ):
         await main()
     run_cli_mock.assert_not_called()
 
@@ -382,7 +437,9 @@ async def test_main_fails_fast_on_invalid_env(monkeypatch):
 async def test_main_max_iterations_defaults_from_env(monkeypatch):
     monkeypatch.setenv("MAX_ITERATIONS", "12")
     run_cli_mock = AsyncMock()
-    with patch("sys.argv", ["prog", "cli", "-p", "hi"]), \
-         patch("app.main.run_cli", run_cli_mock):
+    with (
+        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("app.main.run_cli", run_cli_mock),
+    ):
         await main()
     assert run_cli_mock.call_args.kwargs["max_iterations"] == 12

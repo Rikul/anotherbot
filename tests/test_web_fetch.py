@@ -1,6 +1,7 @@
 from unittest.mock import patch, MagicMock
 
 from app.tools.web_fetch import WebFetchTool
+
 web_fetch = WebFetchTool.call
 
 

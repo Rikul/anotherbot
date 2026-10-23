@@ -16,6 +16,7 @@ def make_telegram_channel(allow_from=None):
 
 # --- Initialization ---
 
+
 def test_registers_delivery_function():
     mq = MessageQueue()
     with patch("app.channels.telegram.ApplicationBuilder"):
@@ -38,13 +39,16 @@ def test_allow_from_defaults_to_empty_list():
 
 # --- send_message ---
 
+
 @pytest.mark.asyncio
 async def test_send_message_sends_to_correct_chat():
     tc, _ = make_telegram_channel()
     tc.app = MagicMock()
     tc.app.bot.send_message = AsyncMock()
 
-    msg = OutgoingMessage(content="hi", channel=ChannelType.TELEGRAM, metadata={"chat_id": 42})
+    msg = OutgoingMessage(
+        content="hi", channel=ChannelType.TELEGRAM, metadata={"chat_id": 42}
+    )
     await tc.send_message(msg)
 
     tc.app.bot.send_message.assert_called_once_with(chat_id=42, text="hi")
@@ -53,6 +57,7 @@ async def test_send_message_sends_to_correct_chat():
 @pytest.mark.asyncio
 async def test_send_message_skips_when_no_chat_id(caplog):
     import logging
+
     tc, _ = make_telegram_channel()
     tc.app = MagicMock()
     tc.app.bot.send_message = AsyncMock()
@@ -66,6 +71,7 @@ async def test_send_message_skips_when_no_chat_id(caplog):
 
 
 # --- process_message ---
+
 
 def make_update(text="hello", user_id=123, chat_id=456):
     update = MagicMock()
@@ -138,6 +144,7 @@ async def test_process_message_rejects_non_text_message():
 
 # --- error_handler ---
 
+
 @pytest.mark.asyncio
 async def test_error_handler_notifies_user_on_chat_update():
     tc, _ = make_telegram_channel()
@@ -155,6 +162,7 @@ async def test_error_handler_notifies_user_on_chat_update():
 
 
 # --- command_handler ---
+
 
 @pytest.mark.asyncio
 async def test_stop_sets_has_stopped():
@@ -203,6 +211,7 @@ async def test_command_handler_dispatches_with_args():
 
 
 # --- error_handler ---
+
 
 @pytest.mark.asyncio
 async def test_error_handler_handles_non_update_object():

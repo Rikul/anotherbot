@@ -20,7 +20,9 @@ def tasks(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_running_task_counts_as_a_turn_and_cancel_keeps_its_slot(tasks):
-    next_run = (datetime.now() - timedelta(minutes=1)).replace(microsecond=0).isoformat()
+    next_run = (
+        (datetime.now() - timedelta(minutes=1)).replace(microsecond=0).isoformat()
+    )
     tasks.add_task("t", "p", next_run, repeat=1, interval_mins=60)
     started = asyncio.Event()
 
@@ -51,8 +53,10 @@ async def test_running_task_counts_as_a_turn_and_cancel_keeps_its_slot(tasks):
 async def test_no_new_runs_while_restart_is_pending(tasks):
     tasks.add_task("t", "p", "")
     restart.request_restart()
-    with patch.object(tasks, "run_task") as run_task, \
-         patch.object(st.asyncio, "sleep", side_effect=asyncio.CancelledError):
+    with (
+        patch.object(tasks, "run_task") as run_task,
+        patch.object(st.asyncio, "sleep", side_effect=asyncio.CancelledError),
+    ):
         with pytest.raises(asyncio.CancelledError):
             await tasks.run()
     run_task.assert_not_called()

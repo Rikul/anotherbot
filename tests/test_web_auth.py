@@ -32,6 +32,7 @@ def login(client, password=PASSWORD):
 
 # --- startup guard ---
 
+
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
 def test_loopback_host_without_password_is_allowed(host):
     ch = make_channel(host=host, password=None)
@@ -61,20 +62,33 @@ def test_is_loopback_host():
 
 # --- unauthenticated access ---
 
+
 def test_index_redirects_to_login():
     resp = make_client().get("/")
     assert resp.status_code == 303
     assert resp.headers["location"] == "/login"
 
 
-@pytest.mark.parametrize("path", ["/api/conversations", "/api/messages?conv_id=1", "/api/status",
-                                  "/app.js", "/app.css", "/index.html", "/login.html"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/conversations",
+        "/api/messages?conv_id=1",
+        "/api/status",
+        "/app.js",
+        "/app.css",
+        "/index.html",
+        "/login.html",
+    ],
+)
 def test_api_and_frontend_return_401(path):
     assert make_client().get(path).status_code == 401
 
 
 def test_upload_requires_login():
-    resp = make_client().post("/api/upload", files={"files": ("a.txt", b"x")}, headers=SAME_ORIGIN)
+    resp = make_client().post(
+        "/api/upload", files={"files": ("a.txt", b"x")}, headers=SAME_ORIGIN
+    )
     assert resp.status_code == 401
 
 
@@ -102,6 +116,7 @@ def test_websocket_rejected_without_session():
 
 # --- login / logout ---
 
+
 def test_wrong_password_returns_error_and_sets_no_cookie():
     resp = login(make_client(), "nope")
     assert resp.status_code == 401
@@ -111,8 +126,11 @@ def test_wrong_password_returns_error_and_sets_no_cookie():
 
 @pytest.mark.parametrize("body", [b"password=x", b"[]", b'{"password": 1}', b"\xff"])
 def test_login_rejects_malformed_body(body):
-    resp = make_client().post("/api/login", content=body,
-                              headers={**SAME_ORIGIN, "content-type": "application/json"})
+    resp = make_client().post(
+        "/api/login",
+        content=body,
+        headers={**SAME_ORIGIN, "content-type": "application/json"},
+    )
     assert resp.status_code == 400
     assert COOKIE_NAME not in resp.cookies
 
@@ -134,8 +152,11 @@ def test_correct_password_sets_session_cookie():
 
 def test_cookie_is_secure_behind_https_proxy():
     client = make_client()
-    resp = client.post("/api/login", json={"password": PASSWORD},
-                       headers={**SAME_ORIGIN, "x-forwarded-proto": "https"})
+    resp = client.post(
+        "/api/login",
+        json={"password": PASSWORD},
+        headers={**SAME_ORIGIN, "x-forwarded-proto": "https"},
+    )
     assert "secure" in resp.headers["set-cookie"].lower()
 
 
@@ -204,11 +225,14 @@ def test_changing_password_invalidates_sessions():
 
 
 def test_login_body_too_large_rejected():
-    resp = make_client().post("/api/login", json={"password": "x" * 10_000}, headers=SAME_ORIGIN)
+    resp = make_client().post(
+        "/api/login", json={"password": "x" * 10_000}, headers=SAME_ORIGIN
+    )
     assert resp.status_code == 413
 
 
 # --- same-origin checks ---
+
 
 def test_cross_origin_websocket_rejected_even_with_session():
     client = make_client()
@@ -221,18 +245,25 @@ def test_cross_origin_websocket_rejected_even_with_session():
 def test_cross_origin_post_rejected():
     client = make_client()
     login(client)
-    resp = client.post("/api/upload", files={"files": ("a.txt", b"x")},
-                       headers={"origin": "http://evil.example"})
+    resp = client.post(
+        "/api/upload",
+        files={"files": ("a.txt", b"x")},
+        headers={"origin": "http://evil.example"},
+    )
     assert resp.status_code == 403
 
 
 def test_cross_origin_login_rejected():
-    resp = make_client().post("/api/login", json={"password": PASSWORD},
-                              headers={"origin": "http://evil.example"})
+    resp = make_client().post(
+        "/api/login",
+        json={"password": PASSWORD},
+        headers={"origin": "http://evil.example"},
+    )
     assert resp.status_code == 403
 
 
 # --- no password: unchanged behaviour on localhost ---
+
 
 def test_no_password_on_localhost_serves_without_login():
     ch = make_channel(host="127.0.0.1", password=None)
@@ -243,16 +274,23 @@ def test_no_password_on_localhost_serves_without_login():
 
 def test_conversation_actions_require_login():
     client = make_client()
-    assert client.post("/api/conversations/1/rename", json={"name": "x"},
-                       headers=SAME_ORIGIN).status_code == 401
+    assert (
+        client.post(
+            "/api/conversations/1/rename", json={"name": "x"}, headers=SAME_ORIGIN
+        ).status_code
+        == 401
+    )
     assert client.get("/api/conversations/1/export").status_code == 401
 
 
 def test_cross_origin_rename_rejected():
     client = make_client()
     login(client)
-    resp = client.post("/api/conversations/1/rename", json={"name": "x"},
-                       headers={"origin": "http://evil.example"})
+    resp = client.post(
+        "/api/conversations/1/rename",
+        json={"name": "x"},
+        headers={"origin": "http://evil.example"},
+    )
     assert resp.status_code == 403
 
 

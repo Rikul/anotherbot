@@ -1,8 +1,13 @@
-
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-from app.core.tool_calls import run_tool, tool_registry, all_tool_specs, get_all_tool_specs, run_tool_async
+from app.core.tool_calls import (
+    run_tool,
+    tool_registry,
+    all_tool_specs,
+    get_all_tool_specs,
+    run_tool_async,
+)
 
 
 def test_tool_registry_contains_expected_tools():
@@ -33,6 +38,7 @@ async def test_run_tool_unknown_tool_returns_error():
 # get_all_tool_specs
 # ---------------------------------------------------------------------------
 
+
 def test_get_all_tool_specs_includes_local_tools():
     mock_mgr = MagicMock()
     mock_mgr.get_tool_specs.return_value = []
@@ -42,7 +48,10 @@ def test_get_all_tool_specs_includes_local_tools():
 
 
 def test_get_all_tool_specs_merges_mcp_tools():
-    mcp_spec = {"type": "function", "function": {"name": "srv__tool", "description": "", "parameters": {}}}
+    mcp_spec = {
+        "type": "function",
+        "function": {"name": "srv__tool", "description": "", "parameters": {}},
+    }
     mock_mgr = MagicMock()
     mock_mgr.get_tool_specs.return_value = [mcp_spec]
     with patch("app.core.mcp_manager.mcp_manager", mock_mgr):
@@ -54,6 +63,7 @@ def test_get_all_tool_specs_merges_mcp_tools():
 # ---------------------------------------------------------------------------
 # run_tool_async
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_run_tool_async_routes_to_mcp():
@@ -83,6 +93,7 @@ def test_tool_subclass_without_call_is_rejected():
     from app.core.tool import Tool
 
     with pytest.raises(TypeError, match="must define call"):
+
         class NoCall(Tool):  # noqa: F841
             @staticmethod
             def spec():

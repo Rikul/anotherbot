@@ -16,6 +16,7 @@ def make_web_channel():
 
 # --- Initialization ---
 
+
 def test_registers_delivery_function():
     ch, mq = make_web_channel()
     assert ch in mq._delivery
@@ -51,24 +52,34 @@ def test_default_metadata_empty():
 
 # --- _extract_message: frame parsing ---
 
-@pytest.mark.parametrize("raw,expected", [
-    ("hello world", "hello world"),                                      # plain text
-    (json.dumps({"type": "message", "content": "hi there"}), "hi there"),  # JSON framing
-    (json.dumps({"type": "message", "content": "  trimmed  "}), "trimmed"),
-    ("", None),
-    ("   ", None),
-    ("{not valid json}", "{not valid json}"),                            # invalid JSON → raw
-    (json.dumps({"type": "system", "content": "x"}),
-     json.dumps({"type": "system", "content": "x"})),                    # other type → raw
-    (json.dumps({"type": "message", "content": None}), None),
-    (json.dumps({"type": "message", "content": "   "}), None),
-])
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("hello world", "hello world"),  # plain text
+        (
+            json.dumps({"type": "message", "content": "hi there"}),
+            "hi there",
+        ),  # JSON framing
+        (json.dumps({"type": "message", "content": "  trimmed  "}), "trimmed"),
+        ("", None),
+        ("   ", None),
+        ("{not valid json}", "{not valid json}"),  # invalid JSON → raw
+        (
+            json.dumps({"type": "system", "content": "x"}),
+            json.dumps({"type": "system", "content": "x"}),
+        ),  # other type → raw
+        (json.dumps({"type": "message", "content": None}), None),
+        (json.dumps({"type": "message", "content": "   "}), None),
+    ],
+)
 def test_extract_message_content(raw, expected):
     ch, _ = make_web_channel()
     assert ch._extract_message(raw)[0] == expected
 
 
 # --- _extract_message: text + attachments ---
+
 
 def test_extract_message_plain_text_no_files():
     ch, _ = make_web_channel()
@@ -86,6 +97,7 @@ def test_extract_message_ignores_non_list_files():
 
 
 # --- _resolve_upload_paths: traversal protection ---
+
 
 def test_resolve_upload_paths_rejects_traversal(tmp_path):
     ch, _ = make_web_channel()
@@ -117,12 +129,14 @@ def test_resolve_upload_paths_ignores_non_strings(tmp_path):
 
 # --- /api/upload endpoint ---
 
+
 def test_upload_saves_files_and_returns_names(tmp_path):
     ch, _ = make_web_channel()
     ch._upload_dir = tmp_path / "uploads"
     ch.start()
 
     from starlette.testclient import TestClient
+
     client = TestClient(ch._app, raise_server_exceptions=True)
     resp = client.post(
         "/api/upload",
@@ -145,6 +159,7 @@ def test_upload_rejects_empty_request(tmp_path):
     ch.start()
 
     from starlette.testclient import TestClient
+
     client = TestClient(ch._app, raise_server_exceptions=True)
     resp = client.post("/api/upload")
     assert resp.status_code == 400
@@ -157,6 +172,7 @@ def test_upload_rejects_oversized(tmp_path):
     ch.start()
 
     from starlette.testclient import TestClient
+
     client = TestClient(ch._app, raise_server_exceptions=True)
     resp = client.post(
         "/api/upload",
@@ -183,7 +199,12 @@ def test_start_registers_upload_route():
 
 
 def test_index_references_frontend_assets():
-    for src in ("/app.css", "/app.js", "/vendor/marked.min.js", "/vendor/purify.min.js"):
+    for src in (
+        "/app.css",
+        "/app.js",
+        "/vendor/marked.min.js",
+        "/vendor/purify.min.js",
+    ):
         assert f'"{src}"' in _INDEX_HTML, f"Missing {src}"
         assert (FRONTEND_DIR / src.lstrip("/")).is_file(), f"{src} not on disk"
 
@@ -195,8 +216,15 @@ def test_index_has_no_inline_css_or_js():
 
 
 def test_index_key_structural_elements():
-    for element_id in ("messages", "input-area", "sidebar", "header", "messages-wrap",
-                       "thinking", "logout-btn"):
+    for element_id in (
+        "messages",
+        "input-area",
+        "sidebar",
+        "header",
+        "messages-wrap",
+        "thinking",
+        "logout-btn",
+    ):
         assert f'id="{element_id}"' in _INDEX_HTML, f"Missing element #{element_id}"
 
 
@@ -206,8 +234,16 @@ def test_index_logout_button_hidden_until_status_says_auth():
 
 # --- Frontend files on disk ---
 
+
 def test_frontend_files_exist_and_are_non_empty():
-    for name in ("index.html", "app.css", "app.js", "login.html", "login.css", "login.js"):
+    for name in (
+        "index.html",
+        "app.css",
+        "app.js",
+        "login.html",
+        "login.css",
+        "login.js",
+    ):
         path = FRONTEND_DIR / name
         assert path.is_file() and path.stat().st_size > 0, f"{name} missing or empty"
 
@@ -222,16 +258,10 @@ def test_user_and_ai_message_rows_fill_available_width():
     content = (FRONTEND_DIR / "app.css").read_text()
     assert "max-width: 80%" not in content
     assert (
-        ".msg-row.user,\n.msg-row.ai {\n"
-        "    align-self: stretch;\n"
-        "    width: 100%;\n"
-        "}"
+        ".msg-row.user,\n.msg-row.ai {\n    align-self: stretch;\n    width: 100%;\n}"
     ) in content
     assert (
-        ".user .bubble,\n.ai .bubble {\n"
-        "    flex: 1;\n"
-        "    min-width: 0;\n"
-        "}"
+        ".user .bubble,\n.ai .bubble {\n    flex: 1;\n    min-width: 0;\n}"
     ) in content
 
 
@@ -257,13 +287,16 @@ def test_static_js_regex_uses_single_backslash():
 
 # --- send_message ---
 
+
 @pytest.mark.asyncio
 async def test_send_message_targeted():
     ch, _ = make_web_channel()
     mock_ws = AsyncMock()
     ch._connections["conn1"] = mock_ws
 
-    msg = OutgoingMessage(content="hello", channel=ChannelType.WEB, metadata={"websocket_id": "conn1"})
+    msg = OutgoingMessage(
+        content="hello", channel=ChannelType.WEB, metadata={"websocket_id": "conn1"}
+    )
     await ch.send_message(msg)
 
     mock_ws.send_json.assert_called_once_with({"type": "message", "content": "hello"})
@@ -291,8 +324,11 @@ async def test_send_message_sends_system_type_when_is_command():
     mock_ws = AsyncMock()
     ch._connections["conn1"] = mock_ws
 
-    msg = OutgoingMessage(content="ok", channel=ChannelType.WEB,
-                          metadata={"websocket_id": "conn1", "is_command": True})
+    msg = OutgoingMessage(
+        content="ok",
+        channel=ChannelType.WEB,
+        metadata={"websocket_id": "conn1", "is_command": True},
+    )
     await ch.send_message(msg)
 
     mock_ws.send_json.assert_called_once_with({"type": "system", "content": "ok"})
@@ -316,7 +352,9 @@ async def test_send_message_broadcasts_when_no_websocket_id():
 async def test_send_message_skips_missing_client():
     ch, _ = make_web_channel()
     # No connection registered — should not raise
-    msg = OutgoingMessage(content="hello", channel=ChannelType.WEB, metadata={"websocket_id": "ghost"})
+    msg = OutgoingMessage(
+        content="hello", channel=ChannelType.WEB, metadata={"websocket_id": "ghost"}
+    )
     await ch.send_message(msg)  # must not raise
 
 
@@ -327,17 +365,22 @@ async def test_send_message_removes_dead_connection_on_error():
     mock_ws.send_json.side_effect = Exception("broken pipe")
     ch._connections["dead"] = mock_ws
 
-    msg = OutgoingMessage(content="oops", channel=ChannelType.WEB, metadata={"websocket_id": "dead"})
+    msg = OutgoingMessage(
+        content="oops", channel=ChannelType.WEB, metadata={"websocket_id": "dead"}
+    )
     await ch.send_message(msg)
 
     assert "dead" not in ch._connections
 
+
 def test_api_messages_rejects_missing_conv():
     from unittest.mock import patch
+
     ch, _ = make_web_channel()
     ch.start()
 
     from starlette.testclient import TestClient
+
     with patch("app.infra.conversations.ConversationStore.get", return_value=None):
         client = TestClient(ch._app, raise_server_exceptions=True)
         resp = client.get("/api/messages?conv_id=99")
@@ -346,8 +389,10 @@ def test_api_messages_rejects_missing_conv():
 
 # --- start(): route registration ---
 
+
 def test_start_registers_websocket_route():
     from starlette.routing import WebSocketRoute
+
     ch, _ = make_web_channel()
     ch.start()
     ws_routes = [r for r in ch._app.router.routes if isinstance(r, WebSocketRoute)]
@@ -356,14 +401,18 @@ def test_start_registers_websocket_route():
 
 def test_start_mounts_frontend_last():
     from starlette.routing import Mount
+
     ch, _ = make_web_channel()
     ch.start()
     last = ch._app.router.routes[-1]
-    assert isinstance(last, Mount) and last.path == ""  # catch-all, after the API routes
+    assert (
+        isinstance(last, Mount) and last.path == ""
+    )  # catch-all, after the API routes
 
 
 def test_root_serves_index_html_with_no_cache():
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch.start()
     resp = TestClient(ch._asgi_app).get("/")
@@ -374,6 +423,7 @@ def test_root_serves_index_html_with_no_cache():
 
 def test_frontend_assets_are_served():
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch.start()
     client = TestClient(ch._asgi_app)
@@ -386,6 +436,7 @@ def test_frontend_assets_are_served():
 
 def test_login_page_404_without_password():
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch.start()
     assert TestClient(ch._asgi_app).get("/login").status_code == 404
@@ -393,14 +444,23 @@ def test_login_page_404_without_password():
 
 # --- routes registered by start() ---
 
+
 def test_conversations_api_lists_all_and_active_id():
     from unittest.mock import patch
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch.start()
-    convs = [{"id": 1, "name": "A", "channel": "telegram"}, {"id": 2, "name": "B", "channel": "web"}]
-    with patch("app.infra.conversations.ConversationStore.list", return_value=convs) as mock_list, \
-         patch("app.core.runtime._store", {"conversation_id:web": 2}):
+    convs = [
+        {"id": 1, "name": "A", "channel": "telegram"},
+        {"id": 2, "name": "B", "channel": "web"},
+    ]
+    with (
+        patch(
+            "app.infra.conversations.ConversationStore.list", return_value=convs
+        ) as mock_list,
+        patch("app.core.runtime._store", {"conversation_id:web": 2}),
+    ):
         resp = TestClient(ch._asgi_app).get("/api/conversations")
     assert resp.status_code == 200
     assert resp.json() == {"conversations": convs, "active_id": 2}
@@ -410,6 +470,7 @@ def test_conversations_api_lists_all_and_active_id():
 def test_status_api_returns_runtime_model():
     from unittest.mock import patch
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch.start()
     with patch("app.core.runtime._store", {"model": "m-1"}):
@@ -420,6 +481,7 @@ def test_status_api_returns_runtime_model():
 @pytest.mark.asyncio
 async def test_websocket_message_is_enqueued_for_agent():
     from starlette.testclient import TestClient
+
     ch, mq = make_web_channel()
     ch.start()
     with TestClient(ch._asgi_app).websocket_connect("/ws") as ws:
@@ -427,7 +489,9 @@ async def test_websocket_message_is_enqueued_for_agent():
         ws.send_text(json.dumps({"type": "message", "content": "hello"}))
         ws.send_text(json.dumps({"type": "message", "content": "/help"}))
         ws.send_text(json.dumps({"type": "message", "content": "/whoami"}))
-        assert "Connection ID" in ws.receive_json()["content"]  # answered inline, not enqueued
+        assert (
+            "Connection ID" in ws.receive_json()["content"]
+        )  # answered inline, not enqueued
     first, second = mq.incoming.get_nowait(), mq.incoming.get_nowait()
     assert first.content == "hello" and first.metadata["is_command"] is False
     assert second.content == "/help" and second.metadata["is_command"] is True
@@ -437,12 +501,14 @@ async def test_websocket_message_is_enqueued_for_agent():
 
 # --- conversation actions: rename / export ---
 
+
 @pytest.fixture
 def api_client(tmp_path):
     """A started channel whose API uses a temp ConversationStore."""
     from unittest.mock import patch
     from starlette.testclient import TestClient
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "app.db")
     ch, _ = make_web_channel()
     ch.start()
@@ -452,6 +518,7 @@ def api_client(tmp_path):
 
 def test_rename_api_renames_any_channels_conversation(api_client):
     from unittest.mock import patch
+
     client, store = api_client
     cid = store.create("telegram", "Old")
     runtime_store = {"conversation_id:web": cid}
@@ -463,7 +530,9 @@ def test_rename_api_renames_any_channels_conversation(api_client):
     assert runtime_store["conversation_name:web"] == "New"  # /status shows it
 
 
-@pytest.mark.parametrize("body", [{"name": ""}, {"name": "   "}, {"name": 5}, {}, ["x"]])
+@pytest.mark.parametrize(
+    "body", [{"name": ""}, {"name": "   "}, {"name": 5}, {}, ["x"]]
+)
 def test_rename_api_rejects_bad_body(api_client, body):
     client, store = api_client
     cid = store.create("web", "Keep")
@@ -474,14 +543,20 @@ def test_rename_api_rejects_bad_body(api_client, body):
 def test_rename_api_rejects_non_json(api_client):
     client, store = api_client
     cid = store.create("web", "Keep")
-    resp = client.post(f"/api/conversations/{cid}/rename", content=b"name=x",
-                       headers={"content-type": "application/x-www-form-urlencoded"})
+    resp = client.post(
+        f"/api/conversations/{cid}/rename",
+        content=b"name=x",
+        headers={"content-type": "application/x-www-form-urlencoded"},
+    )
     assert resp.status_code == 400
 
 
 def test_rename_api_missing_conversation_is_404(api_client):
     client, _ = api_client
-    assert client.post("/api/conversations/99/rename", json={"name": "x"}).status_code == 404
+    assert (
+        client.post("/api/conversations/99/rename", json={"name": "x"}).status_code
+        == 404
+    )
 
 
 def test_rename_api_get_does_not_rename(api_client):
@@ -495,12 +570,16 @@ def test_rename_api_get_does_not_rename(api_client):
 def test_export_api_downloads_json_without_writing_on_server(api_client, tmp_path):
     from unittest.mock import patch
     from app.infra import conversations
+
     client, store = api_client
     cid = store.create("discord", "My Chat")
     with patch.object(conversations, "PROJECT_HOME", tmp_path):
         resp = client.get(f"/api/conversations/{cid}/export")
     assert resp.status_code == 200
-    assert resp.headers["content-disposition"] == f'attachment; filename="{cid}-my-chat.json"'
+    assert (
+        resp.headers["content-disposition"]
+        == f'attachment; filename="{cid}-my-chat.json"'
+    )
     data = resp.json()
     assert data["id"] == cid and data["name"] == "My Chat" and data["messages"] == []
     assert not (tmp_path / "conversations").exists()
@@ -515,14 +594,18 @@ def test_export_api_missing_conversation_is_404(api_client):
 
 def test_trajectory_api_downloads_json(api_client, tmp_path):
     from app.infra.message_history import MessageHistory
+
     client, store = api_client
     cid = store.create("telegram", "Chat")
-    mid = MessageHistory("telegram", db_path=tmp_path / "app.db").add_message("assistant", "a", cid)
+    mid = MessageHistory("telegram", db_path=tmp_path / "app.db").add_message(
+        "assistant", "a", cid
+    )
     store.save_trajectory(mid, cid, {"conversation_id": cid, "messages": []})
     resp = client.get(f"/api/messages/{mid}/trajectory")
     assert resp.status_code == 200
     assert resp.headers["content-disposition"] == (
-        f'attachment; filename="trajectory-{cid}-{mid}.json"')
+        f'attachment; filename="trajectory-{cid}-{mid}.json"'
+    )
     assert resp.json() == {"conversation_id": cid, "messages": []}
 
 
@@ -533,12 +616,17 @@ def test_trajectory_api_missing_is_404(api_client):
 
 def test_messages_api_includes_ids_and_trajectory_flag(api_client, tmp_path):
     from app.infra.message_history import MessageHistory
+
     client, store = api_client
     cid = store.create("web")
-    mid = MessageHistory("web", db_path=tmp_path / "app.db").add_message("assistant", "a", cid)
+    mid = MessageHistory("web", db_path=tmp_path / "app.db").add_message(
+        "assistant", "a", cid
+    )
     store.save_trajectory(mid, cid, {})
     msgs = client.get(f"/api/messages?conv_id={cid}").json()["messages"]
-    assert msgs == [{"role": "assistant", "content": "a", "id": mid, "has_trajectory": True}]
+    assert msgs == [
+        {"role": "assistant", "content": "a", "id": mid, "has_trajectory": True}
+    ]
 
 
 @pytest.mark.asyncio
@@ -550,7 +638,8 @@ async def test_trajectory_frame_goes_to_the_requesting_tab_only():
     msg = mq.outgoing.get_nowait()
     await ch.send_message(msg)
     a.send_json.assert_awaited_once_with(
-        {"type": "trajectory", "message_id": 7, "conversation_id": 3})
+        {"type": "trajectory", "message_id": 7, "conversation_id": 3}
+    )
     b.send_json.assert_not_awaited()
 
 
@@ -559,13 +648,23 @@ async def test_final_flag_reaches_the_browser_only_for_replies():
     ch, _ = make_web_channel()
     ws = AsyncMock()
     ch._connections["c1"] = ws
-    await ch.send_message(OutgoingMessage(
-        content="done", channel=ch, metadata={"websocket_id": "c1", "final": True}))
-    await ch.send_message(OutgoingMessage(
-        content="> bash [ls]...", channel=ch, metadata={"websocket_id": "c1"}))
-    await ch.send_message(OutgoingMessage(
-        content="ok", channel=ch,
-        metadata={"websocket_id": "c1", "is_command": True, "final": True}))
+    await ch.send_message(
+        OutgoingMessage(
+            content="done", channel=ch, metadata={"websocket_id": "c1", "final": True}
+        )
+    )
+    await ch.send_message(
+        OutgoingMessage(
+            content="> bash [ls]...", channel=ch, metadata={"websocket_id": "c1"}
+        )
+    )
+    await ch.send_message(
+        OutgoingMessage(
+            content="ok",
+            channel=ch,
+            metadata={"websocket_id": "c1", "is_command": True, "final": True},
+        )
+    )
     assert [c.args[0] for c in ws.send_json.await_args_list] == [
         {"type": "message", "content": "done", "final": True},
         {"type": "message", "content": "> bash [ls]..."},
@@ -575,12 +674,19 @@ async def test_final_flag_reaches_the_browser_only_for_replies():
 
 def test_sidebar_actions_in_frontend():
     js = (FRONTEND_DIR / "app.js").read_text()
-    for needle in ("/api/conversations/${conv.id}/rename", "/api/conversations/${id}/export",
-                   "`/fork ${id}`", "`/delete ${id}`", "Confirm delete", "conv-actions-btn"):
+    for needle in (
+        "/api/conversations/${conv.id}/rename",
+        "/api/conversations/${id}/export",
+        "`/fork ${id}`",
+        "`/delete ${id}`",
+        "Confirm delete",
+        "conv-actions-btn",
+    ):
         assert needle in js, needle
 
 
 # --- /stop and busy frames ---
+
 
 @pytest.mark.asyncio
 async def test_stop_while_idle_does_nothing():
@@ -588,7 +694,9 @@ async def test_stop_while_idle_does_nothing():
     ws = AsyncMock()
     ch._connections["c1"] = ws
     await ch._handle_ws_text("c1", json.dumps({"type": "message", "content": "/stop"}))
-    ws.send_json.assert_called_once_with({"type": "system", "content": "Nothing to stop."})
+    ws.send_json.assert_called_once_with(
+        {"type": "system", "content": "Nothing to stop."}
+    )
     assert ch.has_stopped is False
     assert mq.incoming.empty()
 
@@ -603,7 +711,8 @@ async def test_stop_during_turn_sets_flag_immediately_and_is_not_queued():
     assert ch.has_stopped is True  # seen by the running loop, not after it
     assert mq.incoming.empty()
     ws.send_json.assert_called_once_with(
-        {"type": "system", "content": "Stopping after the current step…"})
+        {"type": "system", "content": "Stopping after the current step…"}
+    )
 
 
 @pytest.mark.asyncio
@@ -613,11 +722,14 @@ async def test_busy_frames_are_queued_in_order_and_broadcast_with_stopped_flag()
     ch._connections.update({"a": ws1, "b": ws2})
 
     await ch.on_agent_turn(True)
-    await mq.outgoing.put(OutgoingMessage(content="reply", channel=ChannelType.WEB,
-                                          metadata={"websocket_id": "a"}))
+    await mq.outgoing.put(
+        OutgoingMessage(
+            content="reply", channel=ChannelType.WEB, metadata={"websocket_id": "a"}
+        )
+    )
     await ch._handle_ws_text("a", "/stop")
     await ch.on_agent_turn(False)
-    await ch.on_agent_turn(True)   # next turn: stop request doesn't carry over
+    await ch.on_agent_turn(True)  # next turn: stop request doesn't carry over
     await ch.on_agent_turn(False)
 
     while not mq.outgoing.empty():
@@ -625,14 +737,21 @@ async def test_busy_frames_are_queued_in_order_and_broadcast_with_stopped_flag()
 
     busy = lambda b, s: {"type": "busy", "busy": b, "stopped": s}  # noqa: E731
     assert [c.args[0] for c in ws2.send_json.call_args_list] == [
-        busy(True, False), busy(False, True), busy(True, False), busy(False, False)]
+        busy(True, False),
+        busy(False, True),
+        busy(True, False),
+        busy(False, False),
+    ]
     # the requester also got the reply (before the end frame) and the stop ack
     a_frames = [c.args[0] for c in ws1.send_json.call_args_list]
-    assert a_frames.index({"type": "message", "content": "reply"}) < a_frames.index(busy(False, True))
+    assert a_frames.index({"type": "message", "content": "reply"}) < a_frames.index(
+        busy(False, True)
+    )
 
 
 def test_websocket_gets_current_busy_state_on_connect():
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch.start()
     ch._turn_running = True
@@ -648,6 +767,7 @@ def test_index_has_hidden_stop_button():
 @pytest.mark.asyncio
 async def test_busy_frames_are_delivered_by_the_queues_process_outgoing():
     import asyncio
+
     ch, mq = make_web_channel()
     ws = AsyncMock()
     ch._connections["a"] = ws
@@ -675,6 +795,7 @@ _UUID = "0123456789abcdef0123456789abcdef"
 @pytest.fixture
 def uploads_client(tmp_path):
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch._upload_dir = tmp_path
     ch.start()
@@ -694,9 +815,12 @@ def test_upload_image_served_inline_with_safety_headers(uploads_client):
     assert "immutable" in resp.headers["cache-control"]
 
 
-@pytest.mark.parametrize("name", ["notes.txt", "page.html", "logo.svg", "My Report.pdf"])
+@pytest.mark.parametrize(
+    "name", ["notes.txt", "page.html", "logo.svg", "My Report.pdf"]
+)
 def test_upload_non_image_is_a_download_with_original_name(uploads_client, name):
     from urllib.parse import quote
+
     client, updir = uploads_client
     (updir / f"{_UUID}_{name}").write_text("<script>alert(1)</script>")
     resp = client.get(f"/api/uploads/{quote(_UUID + '_' + name)}")
@@ -709,8 +833,15 @@ def test_upload_non_image_is_a_download_with_original_name(uploads_client, name)
     assert resp.headers["x-content-type-options"] == "nosniff"
 
 
-@pytest.mark.parametrize("path", ["/api/uploads/ghost.png", "/api/uploads/..%2Fsecret.png",
-                                  "/api/uploads/..", "/api/uploads/%2Fetc%2Fpasswd"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/uploads/ghost.png",
+        "/api/uploads/..%2Fsecret.png",
+        "/api/uploads/..",
+        "/api/uploads/%2Fetc%2Fpasswd",
+    ],
+)
 def test_upload_missing_or_outside_dir_is_404(uploads_client, path):
     client, updir = uploads_client
     (updir.parent / "secret.png").write_bytes(b"x")
@@ -719,40 +850,57 @@ def test_upload_missing_or_outside_dir_is_404(uploads_client, path):
 
 def test_frontend_renders_attachment_markers():
     js = (FRONTEND_DIR / "app.js").read_text()
-    for needle in ("ATTACHMENT_RE", "/api/uploads/", "openLightbox", "withAttachmentMarkers"):
+    for needle in (
+        "ATTACHMENT_RE",
+        "/api/uploads/",
+        "openLightbox",
+        "withAttachmentMarkers",
+    ):
         assert needle in js, needle
 
 
 # --- /api/commands ---
 
+
 def test_commands_api_lists_registry_plus_whoami_sorted():
     from starlette.testclient import TestClient
     from app.channels.commands import BotCommand, CommandRegistry
+
     ch, _ = make_web_channel()
     ch.start()
     registry = CommandRegistry()
     noop = AsyncMock()
     registry.register(BotCommand("new", "Start a new conversation.", noop))
-    registry.register(BotCommand("load", "Load a conversation. Usage: /load <id>", noop))
+    registry.register(
+        BotCommand("load", "Load a conversation. Usage: /load <id>", noop)
+    )
     ch.commands = registry
     resp = TestClient(ch._asgi_app).get("/api/commands")
-    assert resp.json() == {"commands": [
-        {"name": "load", "description": "Load a conversation. Usage: /load <id>"},
-        {"name": "new", "description": "Start a new conversation."},
-        {"name": "whoami", "description": "Show this tab's connection ID."},
-    ]}
+    assert resp.json() == {
+        "commands": [
+            {"name": "load", "description": "Load a conversation. Usage: /load <id>"},
+            {"name": "new", "description": "Start a new conversation."},
+            {"name": "whoami", "description": "Show this tab's connection ID."},
+        ]
+    }
 
 
 def test_commands_api_without_agent_lists_only_whoami():
     from starlette.testclient import TestClient
+
     ch, _ = make_web_channel()
     ch.start()
-    names = [c["name"] for c in TestClient(ch._asgi_app).get("/api/commands").json()["commands"]]
+    names = [
+        c["name"]
+        for c in TestClient(ch._asgi_app).get("/api/commands").json()["commands"]
+    ]
     assert names == ["whoami"]
 
 
 def test_frontend_has_reply_copy_button_with_http_fallback():
     js = (FRONTEND_DIR / "app.js").read_text()
-    assert "actions.appendChild(copyButton(bubble))" in js   # on the row: survives re-rendering
-    assert "bubble.dataset.raw" in js                     # copies the markdown source
-    assert "document.execCommand('copy')" in js           # no Clipboard API on plain http
+    assert (
+        "actions.appendChild(copyButton(bubble))" in js
+    )  # on the row: survives re-rendering
+    assert "bubble.dataset.raw" in js  # copies the markdown source
+    assert "document.execCommand('copy')" in js  # no Clipboard API on plain http

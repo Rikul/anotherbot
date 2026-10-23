@@ -41,7 +41,7 @@ class BashTool(Tool):
         try:
             timeout = int(timeout) or 30
             timeout = max(1, min(timeout, 300))
-            
+
             result = subprocess.run(
                 command,
                 shell=True,

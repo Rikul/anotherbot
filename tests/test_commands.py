@@ -2,7 +2,14 @@ import pytest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app.channels.commands import BotCommand, CommandRegistry, status_cmd, help_cmd, model_cmd, trace_cmd
+from app.channels.commands import (
+    BotCommand,
+    CommandRegistry,
+    status_cmd,
+    help_cmd,
+    model_cmd,
+    trace_cmd,
+)
 
 
 def make_registry(*extra: BotCommand) -> CommandRegistry:
@@ -16,6 +23,7 @@ def make_registry(*extra: BotCommand) -> CommandRegistry:
 
 # --- BotCommand ---
 
+
 def test_botcommand_stores_fields():
     handler = AsyncMock(return_value="hi")
     cmd = BotCommand("test", "A test command.", handler)
@@ -25,6 +33,7 @@ def test_botcommand_stores_fields():
 
 
 # --- CommandRegistry.list ---
+
 
 def test_registry_list_empty_by_default():
     assert CommandRegistry().list() == []
@@ -46,6 +55,7 @@ def test_registry_register_overwrites_same_name():
 
 # --- CommandRegistry.execute ---
 
+
 @pytest.mark.asyncio
 async def test_execute_returns_none_for_unknown_command():
     assert await CommandRegistry().execute("nope") is None
@@ -65,6 +75,7 @@ async def test_execute_calls_handler_and_returns_result():
 async def test_execute_returns_error_string_on_exception():
     async def boom(args=""):
         raise RuntimeError("oops")
+
     r = CommandRegistry()
     r.register(BotCommand("bad", "Broken.", boom))
     result = await r.execute("bad")
@@ -83,6 +94,7 @@ async def test_execute_passes_args_to_handler():
 
 # --- status_cmd ---
 
+
 @pytest.mark.asyncio
 async def test_status_includes_model_name():
     with patch("app.core.runtime._store", {"model": "my-test-model"}):
@@ -98,6 +110,7 @@ async def test_status_includes_uptime():
 
 
 # --- help_cmd ---
+
 
 @pytest.mark.asyncio
 async def test_help_handler_lists_all_registered_commands():
@@ -122,6 +135,7 @@ async def test_help_handler_reflects_commands_registered_after_creation():
 
 # --- model_cmd ---
 
+
 @pytest.mark.asyncio
 async def test_model_cmd_returns_current_model_when_no_args():
     with patch("app.core.runtime._store", {"model": "deepseek/v3"}):
@@ -140,16 +154,21 @@ async def test_model_cmd_sets_model():
 
 # --- trace_cmd ---
 
+
 @pytest.mark.asyncio
 async def test_trace_cmd_shows_off_when_no_args():
-    with patch("app.core.runtime._store", {"trace": False, "tracedir": Path("/tmp/traces")}):
+    with patch(
+        "app.core.runtime._store", {"trace": False, "tracedir": Path("/tmp/traces")}
+    ):
         result = await trace_cmd("")
     assert "off" in result
 
 
 @pytest.mark.asyncio
 async def test_trace_cmd_shows_on_when_no_args():
-    with patch("app.core.runtime._store", {"trace": True, "tracedir": Path("/tmp/traces")}):
+    with patch(
+        "app.core.runtime._store", {"trace": True, "tracedir": Path("/tmp/traces")}
+    ):
         result = await trace_cmd("")
     assert "on" in result
 
@@ -174,20 +193,27 @@ async def test_trace_cmd_off_disables_tracing():
 
 @pytest.mark.asyncio
 async def test_trace_cmd_off_closes_open_trace_files():
-    with patch("app.core.runtime._store", {"trace": True, "tracedir": Path("/tmp/traces")}), \
-         patch("app.infra.tracer.close_all") as mock_close_all:
+    with (
+        patch(
+            "app.core.runtime._store", {"trace": True, "tracedir": Path("/tmp/traces")}
+        ),
+        patch("app.infra.tracer.close_all") as mock_close_all,
+    ):
         await trace_cmd("off")
     mock_close_all.assert_called_once()
 
 
 @pytest.mark.asyncio
 async def test_trace_cmd_includes_tracedir_in_response():
-    with patch("app.core.runtime._store", {"trace": False, "tracedir": Path("/my/traces")}):
+    with patch(
+        "app.core.runtime._store", {"trace": False, "tracedir": Path("/my/traces")}
+    ):
         result = await trace_cmd("on")
     assert "/my/traces" in result
 
 
 # --- status_cmd tracing line ---
+
 
 @pytest.mark.asyncio
 async def test_status_includes_tracing_off():
@@ -199,7 +225,11 @@ async def test_status_includes_tracing_off():
 
 @pytest.mark.asyncio
 async def test_status_shows_tracing_on_with_filename():
-    mock_store = {"trace": True, "last_trace": "trace_06142026_103045.json", "model": "m"}
+    mock_store = {
+        "trace": True,
+        "last_trace": "trace_06142026_103045.json",
+        "model": "m",
+    }
     with patch("app.core.runtime._store", mock_store):
         result = await status_cmd()
     assert "on" in result
@@ -216,12 +246,16 @@ async def test_status_shows_tracing_on_without_filename():
 
 # --- /mcp ---
 
+
 def _mcp_manager_mock(statuses=None, specs=None, server_specs=None):
     from unittest.mock import MagicMock
+
     mgr = MagicMock()
     mgr.get_server_status.return_value = statuses or []
     mgr.get_tool_specs.return_value = specs or []
-    mgr.get_tools_for_server.side_effect = lambda name: (server_specs or {}).get(name, [])
+    mgr.get_tools_for_server.side_effect = lambda name: (server_specs or {}).get(
+        name, []
+    )
     return mgr
 
 
@@ -232,6 +266,7 @@ def _spec(name, desc=""):
 async def _run_mcp(args, mgr):
     from unittest.mock import patch
     from app.channels.commands import mcp_cmd
+
     with patch("app.core.mcp_manager.mcp_manager", mgr):
         return await mcp_cmd()(args)
 
@@ -246,9 +281,30 @@ async def test_mcp_no_servers_points_to_config_file():
 @pytest.mark.asyncio
 async def test_mcp_lists_server_status():
     statuses = [
-        {"name": "mem", "disabled": False, "connected": True, "transport": "stdio", "target": "npx", "tool_count": 3},
-        {"name": "off", "disabled": True, "connected": False, "transport": "http", "target": "url", "tool_count": 0},
-        {"name": "down", "disabled": False, "connected": False, "transport": "stdio", "target": "x", "tool_count": 0},
+        {
+            "name": "mem",
+            "disabled": False,
+            "connected": True,
+            "transport": "stdio",
+            "target": "npx",
+            "tool_count": 3,
+        },
+        {
+            "name": "off",
+            "disabled": True,
+            "connected": False,
+            "transport": "http",
+            "target": "url",
+            "tool_count": 0,
+        },
+        {
+            "name": "down",
+            "disabled": False,
+            "connected": False,
+            "transport": "stdio",
+            "target": "x",
+            "tool_count": 0,
+        },
     ]
     out = await _run_mcp("", _mcp_manager_mock(statuses=statuses))
     assert out.splitlines() == [
@@ -263,7 +319,11 @@ async def test_mcp_lists_server_status():
 async def test_mcp_tools_lists_all_tools():
     specs = [_spec("mem__read", "Read memory"), _spec("mem__write")]
     out = await _run_mcp("tools", _mcp_manager_mock(specs=specs))
-    assert out.splitlines() == ["MCP tools (2):", "  mem__read — Read memory", "  mem__write"]
+    assert out.splitlines() == [
+        "MCP tools (2):",
+        "  mem__read — Read memory",
+        "  mem__write",
+    ]
 
 
 @pytest.mark.asyncio
@@ -281,7 +341,9 @@ async def test_mcp_tools_for_server_uses_bare_names():
 @pytest.mark.asyncio
 async def test_mcp_tools_for_unknown_server():
     mgr = _mcp_manager_mock(statuses=[{"name": "mem"}])
-    assert await _run_mcp("tools nope", mgr) == "Server 'nope' not found. Configured: mem"
+    assert (
+        await _run_mcp("tools nope", mgr) == "Server 'nope' not found. Configured: mem"
+    )
 
 
 @pytest.mark.asyncio
@@ -292,33 +354,47 @@ async def test_mcp_tools_for_server_without_tools():
 
 # --- /rename and rename_conversation ---
 
+
 @pytest.mark.asyncio
-async def test_rename_cmd_updates_cached_name_for_every_channel_with_it_active(tmp_path):
+async def test_rename_cmd_updates_cached_name_for_every_channel_with_it_active(
+    tmp_path,
+):
     from app.channels.commands import rename_conversation_cmd
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "t.db")
     cid = store.create("telegram", "Old")
     other = store.create("web", "Other")
-    runtime_store = {"conversation_id:telegram": cid, "conversation_id:web": cid,
-                     "conversation_id:discord": other, "conversation_name:discord": "Other"}
+    runtime_store = {
+        "conversation_id:telegram": cid,
+        "conversation_id:web": cid,
+        "conversation_id:discord": other,
+        "conversation_name:discord": "Other",
+    }
     with patch("app.core.runtime._store", runtime_store):
         reply = await rename_conversation_cmd(store)(f"{cid}  New name ")
     assert reply == f'Conversation [{cid}] renamed to "New name"'
     assert store.get(cid)["name"] == "New name"
     assert runtime_store["conversation_name:telegram"] == "New name"
     assert runtime_store["conversation_name:web"] == "New name"
-    assert runtime_store["conversation_name:discord"] == "Other"  # different conversation
+    assert (
+        runtime_store["conversation_name:discord"] == "Other"
+    )  # different conversation
 
 
 @pytest.mark.asyncio
 async def test_rename_cmd_reports_missing_conversation(tmp_path):
     from app.channels.commands import rename_conversation_cmd
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "t.db")
-    assert await rename_conversation_cmd(store)("99 Name") == "Conversation 99 not found"
+    assert (
+        await rename_conversation_cmd(store)("99 Name") == "Conversation 99 not found"
+    )
 
 
 # --- /delete ---
+
 
 class _FakeAgent:
     def __init__(self, store, channel, active_id):
@@ -332,6 +408,7 @@ class _FakeAgent:
 async def test_delete_cmd_deletes_inactive_conversation(tmp_path):
     from app.channels.commands import delete_conversation_cmd
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "t.db")
     active, other = store.create("web", "Active"), store.create("telegram", "Old chat")
     agent = _FakeAgent(store, "web", active)
@@ -345,6 +422,7 @@ async def test_delete_cmd_deletes_inactive_conversation(tmp_path):
 async def test_delete_cmd_on_channels_last_conversation_starts_a_new_one(tmp_path):
     from app.channels.commands import delete_conversation_cmd
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "t.db")
     active = store.create("web", "Active")
     agent = _FakeAgent(store, "web", active)
@@ -354,8 +432,10 @@ async def test_delete_cmd_on_channels_last_conversation_starts_a_new_one(tmp_pat
     assert agent.conversation_id != active
     new = store.get(agent.conversation_id)
     assert new["channel"] == "web" and new["name"] == "New Conversation"
-    assert reply == (f'Deleted conversation [{active}] "Active". '
-                     f"Started new conversation [{new['id']}] New Conversation")
+    assert reply == (
+        f'Deleted conversation [{active}] "Active". '
+        f"Started new conversation [{new['id']}] New Conversation"
+    )
 
 
 @pytest.mark.asyncio
@@ -363,6 +443,7 @@ async def test_delete_cmd_on_own_active_switches_to_channels_most_recent(tmp_pat
     import time
     from app.channels.commands import delete_conversation_cmd
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "t.db")
     recent = store.create("web", "Recent")
     older = store.create("web", "Older")
@@ -374,33 +455,48 @@ async def test_delete_cmd_on_own_active_switches_to_channels_most_recent(tmp_pat
     agent = _FakeAgent(store, "web", active)
     with patch("app.core.runtime._store", {"conversation_id:web": active}):
         reply = await delete_conversation_cmd(agent)(str(active))
-    assert reply == f'Deleted conversation [{active}] "Active". Switched to conversation [{recent}] Recent'
+    assert (
+        reply
+        == f'Deleted conversation [{active}] "Active". Switched to conversation [{recent}] Recent'
+    )
     assert agent.conversation_id == recent
     assert store.get(active) is None and store.get(older) is not None
-    assert [c["name"] for c in store.list("web")] == ["Recent", "Older"]  # nothing new created
+    assert [c["name"] for c in store.list("web")] == [
+        "Recent",
+        "Older",
+    ]  # nothing new created
 
 
 @pytest.mark.asyncio
 async def test_delete_cmd_refuses_conversation_active_in_another_channel(tmp_path):
     from app.channels.commands import delete_conversation_cmd
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "t.db")
     mine, theirs = store.create("web", "Mine"), store.create("telegram", "Theirs")
     agent = _FakeAgent(store, "web", mine)
-    with patch("app.core.runtime._store", {"conversation_id:web": mine,
-                                           "conversation_id:telegram": theirs}):
+    with patch(
+        "app.core.runtime._store",
+        {"conversation_id:web": mine, "conversation_id:telegram": theirs},
+    ):
         reply = await delete_conversation_cmd(agent)(str(theirs))
     assert "active in the telegram channel" in reply
     assert store.get(theirs) is not None
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("args,expected", [("", "Usage: /delete <id>"),
-                                           ("abc", "Invalid id: must be an integer."),
-                                           ("99", "Conversation not found")])
+@pytest.mark.parametrize(
+    "args,expected",
+    [
+        ("", "Usage: /delete <id>"),
+        ("abc", "Invalid id: must be an integer."),
+        ("99", "Conversation not found"),
+    ],
+)
 async def test_delete_cmd_bad_args(tmp_path, args, expected):
     from app.channels.commands import delete_conversation_cmd
     from app.infra.conversations import ConversationStore
+
     store = ConversationStore(db_path=tmp_path / "t.db")
     agent = _FakeAgent(store, "web", store.create("web"))
     assert await delete_conversation_cmd(agent)(args) == expected
@@ -409,5 +505,6 @@ async def test_delete_cmd_bad_args(tmp_path, args, expected):
 def test_delete_is_in_the_standard_registry():
     from unittest.mock import MagicMock
     from app.channels.commands import build_command_registry
+
     agent = MagicMock(channel_str="web")
     assert "delete" in [c.name for c in build_command_registry(agent).list()]

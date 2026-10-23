@@ -19,7 +19,9 @@ def test_client_uses_api_key_and_base_url_from_env(monkeypatch):
     config.load()
     with patch("app.core.client.AsyncOpenAI") as MockOpenAI:
         Client()
-    MockOpenAI.assert_called_once_with(api_key="sk-env", base_url="https://env.example.com/v1")
+    MockOpenAI.assert_called_once_with(
+        api_key="sk-env", base_url="https://env.example.com/v1"
+    )
 
 
 def test_client_uses_default_base_url_when_env_not_set(monkeypatch):
@@ -27,7 +29,9 @@ def test_client_uses_default_base_url_when_env_not_set(monkeypatch):
     config.load()
     with patch("app.core.client.AsyncOpenAI") as MockOpenAI:
         Client()
-    MockOpenAI.assert_called_once_with(api_key="sk-env", base_url="https://openrouter.ai/api/v1")
+    MockOpenAI.assert_called_once_with(
+        api_key="sk-env", base_url="https://openrouter.ai/api/v1"
+    )
 
 
 def test_client_explicit_args_override_env(monkeypatch):
@@ -36,7 +40,9 @@ def test_client_explicit_args_override_env(monkeypatch):
     config.load()
     with patch("app.core.client.AsyncOpenAI") as MockOpenAI:
         Client(api_key="test-key", base_url="https://custom.api.com")
-    MockOpenAI.assert_called_once_with(api_key="test-key", base_url="https://custom.api.com")
+    MockOpenAI.assert_called_once_with(
+        api_key="test-key", base_url="https://custom.api.com"
+    )
 
 
 def test_client_get_client_returns_openai_instance():

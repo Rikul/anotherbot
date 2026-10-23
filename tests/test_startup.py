@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from app.core.agent import get_default_sys_prompt
 
+
 def test_get_default_sys_prompt_returns_string():
     result = get_default_sys_prompt()
     assert isinstance(result, str)

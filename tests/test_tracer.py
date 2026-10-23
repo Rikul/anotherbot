@@ -128,7 +128,9 @@ async def test_loop_records_full_trajectory_with_tool_calls(tmp_path):
         msg.tool_calls = tool_calls
         msg.content = content
         msg.model_dump.return_value = {"reasoning": "thinking..."}
-        choice = MagicMock(message=msg, finish_reason="tool_calls" if tool_calls else "stop")
+        choice = MagicMock(
+            message=msg, finish_reason="tool_calls" if tool_calls else "stop"
+        )
         chat = MagicMock(choices=[choice])
         chat.usage.model_dump.return_value = {"total_tokens": 42}
         return chat
@@ -139,19 +141,28 @@ async def test_loop_records_full_trajectory_with_tool_calls(tmp_path):
     agent.client.chat.completions.create = AsyncMock(
         side_effect=[response([tc], None), response(None, "done")]
     )
-    with patch("app.core.runtime._store", _store(tmp_path)), \
-         patch("app.core.tool_calls.run_tool", return_value="hi\n"):
+    with (
+        patch("app.core.runtime._store", _store(tmp_path)),
+        patch("app.core.tool_calls.run_tool", return_value="hi\n"),
+    ):
         result = await agent.run("say hi")
     assert result == "done"
 
     (path,) = tmp_path.glob("trace_helper_*.jsonl")
     events = _events(path)
     assert [e["event"] for e in events] == [
-        "session", "history", "turn_start",
-        "llm_response", "tool_result", "llm_response", "turn_end",
+        "session",
+        "history",
+        "turn_start",
+        "llm_response",
+        "tool_result",
+        "llm_response",
+        "turn_end",
     ]
     first = events[3]
-    assert first["message"]["tool_calls"] == [{"id": "tc1", "function": {"name": "bash"}}]
+    assert first["message"]["tool_calls"] == [
+        {"id": "tc1", "function": {"name": "bash"}}
+    ]
     assert first["message"]["reasoning_content"] == "thinking..."
     assert first["usage"] == {"total_tokens": 42}
     assert "duration_s" in first
@@ -183,8 +194,10 @@ async def test_loop_skips_trace_work_when_disabled(tmp_path):
     chat = MagicMock(choices=[MagicMock(message=msg, finish_reason="stop")])
     agent.client = MagicMock()
     agent.client.chat.completions.create = AsyncMock(return_value=chat)
-    with patch("app.core.runtime._store", _store(tmp_path, trace=False)), \
-         patch.object(agent.tracer, "record") as mock_record:
+    with (
+        patch("app.core.runtime._store", _store(tmp_path, trace=False)),
+        patch.object(agent.tracer, "record") as mock_record,
+    ):
         await agent.run("hi")
     mock_record.assert_not_called()
     chat.usage.model_dump.assert_not_called()
@@ -332,8 +345,10 @@ async def test_trace_event_schema(tmp_path):
         return f"{tool_name} output"
 
     store = _store(tmp_path, model="deepseek/deepseek-v4.1-flash")
-    with patch("app.core.runtime._store", store), \
-         patch("app.core.tool_calls.run_tool", side_effect=fake_run_tool):
+    with (
+        patch("app.core.runtime._store", store),
+        patch("app.core.tool_calls.run_tool", side_effect=fake_run_tool),
+    ):
         assert await agent.run("review the branch") == "Review complete."
 
     (path,) = tmp_path.glob("trace_helper_*.jsonl")
@@ -344,8 +359,13 @@ async def test_trace_event_schema(tmp_path):
         assert isinstance(e["event"], str)
         datetime.fromisoformat(e["ts"])
     assert [e["event"] for e in events] == [
-        "session", "history", "turn_start",
-        "llm_response", "tool_result", "tool_result", "llm_response",
+        "session",
+        "history",
+        "turn_start",
+        "llm_response",
+        "tool_result",
+        "tool_result",
+        "llm_response",
         "turn_end",
     ]
 
@@ -353,8 +373,14 @@ async def test_trace_event_schema(tmp_path):
     responses = [e for e in events if e["event"] == "llm_response"]
     for e in responses:
         assert set(e) == {
-            "ts", "event", "iteration", "model", "duration_s",
-            "finish_reason", "usage", "message",
+            "ts",
+            "event",
+            "iteration",
+            "model",
+            "duration_s",
+            "finish_reason",
+            "usage",
+            "message",
         }
         assert e["model"] == "deepseek/deepseek-v4.1-flash"
         assert isinstance(e["duration_s"], float) and e["duration_s"] >= 0
@@ -394,7 +420,13 @@ async def test_trace_event_schema(tmp_path):
     )
     for e in results:
         assert set(e) == {
-            "ts", "event", "iteration", "tool_call_id", "name", "duration_s", "content",
+            "ts",
+            "event",
+            "iteration",
+            "tool_call_id",
+            "name",
+            "duration_s",
+            "content",
         }
         assert e["iteration"] == 1
         assert isinstance(e["duration_s"], float) and e["duration_s"] >= 0

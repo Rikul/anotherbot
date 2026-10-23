@@ -1,4 +1,5 @@
 """Tests for ConversationStore."""
+
 from __future__ import annotations
 
 import sqlite3
@@ -21,6 +22,7 @@ def store(db) -> ConversationStore:
 
 # --- Schema idempotency ---
 
+
 def test_ensure_schema_idempotent(db):
     ConversationStore(db_path=db)
     # Second call must not raise
@@ -29,11 +31,15 @@ def test_ensure_schema_idempotent(db):
 
 def test_conversations_table_created(store, db):
     with sqlite3.connect(db) as conn:
-        tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        tables = {
+            r[0]
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
     assert "conversations" in tables
 
 
 # --- create / get ---
+
 
 def test_create_returns_integer_id(store):
     cid = store.create("cli")
@@ -70,6 +76,7 @@ def test_create_falls_back_for_empty_name(store):
 
 # --- get_last ---
 
+
 def test_get_last_returns_none_when_empty(store):
     assert store.get_last("cli") is None
 
@@ -80,7 +87,8 @@ def test_get_last_returns_most_recently_updated(store, db):
     # Pin cid2 to a future timestamp so ordering is deterministic
     with sqlite3.connect(db) as conn:
         conn.execute(
-            "UPDATE conversations SET updated_at='2099-01-01T00:00:00' WHERE id=?", (cid2,)
+            "UPDATE conversations SET updated_at='2099-01-01T00:00:00' WHERE id=?",
+            (cid2,),
         )
         conn.commit()
     last = store.get_last("cli")
@@ -96,6 +104,7 @@ def test_get_last_respects_channel(store):
 
 # --- list ---
 
+
 def test_list_returns_all_for_channel(store):
     store.create("cli", "A")
     store.create("cli", "B")
@@ -110,7 +119,10 @@ def test_list_without_channel_returns_all_with_channel_field(store):
     store.create("cli", "A")
     store.create("telegram", "T")
     convs = store.list()
-    assert {(c["name"], c["channel"]) for c in convs} == {("A", "cli"), ("T", "telegram")}
+    assert {(c["name"], c["channel"]) for c in convs} == {
+        ("A", "cli"),
+        ("T", "telegram"),
+    }
 
 
 def test_list_includes_message_count(store, db):
@@ -134,6 +146,7 @@ def test_list_includes_message_count(store, db):
 
 # --- rename ---
 
+
 def test_rename_updates_name(store):
     cid = store.create("cli", "Old Name")
     store.rename(cid, "New Name", "cli")
@@ -146,6 +159,7 @@ def test_rename_rejects_missing_conversation(store):
 
 
 # --- fork ---
+
 
 def _setup_messages(db: Path, channel: str, conv_id: int, count: int = 2):
     with sqlite3.connect(db) as conn:
@@ -230,6 +244,7 @@ def test_fork_name_fits_80_chars(store):
 
 # --- load_messages ordering ---
 
+
 def test_load_messages_ordered_by_timestamp_then_id(store, db):
     cid = store.create("cli")
     with sqlite3.connect(db) as conn:
@@ -266,6 +281,7 @@ def test_load_messages_returns_most_recent_when_truncated(store, db):
 
 # --- count_user_messages ---
 
+
 def test_count_user_messages(store, db):
     cid = store.create("cli")
     with sqlite3.connect(db) as conn:
@@ -289,6 +305,7 @@ def test_count_user_messages(store, db):
 
 
 # --- Migration ---
+
 
 def test_migration_assigns_existing_messages(db):
     # Seed the db with messages table and no conversation_id column
@@ -343,6 +360,7 @@ def test_migration_is_reentrant(db):
 
 # --- Auto-name guard ---
 
+
 @pytest.mark.asyncio
 async def test_auto_name_does_not_overwrite_manual_rename(store):
     cid = store.create("cli", "New Conversation")
@@ -355,6 +373,7 @@ async def test_auto_name_does_not_overwrite_manual_rename(store):
 
     with patch("app.core.helper_agent.HelperAgent", return_value=mock_helper_instance):
         from app.core.agent import Agent
+
         agent_stub = MagicMock(spec=[])  # _auto_name doesn't use self
         await Agent._auto_name(agent_stub, store, cid, [], "conversation_name")
 
@@ -364,25 +383,33 @@ async def test_auto_name_does_not_overwrite_manual_rename(store):
 
 # --- Export ---
 
+
 def test_export_writes_json(store, db, tmp_path):
     cid = store.create("cli", "Test Export")
     from app import config
+
     with patch.object(config, "PROJECT_HOME", tmp_path):
         from app.infra import conversations
+
         with patch.object(conversations, "PROJECT_HOME", tmp_path):
             path = store.export(cid, "cli")
     assert path.exists()
     import json
+
     data = json.loads(path.read_text())
     assert data["name"] == "Test Export"
     assert data["channel"] == "cli"
 
 
-def test_export_payload_builds_filename_and_messages_without_writing(store, db, tmp_path):
+def test_export_payload_builds_filename_and_messages_without_writing(
+    store, db, tmp_path
+):
     from app.infra.message_history import MessageHistory
+
     cid = store.create("web", "Trip Plan: Rome!")
     MessageHistory("web", db_path=db).add_message("user", "hi", cid)
     from app.infra import conversations
+
     with patch.object(conversations, "PROJECT_HOME", tmp_path):
         filename, payload = store.export_payload(cid)
     assert filename == f"{cid}-trip-plan-rome.json"
@@ -398,8 +425,10 @@ def test_export_payload_rejects_missing_conversation(store):
 
 # --- delete ---
 
+
 def test_delete_removes_conversation_and_its_messages_only(store, db):
     from app.infra.message_history import MessageHistory
+
     keep = store.create("web", "Keep")
     gone = store.create("telegram", "Gone")
     history = MessageHistory("web", db_path=db)
@@ -414,6 +443,7 @@ def test_delete_removes_conversation_and_its_messages_only(store, db):
 
 def test_delete_source_of_a_fork_keeps_the_fork(store, db):
     from app.infra.message_history import MessageHistory
+
     src = store.create("web", "Source")
     MessageHistory("web", db_path=db).add_message("user", "hi", src)
     fork = store.fork(src, "web")
@@ -429,12 +459,16 @@ def test_delete_rejects_missing_conversation(store):
 
 # --- trajectories ---
 
+
 def _reply_with_trajectory(store, db, cid, data=None):
     from app.infra.message_history import MessageHistory
+
     history = MessageHistory("web", db_path=db)
     history.add_message("user", "q", cid)
     mid = history.add_message("assistant", "a", cid)
-    store.save_trajectory(mid, cid, data or {"messages": [{"role": "user", "content": "q"}]})
+    store.save_trajectory(
+        mid, cid, data or {"messages": [{"role": "user", "content": "q"}]}
+    )
     return mid
 
 
@@ -449,11 +483,16 @@ def test_load_messages_with_meta_marks_trajectories(store, db):
     cid = store.create("web")
     mid = _reply_with_trajectory(store, db, cid)
     msgs = store.load_messages(cid, with_meta=True)
-    assert [(m["role"], m["has_trajectory"]) for m in msgs] == [("user", False), ("assistant", True)]
+    assert [(m["role"], m["has_trajectory"]) for m in msgs] == [
+        ("user", False),
+        ("assistant", True),
+    ]
     assert msgs[1]["id"] == mid
     # without with_meta the agent gets plain role/content dicts
-    assert store.load_messages(cid) == [{"role": "user", "content": "q"},
-                                        {"role": "assistant", "content": "a"}]
+    assert store.load_messages(cid) == [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "a"},
+    ]
 
 
 def test_delete_removes_trajectories(store, db):

@@ -27,6 +27,7 @@ def make_not_found():
 
 # --- Initialization ---
 
+
 def test_registers_delivery_function():
     dc, mq = make_discord_channel()
     assert dc in mq._delivery
@@ -49,6 +50,7 @@ def test_initial_stopped_false():
 
 
 # --- on_message ---
+
 
 @pytest.mark.asyncio
 async def test_on_message_puts_to_incoming_queue():
@@ -148,6 +150,7 @@ async def test_on_message_trims_whitespace():
 
 # --- send_message ---
 
+
 @pytest.mark.asyncio
 async def test_send_message_sends_to_channel():
     dc, _ = make_discord_channel()
@@ -194,6 +197,7 @@ async def test_send_message_dms_owner_when_no_channel_id():
 @pytest.mark.asyncio
 async def test_send_message_logs_error_when_channel_not_found(caplog):
     import logging
+
     dc, _ = make_discord_channel()
     dc.get_channel = MagicMock(return_value=None)
     dc.fetch_channel = AsyncMock(side_effect=make_not_found())
@@ -212,13 +216,16 @@ async def test_send_message_splits_long_content():
     dc.get_channel = MagicMock(return_value=mock_channel)
 
     long_content = "x" * (MAX_DISCORD_LENGTH + 100)
-    msg = OutgoingMessage(content=long_content, channel=dc, metadata={"channel_id": 456})
+    msg = OutgoingMessage(
+        content=long_content, channel=dc, metadata={"channel_id": 456}
+    )
     await dc.send_message(msg)
 
     assert mock_channel.send.call_count == 2
 
 
 # --- default_metadata / last channel tracking ---
+
 
 def test_default_metadata_empty_before_any_message():
     dc, _ = make_discord_channel()
@@ -253,6 +260,7 @@ async def test_on_message_updates_last_channel_id():
 
 # --- has_stopped / clear_stopped ---
 
+
 def test_clear_stopped_resets_state():
     dc, _ = make_discord_channel()
     dc.stopped = True
@@ -261,6 +269,7 @@ def test_clear_stopped_resets_state():
 
 
 # --- command handling ---
+
 
 @pytest.mark.asyncio
 async def test_on_message_whoami_replies_with_user_info():

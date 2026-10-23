@@ -32,14 +32,15 @@ async def test_start_server_discord_only_starts_discord_agent():
     mock_gather = AsyncMock()
     mock_config = _make_config(discord_token="discord-token")
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("app.channels.discord.DiscordChannel") as MockDC, \
-         patch("app.bg_server.BackgroundAgent") as MockAgent, \
-         patch("app.bg_server.ScheduledTasks"), \
-         patch("app.bg_server.MessageQueue") as MockMQ, \
-         patch("asyncio.gather", mock_gather):
-
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("app.channels.discord.DiscordChannel") as MockDC,
+        patch("app.bg_server.BackgroundAgent") as MockAgent,
+        patch("app.bg_server.ScheduledTasks"),
+        patch("app.bg_server.MessageQueue") as MockMQ,
+        patch("asyncio.gather", mock_gather),
+    ):
         mock_dc = MockDC.return_value
         mock_mq = MockMQ.return_value
 
@@ -58,14 +59,15 @@ async def test_start_server_discord_only_no_telegram_crash():
     # config.telegram is not set — accessing it should not be reached
     del mock_config.telegram
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("app.channels.discord.DiscordChannel"), \
-         patch("app.bg_server.BackgroundAgent"), \
-         patch("app.bg_server.ScheduledTasks"), \
-         patch("app.bg_server.MessageQueue"), \
-         patch("asyncio.gather", mock_gather):
-
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("app.channels.discord.DiscordChannel"),
+        patch("app.bg_server.BackgroundAgent"),
+        patch("app.bg_server.ScheduledTasks"),
+        patch("app.bg_server.MessageQueue"),
+        patch("asyncio.gather", mock_gather),
+    ):
         await start_server()  # must not raise
 
 
@@ -74,14 +76,15 @@ async def test_start_server_discord_only_gather_excludes_telegram():
     mock_gather = AsyncMock()
     mock_config = _make_config(discord_token="discord-token")
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("app.channels.discord.DiscordChannel") as MockDC, \
-         patch("app.bg_server.BackgroundAgent") as MockAgent, \
-         patch("app.bg_server.ScheduledTasks"), \
-         patch("app.bg_server.MessageQueue") as MockMQ, \
-         patch("asyncio.gather", mock_gather):
-
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("app.channels.discord.DiscordChannel") as MockDC,
+        patch("app.bg_server.BackgroundAgent") as MockAgent,
+        patch("app.bg_server.ScheduledTasks"),
+        patch("app.bg_server.MessageQueue") as MockMQ,
+        patch("asyncio.gather", mock_gather),
+    ):
         mock_dc = MockDC.return_value
         mock_agent = MockAgent.return_value
         mock_mq = MockMQ.return_value
@@ -101,10 +104,11 @@ async def test_start_server_exits_when_no_channels_configured():
     mock_gather = AsyncMock()
     mock_config = _make_config()  # neither telegram nor discord
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("asyncio.gather", mock_gather):
-
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("asyncio.gather", mock_gather),
+    ):
         await start_server()
 
     mock_gather.assert_not_called()
@@ -121,15 +125,16 @@ async def test_start_server_both_channels_uses_separate_mqs():
         mq_instances.append(mq)
         return mq
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("app.channels.telegram.TelegramChannel"), \
-         patch("app.channels.discord.DiscordChannel"), \
-         patch("app.bg_server.BackgroundAgent"), \
-         patch("app.bg_server.ScheduledTasks"), \
-         patch("app.bg_server.MessageQueue", side_effect=make_mq), \
-         patch("asyncio.gather", mock_gather):
-
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("app.channels.telegram.TelegramChannel"),
+        patch("app.channels.discord.DiscordChannel"),
+        patch("app.bg_server.BackgroundAgent"),
+        patch("app.bg_server.ScheduledTasks"),
+        patch("app.bg_server.MessageQueue", side_effect=make_mq),
+        patch("asyncio.gather", mock_gather),
+    ):
         await start_server()
 
     # One MQ per channel
@@ -142,12 +147,15 @@ async def test_start_server_discord_missing_token_skips_channel():
     mock_gather = AsyncMock()
     mock_config = _make_config(discord_token=None)
     mock_config.get.side_effect = lambda key: {"discord": True}.get(key)
-    mock_config.discord.get.side_effect = lambda key, default=None: None  # TOKEN missing
+    mock_config.discord.get.side_effect = lambda key, default=None: (
+        None
+    )  # TOKEN missing
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("asyncio.gather", mock_gather):
-
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("asyncio.gather", mock_gather),
+    ):
         await start_server()
 
     mock_gather.assert_not_called()
@@ -155,11 +163,14 @@ async def test_start_server_discord_missing_token_skips_channel():
 
 # --- web channel auth guard (config from env vars) ---
 
+
 def _closing_gather():
     """Mock asyncio.gather that closes the coroutines it receives (they're never run)."""
+
     async def gather(*coros, **kwargs):
         for c in coros:
             c.close()
+
     return AsyncMock(side_effect=gather)
 
 
@@ -174,6 +185,7 @@ def _web_server_patches():
 @pytest.mark.asyncio
 async def test_exposed_web_without_password_is_skipped_and_server_exits(monkeypatch):
     import app.config as config
+
     monkeypatch.setenv("WEBSOCKET_HOST", "0.0.0.0")
     config.load()
     mock_gather = _closing_gather()
@@ -192,6 +204,7 @@ async def test_exposed_web_without_password_is_skipped_and_server_exits(monkeypa
 @pytest.mark.asyncio
 async def test_exposed_web_without_password_keeps_other_channels(monkeypatch):
     import app.config as config
+
     monkeypatch.setenv("WEBSOCKET_HOST", "0.0.0.0")
     monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord-token")
     config.load()
@@ -200,9 +213,11 @@ async def test_exposed_web_without_password_keeps_other_channels(monkeypatch):
     for p in patches:
         p.start()
     try:
-        with patch("app.channels.discord.DiscordChannel"), \
-             patch("app.channels.web_channel.WebChannel.run_polling") as web_polling, \
-             patch("asyncio.gather", mock_gather):
+        with (
+            patch("app.channels.discord.DiscordChannel"),
+            patch("app.channels.web_channel.WebChannel.run_polling") as web_polling,
+            patch("asyncio.gather", mock_gather),
+        ):
             await start_server()
     finally:
         for p in patches:
@@ -215,6 +230,7 @@ async def test_exposed_web_without_password_keeps_other_channels(monkeypatch):
 async def test_exposed_web_with_password_starts(monkeypatch):
     import app.config as config
     from app.channels.web_auth import WebAuthMiddleware
+
     monkeypatch.setenv("WEBSOCKET_HOST", "0.0.0.0")
     monkeypatch.setenv("WEB_PASSWORD", "s3cret")
     config.load()
@@ -232,8 +248,10 @@ async def test_exposed_web_with_password_starts(monkeypatch):
             started.append(self)
             return fake_run_polling(self)
 
-        with patch("app.channels.web_channel.WebChannel.run_polling", record), \
-             patch("asyncio.gather", mock_gather):
+        with (
+            patch("app.channels.web_channel.WebChannel.run_polling", record),
+            patch("asyncio.gather", mock_gather),
+        ):
             await start_server()
     finally:
         for p in patches:
@@ -255,15 +273,16 @@ async def test_scheduled_tasks_gets_channels_keyed_by_delivery_channel_string():
         mq_instances.append(mq)
         return mq
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("app.channels.telegram.TelegramChannel") as MockTG, \
-         patch("app.channels.discord.DiscordChannel") as MockDC, \
-         patch("app.bg_server.BackgroundAgent"), \
-         patch("app.bg_server.ScheduledTasks") as MockTasks, \
-         patch("app.bg_server.MessageQueue", side_effect=make_mq), \
-         patch("asyncio.gather", AsyncMock()):
-
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("app.channels.telegram.TelegramChannel") as MockTG,
+        patch("app.channels.discord.DiscordChannel") as MockDC,
+        patch("app.bg_server.BackgroundAgent"),
+        patch("app.bg_server.ScheduledTasks") as MockTasks,
+        patch("app.bg_server.MessageQueue", side_effect=make_mq),
+        patch("asyncio.gather", AsyncMock()),
+    ):
         await start_server()
 
     kwargs = MockTasks.call_args.kwargs
@@ -279,6 +298,7 @@ async def test_scheduled_tasks_gets_channels_keyed_by_delivery_channel_string():
 def test_web_channel_gets_the_agents_command_registry(monkeypatch):
     import app.config as config
     from app.bg_server import web_channel_agent
+
     monkeypatch.setenv("WEBSOCKET_HOST", "127.0.0.1")
     config.load()
     with patch("app.bg_server.BackgroundAgent") as MockAgent:
@@ -288,6 +308,7 @@ def test_web_channel_gets_the_agents_command_registry(monkeypatch):
 
 
 # --- restart ---
+
 
 @pytest.mark.asyncio
 async def test_restart_request_cancels_channels_and_returns():
@@ -304,13 +325,15 @@ async def test_restart_request_cancels_channels_and_returns():
             cancelled.append(name)
 
     mock_config = _make_config(discord_token="discord-token")
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("app.channels.discord.DiscordChannel") as MockDC, \
-         patch("app.bg_server.BackgroundAgent") as MockAgent, \
-         patch("app.bg_server.ScheduledTasks") as MockTasks, \
-         patch("app.bg_server.MessageQueue") as MockMQ, \
-         patch("app.bg_server.restart.wait_until_idle", AsyncMock()) as idle:
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("app.channels.discord.DiscordChannel") as MockDC,
+        patch("app.bg_server.BackgroundAgent") as MockAgent,
+        patch("app.bg_server.ScheduledTasks") as MockTasks,
+        patch("app.bg_server.MessageQueue") as MockMQ,
+        patch("app.bg_server.restart.wait_until_idle", AsyncMock()) as idle,
+    ):
         MockDC.return_value.run_polling = lambda: forever("polling")
         MockAgent.return_value.process_incoming = lambda: forever("incoming")
         MockTasks.return_value.run = lambda: forever("tasks")
@@ -340,14 +363,16 @@ async def test_sighup_requests_restart():
 
     previous = signal.getsignal(signal.SIGHUP)
 
-    with patch("app.bg_server.config", mock_config), \
-         patch("app.bg_server.os.chdir"), \
-         patch("app.channels.discord.DiscordChannel"), \
-         patch("app.bg_server.BackgroundAgent"), \
-         patch("app.bg_server.ScheduledTasks"), \
-         patch("app.bg_server.MessageQueue"), \
-         patch("app.bg_server.restart.wait_until_idle", AsyncMock()), \
-         patch("asyncio.gather", AsyncMock(side_effect=gather)):
+    with (
+        patch("app.bg_server.config", mock_config),
+        patch("app.bg_server.os.chdir"),
+        patch("app.channels.discord.DiscordChannel"),
+        patch("app.bg_server.BackgroundAgent"),
+        patch("app.bg_server.ScheduledTasks"),
+        patch("app.bg_server.MessageQueue"),
+        patch("app.bg_server.restart.wait_until_idle", AsyncMock()),
+        patch("asyncio.gather", AsyncMock(side_effect=gather)),
+    ):
         try:
             await asyncio.wait_for(start_server(), 5)
         finally:
