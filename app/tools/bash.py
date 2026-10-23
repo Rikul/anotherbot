@@ -7,7 +7,7 @@ from ..infra.app_logging import log
 
 
 class BashTool(Tool):
-    """Run a shell command (30 s timeout); return stdout plus any stderr under ``[stderr]``."""
+    """Run a shell command (with timeout); return stdout plus any stderr under ``[stderr]``."""
 
     @staticmethod
     def spec():
@@ -23,25 +23,32 @@ class BashTool(Tool):
                         "command": {
                             "type": "string",
                             "description": "The command to execute",
-                        }
+                        },
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Timeout in seconds; default 30, min 1 max 300",
+                        },
                     },
                 },
             },
         }
 
     @staticmethod
-    def call(command: str) -> str:
+    def call(command: str, timeout: int = 30) -> str:
         """Run ``command`` in a shell; errors (including timeouts) are returned as text."""
         log.info("bash, command: %s", command)
 
         try:
+            timeout = int(timeout) or 30
+            timeout = max(1, min(timeout, 300))
+            
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=30,
+                timeout=timeout,
             )
             output = result.stdout
             if result.stderr:
