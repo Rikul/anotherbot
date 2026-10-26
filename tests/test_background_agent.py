@@ -346,7 +346,31 @@ async def test_process_incoming_sends_error_to_user_on_agent_loop_failure():
     assert not mq.outgoing.empty()
     error_msg = await mq.outgoing.get()
     assert "model not found" in error_msg.content
-    assert error_msg.metadata == {"chat_id": 99}
+    # tagged with the turn's conversation, like the turn's replies
+    assert error_msg.metadata == {
+        "chat_id": 99,
+        "conversation_id": agent.conversation_id,
+    }
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_tags_turn_metadata_with_the_conversation():
+    agent, _, mq = make_agent()
+    agent.conversation_id = 42
+    with patch.object(agent, "agent_loop", AsyncMock()) as loop:
+        await mq.incoming.put(
+            IncomingMessage(
+                content="hi", channel=ChannelType.TELEGRAM, metadata={"chat_id": 1}
+            )
+        )
+        task = asyncio.create_task(agent.process_incoming())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    loop.assert_awaited_once_with("hi", {"chat_id": 1, "conversation_id": 42})
 
 
 @pytest.mark.asyncio
