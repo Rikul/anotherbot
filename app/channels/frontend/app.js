@@ -247,7 +247,9 @@
         menu.setAttribute('role', 'menu');
         const items = [
             { label: 'Rename', action: () => startRename(conv) },
-            { label: 'Fork',   action: () => forkConv(conv.id) },
+            // Fork switches the agent to the copy, like /load.
+            { label: 'Fork',   action: () => forkConv(conv.id),
+              disabled: switchLocked() ? SWITCH_LOCKED : '' },
             { label: 'Export', action: () => exportConv(conv.id) },
             // Destructive, so it takes a second click. While the agent is
             // working on this conversation, /delete would only run after the
@@ -380,6 +382,8 @@
             appendMessage('Fork failed: disconnected (please retry).', 'system');
             return;
         }
+        // The menu may have been opened before a turn started.
+        if (switchLocked()) { appendMessage(SWITCH_LOCKED_MSG, 'system'); return; }
         closeSidebarOnNarrow();
         // The fork is an exact copy, so show the source conversation's messages.
         // Load them before sending /fork so the reply lands below them.
@@ -387,6 +391,13 @@
         await loadMessages(id);
         if (!connected()) {
             appendMessage('Fork failed: disconnected (please retry).', 'system');
+            return;
+        }
+        if (switchLocked()) {
+            // a turn started while the history loaded: show its conversation again
+            appendMessage(SWITCH_LOCKED_MSG, 'system');
+            clearMessages();
+            await loadMessages(activeConvId);
             return;
         }
         ws.send(JSON.stringify({ type: 'message', content: `/fork ${id}` }));
@@ -456,6 +467,12 @@
 
     function loadConv(id) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (switchLocked()) {
+            // Switching mid-turn would queue the /load behind the turn and show
+            // the turn's replies in the wrong conversation.
+            if (id !== activeConvId) appendMessage(SWITCH_LOCKED_MSG, 'system');
+            return;
+        }
         ws.send(JSON.stringify({ type: 'message', content: `/load ${id}` }));
         activeConvId = id;
         convListEl.querySelectorAll('.conv-item').forEach(el => {
@@ -467,7 +484,7 @@
     }
 
     newConvBtn.addEventListener('click', () => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN || switchLocked()) return;
         ws.send(JSON.stringify({ type: 'message', content: '/new' }));
         clearMessages();
         closeSidebarOnNarrow();
@@ -508,8 +525,13 @@
             refreshSendState();
             loadStatus();
             if (!commands.length) loadCommands();
-            clearMessages();       // always reset DOM before reloading — prevents duplicates on reconnect
-            loadConversations(true);
+            // The server first replays the agent's state (and a running turn's
+            // progress); hold those frames until the history is on screen so
+            // they land below it.
+            holdFrames(async () => {
+                clearMessages();   // always reset DOM before reloading — prevents duplicates on reconnect
+                await loadConversations(true);
+            });
         };
 
         ws.onclose = () => {
@@ -527,34 +549,91 @@
         ws.onerror = () => setStatus('');
 
         ws.onmessage = (evt) => {
-            try {
-                const data = JSON.parse(evt.data);
-                if (data.type === 'busy') {
-                    onBusy(data);
-                } else if (data.type === 'trajectory') {
-                    // follows the turn's reply once its trajectory is stored; a turn
-                    // with no reply (stopped, or empty) gets no button anywhere
-                    if (turnReplyRow) addTrajectoryButton(turnReplyRow, data.message_id);
-                    turnReplyRow = null;
-                } else if (data.type === 'message') {
-                    const row = appendMessage(data.content, 'ai');
-                    // only the turn's reply, not status lines ("> tool [...]") or thinking text
-                    if (data.final) turnReplyRow = row;
-                    // agent_loop() calls _store.touch() after every response, so the
-                    // sidebar's updated_at and message count change — refresh it
-                    setTimeout(() => loadConversations(false), 300);
-                } else if (data.type === 'system') {
-                    if (!handleDeleteReply(data.content)) appendMessage(data.content, 'system');
-                    // always refresh after any system message; conversation-mutating
-                    // commands (new, load, fork, rename) change the sidebar list too,
-                    // and /model changes the model shown in the header
-                    setTimeout(() => { loadConversations(false); loadStatus(); }, 150);
-                }
-            } catch (e) {
-                appendMessage(evt.data, 'ai');
-                setTimeout(() => loadConversations(false), 300);
-            }
+            let data;
+            try { data = JSON.parse(evt.data); } catch (e) { data = { type: 'message', content: evt.data }; }
+            if (heldFrames) heldFrames.push(data);
+            else handleFrame(data);
         };
+    }
+
+    // While the chat is being (re)loaded from the server, incoming frames wait
+    // here, then are handled in order on top of the loaded history.
+    let heldFrames = null;
+    async function holdFrames(load) {
+        const outer = heldFrames === null;
+        if (outer) heldFrames = [];
+        try { await load(); }
+        finally {
+            if (outer) {
+                const frames = markReplyInHistory(heldFrames);
+                heldFrames = null;
+                for (let i = 0; i < frames.length; i++) {
+                    // a frame started another reload: the rest wait for that one
+                    if (heldFrames) { heldFrames.push(...frames.slice(i)); break; }
+                    handleFrame(frames[i]);
+                }
+            }
+        }
+    }
+
+    // A turn's reply is stored as it is sent, so the loaded history can already
+    // end with the reply of a turn whose frames were held. Then that turn's
+    // held lines are left out (they'd land below its reply) and its reply
+    // frame only points at the history row, for the trajectory button.
+    function markReplyInHistory(frames) {
+        const last = lastAiRow();
+        const raw = last && last.querySelector('.bubble').dataset.raw;
+        const end = frames.findIndex(f => f.type === 'message' && f.final && f.content === raw);
+        if (end < 0) return frames;
+        return frames.flatMap((f, i) => {
+            if (i === end) return [{ type: 'reply-in-history', row: last }];
+            const turnLine = f.type === 'message' && f.conversation_id != null;
+            return i < end && turnLine ? [] : [f];
+        });
+    }
+
+    // A turn frame for a conversation this tab isn't showing (e.g. a stale
+    // tab) is left out; the conversation's history has its reply.
+    const otherConv = data => data.conversation_id != null && activeConvId != null &&
+                              data.conversation_id !== activeConvId;
+
+    function handleFrame(data) {
+        if (data.type === 'busy') {
+            onBusy(data);
+        } else if (data.type === 'trajectory') {
+            if (otherConv(data)) return;
+            // follows the turn's reply once its trajectory is stored; a turn
+            // with no reply (stopped, or empty) gets no button anywhere
+            if (turnReplyRow) addTrajectoryButton(turnReplyRow, data.message_id);
+            turnReplyRow = null;
+        } else if (data.type === 'reply-in-history') {
+            turnReplyRow = data.row;
+        } else if (data.type === 'message') {
+            if (data.not_started && !agentBusy && pendingTurn) {
+                // e.g. "Restarting, please send that again": the turn never started
+                pendingTurn = false;
+                renderBusy();
+            }
+            if (otherConv(data)) return;
+            const row = appendMessage(data.content, 'ai');
+            // only the turn's reply, not status lines ("> tool [...]") or thinking text
+            if (data.final) turnReplyRow = row;
+            // agent_loop() calls _store.touch() after every response, so the
+            // sidebar's updated_at and message count change — refresh it
+            setTimeout(() => loadConversations(false), 300);
+        } else if (data.type === 'system') {
+            if (!handleDeleteReply(data.content)) appendMessage(data.content, 'system');
+            // always refresh after any system message; conversation-mutating
+            // commands (new, load, fork, rename) change the sidebar list too,
+            // and /model changes the model shown in the header
+            setTimeout(() => { loadConversations(false); loadStatus(); }, 150);
+        }
+    }
+
+    function lastAiRow() {
+        const rows = messagesEl.querySelectorAll('.msg-row');
+        const last = rows[rows.length - 1];
+        return last && last.classList.contains('ai') ? last : null;
     }
 
     // ---- agent busy state + stop ----
@@ -567,12 +646,34 @@
     // The running turn's reply row (a "final" message): gets the trajectory download.
     let turnReplyRow = null;
 
-    function onBusy({ busy, stopped }) {
+    // All tabs share one agent, and a /load, /new or /fork sent mid-turn
+    // would only run after the turn (whose replies would then land in the
+    // wrong conversation), so switching waits for the turn to end.
+    const switchLocked = () => agentBusy || pendingTurn;
+    const SWITCH_LOCKED = 'Wait for the agent to finish (or stop it) first';
+    const SWITCH_LOCKED_MSG = 'The agent is still working. Wait for it to finish, or stop it, before switching conversations.';
+
+    function onBusy({ busy, stopped, replay, conversation_id: convId }) {
         agentBusy = busy;
         if (busy) {
+            const mine = pendingTurn;
             pendingTurn = false;
             turnReplyRow = null;
             loadStatus();   // the model is shared: another channel may have changed it
+            // A turn this tab didn't start (another tab, or a message sent
+            // before a reload) or one in another conversation: show that
+            // conversation from the history, which already has its message.
+            // Only the state replayed on connect is already in the history the
+            // tab loaded then; a turn that started while it loaded is not.
+            const elsewhere = convId != null && convId !== activeConvId;
+            if (convId != null && (elsewhere || (!mine && !replay))) {
+                activeConvId = convId;
+                holdFrames(async () => {
+                    clearMessages();
+                    await loadMessages(convId);
+                });
+                loadConversations(false);
+            }
         }
         else stopping = false;
         renderBusy();
@@ -587,6 +688,11 @@
         if (ws && ws.readyState === WebSocket.OPEN) setStatus(working ? 'thinking' : 'connected');
         stopBtn.hidden = !agentBusy;
         stopBtn.disabled = stopping;
+        const locked = switchLocked();
+        newConvBtn.disabled = locked;
+        newConvBtn.title = locked ? SWITCH_LOCKED : 'New conversation';
+        convListEl.classList.toggle('locked', locked);
+        convListEl.title = locked ? SWITCH_LOCKED : '';
         const label = stopping ? 'Stopping after the current step…' : 'Stop';
         stopBtn.title = label;
         stopBtn.setAttribute('aria-label', label);
@@ -935,6 +1041,10 @@
         const text = inputEl.value.trim();
         const files = selectedFiles.slice();
         if (sendBtn.disabled) return;
+        if (switchLocked() && /^\/(new|load|fork)\b/i.test(text)) {
+            appendMessage(SWITCH_LOCKED_MSG, 'system');
+            return;
+        }
 
         let uploaded = [];
         if (files.length) {

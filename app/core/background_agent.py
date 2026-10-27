@@ -159,6 +159,7 @@ class BackgroundAgent(Agent):
         init_task_todos()  # per-channel todo list (this coroutine runs as its own task)
         while True:
             msg = await self.mq.incoming.get()
+            reply_metadata = msg.metadata
             try:
                 if msg.content.startswith("/"):
                     parts = msg.content[1:].split(maxsplit=1)
@@ -181,23 +182,30 @@ class BackgroundAgent(Agent):
                         OutgoingMessage(
                             content="Restarting, please send that again in a few seconds.",
                             channel=self.channel,
-                            metadata=msg.metadata,
+                            # tells the web UI this message's turn never started
+                            metadata={**(msg.metadata or {}), "not_started": True},
                         )
                     )
                 else:
+                    # Tag the turn's replies (and an error) with its conversation,
+                    # so the web UI can tell which conversation they belong to.
+                    reply_metadata = {
+                        **(msg.metadata or {}),
+                        "conversation_id": self.conversation_id,
+                    }
                     # A /stop that arrived while idle must not cut this turn short.
                     self.channel.clear_stopped()
                     await self.channel.on_agent_turn(True)
                     try:
                         with restart.turn():  # a restart waits for this turn
-                            await self.agent_loop(msg.content, msg.metadata)
+                            await self.agent_loop(msg.content, reply_metadata)
                     finally:
                         await self.channel.on_agent_turn(False)
             except Exception as e:  # pylint: disable=broad-exception-caught  # report it, keep serving
                 log.error("Agent loop error: %s", e)
                 await self.mq.outgoing_msg(
                     OutgoingMessage(
-                        content=str(e), channel=self.channel, metadata=msg.metadata
+                        content=str(e), channel=self.channel, metadata=reply_metadata
                     )
                 )
 

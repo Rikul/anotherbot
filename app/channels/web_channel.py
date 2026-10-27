@@ -21,15 +21,23 @@ With ``WEB_PASSWORD`` set, ``WebAuthMiddleware`` adds ``POST /api/login`` and
 WebSocket message framing::
 
     → {"type": "message", "content": "...", "files": ["<stored name>", ...]}
-    ← {"type": "message" | "system", "content": "...", "final": true?}
-    ← {"type": "busy", "busy": bool, "stopped": bool}
+    ← {"type": "message", "content": "...", "conversation_id": int?, "final": true?}
+    ← {"type": "system", "content": "..."}
+    ← {"type": "busy", "busy": bool, "stopped": bool, "conversation_id": int?}
     ← {"type": "trajectory", "message_id": int, "conversation_id": int}
 
 Plain text is also accepted as a convenience. ``busy`` frames go to every tab
-when an agent turn starts/ends (and once on connect); ``stopped`` is true when
-a ``/stop`` cut the turn short. A ``trajectory`` frame follows a turn's last
-reply (to the tab that sent the message) once its trajectory is stored;
-``final`` marks that reply (status lines and thinking text don't have it).
+when an agent turn starts/ends; ``stopped`` is true when a ``/stop`` cut the
+turn short. Everything an agent turn sends (thinking text, tool status lines,
+the reply, an error, the ``trajectory`` frame) carries the turn's
+``conversation_id`` and also goes to every tab, since they all share one
+agent; ``final`` marks the turn's reply. Command replies (``system``) go only
+to the tab that sent the command, and messages with no tab (scheduled tasks)
+to every tab.
+
+On connect a tab gets the last ``busy`` frame delivered and, if a turn is
+running, the turn frames delivered since it started, so a reopened browser
+sees the turn's progress so far and its remaining replies.
 """
 
 from __future__ import annotations
@@ -120,6 +128,12 @@ class WebChannel(Channel):
         # Whether an agent turn is running, and whether /stop was sent during it.
         self._turn_running = False
         self._stop_requested = False
+        self._turn_conv_id: int | None = None
+        # What the browsers have been sent (frames are delivered after the
+        # agent queues them): the last busy frame and, while that says busy,
+        # the turn's frames since. Replayed to a tab when it connects.
+        self._shown_busy: dict = self._busy_frame(False)
+        self._turn_frames: list[dict] = []
         self._connections: dict[str, WebSocket] = {}
         self._send_locks: dict[str, asyncio.Lock] = {}
         self._conn_lock = asyncio.Lock()
@@ -135,6 +149,9 @@ class WebChannel(Channel):
     # Cap on a single multipart upload request (combined across files). The
     # agent enforces its own per-message limit when building the LLM payload.
     _MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5 MB
+
+    # Turn frames kept for replay on connect (the oldest are dropped first).
+    _MAX_TURN_FRAMES = 500
 
     # -- Channel ABC --------------------------------------------------------
 
@@ -403,9 +420,28 @@ class WebChannel(Channel):
         client_id = str(uuid.uuid4())
         log.info("WebSocket client connected: %s", client_id)
 
-        async with self._conn_lock:
-            self._connections[client_id] = ws
-        await self._safe_send_json(client_id, self._busy_frame(self._turn_running))
+        # Hold this tab's send lock while catching it up, so frames delivered
+        # meanwhile queue behind the replay. Registering the connection and
+        # copying the replay under _conn_lock (send_message records frames
+        # under it too) means each frame is either replayed or sent live,
+        # never both or neither.
+        lock = asyncio.Lock()
+        async with lock:
+            async with self._conn_lock:
+                self._connections[client_id] = ws
+                self._send_locks[client_id] = lock
+                # "stopped" was news for the tabs open when the turn ended;
+                # "replay" tells the tab this turn began before it connected
+                # (so its history, loaded after this, has the user message)
+                replay = [
+                    {**self._shown_busy, "stopped": False, "replay": True},
+                    *self._turn_frames,
+                ]
+            try:
+                for frame in replay:
+                    await ws.send_json(frame)
+            except Exception:  # pylint: disable=broad-exception-caught  # the receive loop below sees the disconnect
+                log.info("WebSocket client %s left during catch-up", client_id)
 
         try:
             while True:
@@ -496,30 +532,41 @@ class WebChannel(Channel):
         return "Stopping after the current step…"
 
     @staticmethod
-    def _busy_frame(busy: bool, stopped: bool = False) -> dict:
-        return {"type": "busy", "busy": busy, "stopped": stopped}
+    def _busy_frame(
+        busy: bool, stopped: bool = False, conversation_id: int | None = None
+    ) -> dict:
+        frame = {"type": "busy", "busy": busy, "stopped": stopped}
+        if conversation_id is not None:
+            frame["conversation_id"] = conversation_id
+        return frame
 
     async def on_agent_turn(self, running: bool) -> None:
         """Track the running turn and tell every tab (they share one agent).
 
         The frame goes through the outgoing queue, so it reaches the browser
-        after the turn's replies rather than overtaking them.
+        after the turn's replies rather than overtaking them. It names the
+        turn's conversation: the agent's active one, which can't change
+        until the turn ends (commands queue behind it).
         """
         stopped = not running and self._stop_requested
+        if running:
+            self._turn_conv_id = runtime.get(f"conversation_id:{ChannelType.WEB.value}")
         self._turn_running = running
         self._stop_requested = False
         await self.mq.outgoing_msg(
             OutgoingMessage(
                 content="",
                 channel=self,  # the queue routes by the registered channel object
-                metadata={"busy_frame": self._busy_frame(running, stopped)},
+                metadata={
+                    "busy_frame": self._busy_frame(running, stopped, self._turn_conv_id)
+                },
             )
         )
 
     async def on_trajectory_saved(
         self, message_id: int, conversation_id: int, metadata: dict
     ) -> None:
-        """Tell the tab that sent the message its reply can now be downloaded.
+        """Tell the tabs the turn's reply can now be downloaded.
 
         Sent through the outgoing queue so it arrives after the reply itself.
         """
@@ -539,24 +586,46 @@ class WebChannel(Channel):
         )
 
     async def send_message(self, message: OutgoingMessage) -> None:
-        client_id = message.metadata.get("websocket_id")
-        is_command = message.metadata.get("is_command", False)
-        msg_type = "system" if is_command else "message"
-        payload = {"type": msg_type, "content": message.content}
-        if message.metadata.get("final") and not is_command:
-            payload["final"] = True
-        if "busy_frame" in message.metadata:
-            client_id, payload = None, message.metadata["busy_frame"]
-        elif "trajectory_frame" in message.metadata:
-            payload = message.metadata["trajectory_frame"]
-        if client_id:
-            await self._safe_send_json(client_id, payload)
+        meta = message.metadata or {}
+        client_id = meta.get("websocket_id")
+        is_command = meta.get("is_command", False)
+        # Part of an agent turn: BackgroundAgent tags those with the conversation.
+        in_turn = meta.get("conversation_id") is not None and not is_command
+        if "busy_frame" in meta:
+            payload = meta["busy_frame"]
+        elif "trajectory_frame" in meta:
+            payload = meta["trajectory_frame"]
         else:
-            # No specific client (e.g. scheduled task delivery) — broadcast to all connected clients
-            async with self._conn_lock:
-                targets = list(self._connections.keys())
-            for cid in targets:
-                await self._safe_send_json(cid, payload)
+            payload = {
+                "type": "system" if is_command else "message",
+                "content": message.content,
+            }
+            if in_turn:
+                payload["conversation_id"] = meta["conversation_id"]
+            if meta.get("final") and not is_command:
+                payload["final"] = True
+            if meta.get("not_started"):
+                payload["not_started"] = True
+
+        if client_id and not in_turn and "busy_frame" not in meta:
+            await self._safe_send_json(client_id, payload)
+            return
+        # Busy and turn frames go to every tab (they share one agent), and so
+        # does anything without a tab (e.g. a scheduled task's output).
+        async with self._conn_lock:
+            self._record(payload, in_turn)
+            targets = list(self._connections.keys())
+        for cid in targets:
+            await self._safe_send_json(cid, payload)
+
+    def _record(self, payload: dict, in_turn: bool) -> None:
+        """Remember what a tab connecting now needs to catch up on."""
+        if payload.get("type") == "busy":
+            self._shown_busy = payload
+            self._turn_frames = []
+        elif in_turn and self._shown_busy.get("busy"):
+            self._turn_frames.append(payload)
+            del self._turn_frames[: -self._MAX_TURN_FRAMES]
 
     # -- Helpers ------------------------------------------------------------
 

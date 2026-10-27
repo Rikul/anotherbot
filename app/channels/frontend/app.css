@@ -110,6 +110,11 @@ body {
     transition: background .15s;
 }
 #new-conv-btn:hover { background: var(--accent-h); }
+#new-conv-btn:disabled { opacity: .5; cursor: not-allowed; background: var(--accent); }
+
+/* While the agent works, other conversations can't be opened (app.js) */
+#conv-list.locked .conv-item:not(.active) .conv-text { opacity: .55; }
+#conv-list.locked .conv-item:not(.active) { cursor: not-allowed; }
 
 #conv-list {
     flex: 1;

@@ -485,7 +485,12 @@ async def test_websocket_message_is_enqueued_for_agent():
     ch, mq = make_web_channel()
     ch.start()
     with TestClient(ch._asgi_app).websocket_connect("/ws") as ws:
-        assert ws.receive_json() == {"type": "busy", "busy": False, "stopped": False}
+        assert ws.receive_json() == {
+            "type": "busy",
+            "busy": False,
+            "stopped": False,
+            "replay": True,
+        }
         ws.send_text(json.dumps({"type": "message", "content": "hello"}))
         ws.send_text(json.dumps({"type": "message", "content": "/help"}))
         ws.send_text(json.dumps({"type": "message", "content": "/whoami"}))
@@ -717,6 +722,9 @@ async def test_stop_during_turn_sets_flag_immediately_and_is_not_queued():
 
 @pytest.mark.asyncio
 async def test_busy_frames_are_queued_in_order_and_broadcast_with_stopped_flag():
+    from app.core import runtime
+
+    runtime.set("conversation_id:web", 5)
     ch, mq = make_web_channel()
     ws1, ws2 = AsyncMock(), AsyncMock()
     ch._connections.update({"a": ws1, "b": ws2})
@@ -735,7 +743,12 @@ async def test_busy_frames_are_queued_in_order_and_broadcast_with_stopped_flag()
     while not mq.outgoing.empty():
         await ch.send_message(mq.outgoing.get_nowait())
 
-    busy = lambda b, s: {"type": "busy", "busy": b, "stopped": s}  # noqa: E731
+    busy = lambda b, s: {  # noqa: E731
+        "type": "busy",
+        "busy": b,
+        "stopped": s,
+        "conversation_id": 5,
+    }
     assert [c.args[0] for c in ws2.send_json.call_args_list] == [
         busy(True, False),
         busy(False, True),
@@ -749,14 +762,176 @@ async def test_busy_frames_are_queued_in_order_and_broadcast_with_stopped_flag()
     )
 
 
-def test_websocket_gets_current_busy_state_on_connect():
+def _turn_msg(content, conv_id=7, **meta):
+    return OutgoingMessage(
+        content=content,
+        channel=ChannelType.WEB,
+        metadata={"websocket_id": "old-tab", "conversation_id": conv_id, **meta},
+    )
+
+
+def _busy_msg(busy, stopped=False, conv_id=7):
+    return OutgoingMessage(
+        content="",
+        channel=ChannelType.WEB,
+        metadata={"busy_frame": WebChannel._busy_frame(busy, stopped, conv_id)},
+    )
+
+
+def test_websocket_gets_idle_state_on_connect():
     from starlette.testclient import TestClient
 
     ch, _ = make_web_channel()
     ch.start()
-    ch._turn_running = True
     with TestClient(ch._asgi_app).websocket_connect("/ws") as ws:
-        assert ws.receive_json() == {"type": "busy", "busy": True, "stopped": False}
+        assert ws.receive_json() == {
+            "type": "busy",
+            "busy": False,
+            "stopped": False,
+            "replay": True,
+        }
+
+
+@pytest.mark.asyncio
+async def test_turn_frames_go_to_every_tab_with_the_conversation_id():
+    """All tabs share one agent: a tab opened mid-turn must see its replies,
+    even though the turn was started from another (maybe closed) tab."""
+    ch, _ = make_web_channel()
+    a, b = AsyncMock(), AsyncMock()
+    ch._connections.update({"old-tab": a, "new-tab": b})
+    await ch.send_message(_turn_msg("> bash [ls]..."))
+    await ch.send_message(_turn_msg("done", final=True))
+    expected = [
+        {"type": "message", "content": "> bash [ls]...", "conversation_id": 7},
+        {"type": "message", "content": "done", "conversation_id": 7, "final": True},
+    ]
+    assert [c.args[0] for c in a.send_json.await_args_list] == expected
+    assert [c.args[0] for c in b.send_json.await_args_list] == expected
+
+
+@pytest.mark.asyncio
+async def test_refused_message_is_marked_not_started_for_its_tab_only():
+    ch, _ = make_web_channel()
+    a, b = AsyncMock(), AsyncMock()
+    ch._connections.update({"a": a, "b": b})
+    await ch.send_message(
+        OutgoingMessage(
+            content="Restarting, please send that again in a few seconds.",
+            channel=ChannelType.WEB,
+            metadata={"websocket_id": "a", "not_started": True},
+        )
+    )
+    a.send_json.assert_awaited_once_with(
+        {
+            "type": "message",
+            "content": "Restarting, please send that again in a few seconds.",
+            "not_started": True,
+        }
+    )
+    b.send_json.assert_not_awaited()
+
+
+def test_frontend_clears_pending_turn_only_for_refused_messages():
+    js = (FRONTEND_DIR / "app.js").read_text()
+    assert "if (data.not_started && !agentBusy && pendingTurn)" in js
+    assert "data.conversation_id == null && !agentBusy" not in js
+
+
+@pytest.mark.asyncio
+async def test_command_replies_still_go_only_to_the_requesting_tab():
+    ch, _ = make_web_channel()
+    a, b = AsyncMock(), AsyncMock()
+    ch._connections.update({"a": a, "b": b})
+    await ch.send_message(
+        OutgoingMessage(
+            content="Loaded",
+            channel=ChannelType.WEB,
+            metadata={"websocket_id": "a", "is_command": True, "conversation_id": 7},
+        )
+    )
+    a.send_json.assert_awaited_once_with({"type": "system", "content": "Loaded"})
+    b.send_json.assert_not_awaited()
+
+
+def test_tab_opened_mid_turn_gets_busy_state_and_the_turn_so_far():
+    import asyncio
+
+    from starlette.testclient import TestClient
+
+    ch, _ = make_web_channel()
+    ch.start()
+
+    async def deliver(*msgs):
+        for m in msgs:
+            await ch.send_message(m)
+
+    asyncio.run(deliver(_busy_msg(True), _turn_msg("thinking..."), _turn_msg("> bash")))
+    client = TestClient(ch._asgi_app)
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json() == {
+            "type": "busy",
+            "busy": True,
+            "stopped": False,
+            "conversation_id": 7,
+            "replay": True,
+        }
+        assert ws.receive_json()["content"] == "thinking..."
+        assert ws.receive_json()["content"] == "> bash"
+
+    # once the turn has ended its frames are in the history, not replayed;
+    # and "stopped" was news only for the tabs open at the time
+    asyncio.run(deliver(_turn_msg("done", final=True), _busy_msg(False, stopped=True)))
+    assert ch._turn_frames == []
+    with client.websocket_connect("/ws") as ws:
+        assert ws.receive_json() == {
+            "type": "busy",
+            "busy": False,
+            "stopped": False,
+            "conversation_id": 7,
+            "replay": True,
+        }
+    # live busy frames aren't marked: a turn that starts while a tab loads
+    # its history makes the tab reload it (to show the new user message)
+    assert "replay" not in ch._shown_busy
+
+
+def test_frontend_reloads_history_for_turns_that_start_while_loading():
+    js = (FRONTEND_DIR / "app.js").read_text()
+    assert "(elsewhere || (!mine && !replay))" in js
+
+
+@pytest.mark.asyncio
+async def test_turn_replay_is_capped():
+    ch, _ = make_web_channel()
+    ch._MAX_TURN_FRAMES = 3
+    await ch.send_message(_busy_msg(True))
+    for i in range(5):
+        await ch.send_message(_turn_msg(f"line {i}"))
+    assert [f["content"] for f in ch._turn_frames] == ["line 2", "line 3", "line 4"]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_task_output_is_not_replayed_as_part_of_the_turn():
+    ch, _ = make_web_channel()
+    await ch.send_message(_busy_msg(True))
+    await ch.send_message(
+        OutgoingMessage(content="task output", channel=ChannelType.WEB, metadata={})
+    )
+    assert ch._turn_frames == []
+
+
+def test_frontend_locks_conversation_switching_during_a_turn():
+    js = (FRONTEND_DIR / "app.js").read_text()
+    for needle in (
+        "const switchLocked = () => agentBusy || pendingTurn;",
+        "if (switchLocked()) {",  # sidebar click
+        "|| switchLocked()) return;",  # + New
+        "/^\\/(new|load|fork)\\b/i",  # typed commands
+        "disabled: switchLocked() ? SWITCH_LOCKED : ''",  # Fork menu item
+        "holdFrames(",  # replayed frames wait for the history
+        "data.conversation_id !== activeConvId",
+    ):
+        assert needle in js, needle
 
 
 def test_index_has_hidden_stop_button():
