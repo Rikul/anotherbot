@@ -838,6 +838,51 @@ def test_frontend_clears_pending_turn_only_for_refused_messages():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["/load 3", "/new", "/fork 3", "/LOAD 3"])
+async def test_switch_commands_are_refused_while_a_turn_runs(command):
+    ch, mq = make_web_channel()
+    ws = AsyncMock()
+    ch._connections["c1"] = ws
+    await ch.on_agent_turn(True)
+    mq.outgoing.get_nowait()  # the busy frame
+    await ch._handle_ws_text("c1", command)
+    assert mq.incoming.empty()  # never reaches the agent
+    ws.send_json.assert_awaited_once_with(
+        {
+            "type": "system",
+            "content": WebChannel._SWITCH_REFUSED,
+            "switch_refused": True,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_switch_commands_are_refused_behind_a_queued_message():
+    ch, mq = make_web_channel()
+    ch._connections["c1"] = AsyncMock()
+    await ch._handle_ws_text("c1", "do something long")
+    await ch._handle_ws_text("c1", "/load 3")
+    assert mq.incoming.qsize() == 1  # only the message
+
+
+@pytest.mark.asyncio
+async def test_switch_commands_and_others_pass_when_idle():
+    ch, mq = make_web_channel()
+    ch._connections["c1"] = AsyncMock()
+    await ch.on_agent_turn(True)
+    await ch._handle_ws_text("c1", "/help")  # not a switch: queued as usual
+    await ch.on_agent_turn(False)
+    mq.incoming.get_nowait()
+    await ch._handle_ws_text("c1", "/load 3")
+    assert mq.incoming.get_nowait().content == "/load 3"
+
+
+def test_frontend_restores_the_view_when_a_switch_is_refused():
+    js = (FRONTEND_DIR / "app.js").read_text()
+    assert "data.type === 'system' && data.switch_refused" in js
+
+
+@pytest.mark.asyncio
 async def test_command_replies_still_go_only_to_the_requesting_tab():
     ch, _ = make_web_channel()
     a, b = AsyncMock(), AsyncMock()

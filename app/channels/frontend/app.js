@@ -621,6 +621,14 @@
             // agent_loop() calls _store.touch() after every response, so the
             // sidebar's updated_at and message count change — refresh it
             setTimeout(() => loadConversations(false), 300);
+        } else if (data.type === 'system' && data.switch_refused) {
+            // The server refused a /load, /new or /fork (a turn had just
+            // started): show the agent's conversation again, then the notice.
+            holdFrames(async () => {
+                clearMessages();
+                await loadConversations(true);
+                appendMessage(data.content, 'system');
+            });
         } else if (data.type === 'system') {
             if (!handleDeleteReply(data.content)) appendMessage(data.content, 'system');
             // always refresh after any system message; conversation-mutating

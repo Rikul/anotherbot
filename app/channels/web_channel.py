@@ -486,6 +486,19 @@ class WebChannel(Channel):
                     client_id, {"type": "system", "content": self._request_stop()}
                 )
                 return
+            if cmd and cmd[0].lower() in self._SWITCH_COMMANDS and self._agent_busy():
+                # It would run only after the turn and switch the shared agent
+                # away from it. The UI blocks these too, but its busy state can
+                # lag (another tab may have just started a turn).
+                await self._safe_send_json(
+                    client_id,
+                    {
+                        "type": "system",
+                        "content": self._SWITCH_REFUSED,
+                        "switch_refused": True,
+                    },
+                )
+                return
 
         metadata = {"websocket_id": client_id, "is_command": is_command}
         if files:
@@ -518,6 +531,17 @@ class WebChannel(Channel):
             raise
 
     # -- Message delivery ---------------------------------------------------
+
+    # Commands that switch the agent's conversation; refused during a turn.
+    _SWITCH_COMMANDS = frozenset({"new", "load", "fork"})
+    _SWITCH_REFUSED = (
+        "The agent is still working. Wait for it to finish, or stop it, "
+        "before switching conversations."
+    )
+
+    def _agent_busy(self) -> bool:
+        """A turn is running, or something is queued ahead (maybe a message)."""
+        return self._turn_running or not self.mq.incoming.empty()
 
     def _request_stop(self) -> str:
         """Ask the running turn to stop; returns the reply for the requester.
