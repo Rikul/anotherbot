@@ -382,6 +382,8 @@
             appendMessage('Fork failed: disconnected (please retry).', 'system');
             return;
         }
+        // The menu may have been opened before a turn started.
+        if (switchLocked()) { appendMessage(SWITCH_LOCKED_MSG, 'system'); return; }
         closeSidebarOnNarrow();
         // The fork is an exact copy, so show the source conversation's messages.
         // Load them before sending /fork so the reply lands below them.
@@ -389,6 +391,13 @@
         await loadMessages(id);
         if (!connected()) {
             appendMessage('Fork failed: disconnected (please retry).', 'system');
+            return;
+        }
+        if (switchLocked()) {
+            // a turn started while the history loaded: show its conversation again
+            appendMessage(SWITCH_LOCKED_MSG, 'system');
+            clearMessages();
+            await loadMessages(activeConvId);
             return;
         }
         ws.send(JSON.stringify({ type: 'message', content: `/fork ${id}` }));
@@ -556,11 +565,31 @@
         try { await load(); }
         finally {
             if (outer) {
-                const frames = heldFrames;
+                const frames = markReplyInHistory(heldFrames);
                 heldFrames = null;
-                frames.forEach(f => handleFrame(f, true));
+                for (let i = 0; i < frames.length; i++) {
+                    // a frame started another reload: the rest wait for that one
+                    if (heldFrames) { heldFrames.push(...frames.slice(i)); break; }
+                    handleFrame(frames[i], true);
+                }
             }
         }
+    }
+
+    // A turn's reply is stored as it is sent, so the loaded history can already
+    // end with the reply of a turn whose frames were held. Then that turn's
+    // held lines are left out (they'd land below its reply) and its reply
+    // frame only points at the history row, for the trajectory button.
+    function markReplyInHistory(frames) {
+        const last = lastAiRow();
+        const raw = last && last.querySelector('.bubble').dataset.raw;
+        const end = frames.findIndex(f => f.type === 'message' && f.final && f.content === raw);
+        if (end < 0) return frames;
+        return frames.flatMap((f, i) => {
+            if (i === end) return [{ type: 'reply-in-history', row: last }];
+            const turnLine = f.type === 'message' && f.conversation_id != null;
+            return i < end && turnLine ? [] : [f];
+        });
     }
 
     // A turn frame for a conversation this tab isn't showing (e.g. a stale
@@ -579,17 +608,16 @@
             // with no reply (stopped, or empty) gets no button anywhere
             if (turnReplyRow) addTrajectoryButton(turnReplyRow, data.message_id);
             turnReplyRow = null;
+        } else if (data.type === 'reply-in-history') {
+            turnReplyRow = data.row;
         } else if (data.type === 'message') {
-            if (data.conversation_id == null && !agentBusy && pendingTurn) {
+            if (data.not_started && !agentBusy && pendingTurn) {
                 // e.g. "Restarting, please send that again": the turn never started
                 pendingTurn = false;
                 renderBusy();
             }
             if (otherConv(data)) return;
-            // The reply may be in the history already (it is stored as it is sent).
-            const last = caughtUp && data.final ? lastAiRow() : null;
-            const row = last && last.querySelector('.bubble').dataset.raw === data.content
-                ? last : appendMessage(data.content, 'ai');
+            const row = appendMessage(data.content, 'ai');
             // only the turn's reply, not status lines ("> tool [...]") or thinking text
             if (data.final) turnReplyRow = row;
             // agent_loop() calls _store.touch() after every response, so the

@@ -599,6 +599,8 @@ class WebChannel(Channel):
                 payload["conversation_id"] = meta["conversation_id"]
             if meta.get("final") and not is_command:
                 payload["final"] = True
+            if meta.get("not_started"):
+                payload["not_started"] = True
 
         if client_id and not in_turn and "busy_frame" not in meta:
             await self._safe_send_json(client_id, payload)

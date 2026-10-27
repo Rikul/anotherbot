@@ -578,6 +578,7 @@ async def test_no_new_turns_while_restart_is_pending():
     loop.assert_not_awaited()
     reply = mq.outgoing.get_nowait()
     assert "Restarting" in reply.content
+    assert reply.metadata["not_started"] is True  # the web UI clears its pending dots
 
 
 # --- trajectories ---

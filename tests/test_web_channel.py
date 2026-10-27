@@ -800,6 +800,34 @@ async def test_turn_frames_go_to_every_tab_with_the_conversation_id():
 
 
 @pytest.mark.asyncio
+async def test_refused_message_is_marked_not_started_for_its_tab_only():
+    ch, _ = make_web_channel()
+    a, b = AsyncMock(), AsyncMock()
+    ch._connections.update({"a": a, "b": b})
+    await ch.send_message(
+        OutgoingMessage(
+            content="Restarting, please send that again in a few seconds.",
+            channel=ChannelType.WEB,
+            metadata={"websocket_id": "a", "not_started": True},
+        )
+    )
+    a.send_json.assert_awaited_once_with(
+        {
+            "type": "message",
+            "content": "Restarting, please send that again in a few seconds.",
+            "not_started": True,
+        }
+    )
+    b.send_json.assert_not_awaited()
+
+
+def test_frontend_clears_pending_turn_only_for_refused_messages():
+    js = (FRONTEND_DIR / "app.js").read_text()
+    assert "if (data.not_started && !agentBusy && pendingTurn)" in js
+    assert "data.conversation_id == null && !agentBusy" not in js
+
+
+@pytest.mark.asyncio
 async def test_command_replies_still_go_only_to_the_requesting_tab():
     ch, _ = make_web_channel()
     a, b = AsyncMock(), AsyncMock()

@@ -182,7 +182,8 @@ class BackgroundAgent(Agent):
                         OutgoingMessage(
                             content="Restarting, please send that again in a few seconds.",
                             channel=self.channel,
-                            metadata=msg.metadata,
+                            # tells the web UI this message's turn never started
+                            metadata={**(msg.metadata or {}), "not_started": True},
                         )
                     )
                 else:
