@@ -485,7 +485,12 @@ async def test_websocket_message_is_enqueued_for_agent():
     ch, mq = make_web_channel()
     ch.start()
     with TestClient(ch._asgi_app).websocket_connect("/ws") as ws:
-        assert ws.receive_json() == {"type": "busy", "busy": False, "stopped": False}
+        assert ws.receive_json() == {
+            "type": "busy",
+            "busy": False,
+            "stopped": False,
+            "replay": True,
+        }
         ws.send_text(json.dumps({"type": "message", "content": "hello"}))
         ws.send_text(json.dumps({"type": "message", "content": "/help"}))
         ws.send_text(json.dumps({"type": "message", "content": "/whoami"}))
@@ -779,7 +784,12 @@ def test_websocket_gets_idle_state_on_connect():
     ch, _ = make_web_channel()
     ch.start()
     with TestClient(ch._asgi_app).websocket_connect("/ws") as ws:
-        assert ws.receive_json() == {"type": "busy", "busy": False, "stopped": False}
+        assert ws.receive_json() == {
+            "type": "busy",
+            "busy": False,
+            "stopped": False,
+            "replay": True,
+        }
 
 
 @pytest.mark.asyncio
@@ -863,6 +873,7 @@ def test_tab_opened_mid_turn_gets_busy_state_and_the_turn_so_far():
             "busy": True,
             "stopped": False,
             "conversation_id": 7,
+            "replay": True,
         }
         assert ws.receive_json()["content"] == "thinking..."
         assert ws.receive_json()["content"] == "> bash"
@@ -877,7 +888,16 @@ def test_tab_opened_mid_turn_gets_busy_state_and_the_turn_so_far():
             "busy": False,
             "stopped": False,
             "conversation_id": 7,
+            "replay": True,
         }
+    # live busy frames aren't marked: a turn that starts while a tab loads
+    # its history makes the tab reload it (to show the new user message)
+    assert "replay" not in ch._shown_busy
+
+
+def test_frontend_reloads_history_for_turns_that_start_while_loading():
+    js = (FRONTEND_DIR / "app.js").read_text()
+    assert "(elsewhere || (!mine && !replay))" in js
 
 
 @pytest.mark.asyncio

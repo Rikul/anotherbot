@@ -430,8 +430,13 @@ class WebChannel(Channel):
             async with self._conn_lock:
                 self._connections[client_id] = ws
                 self._send_locks[client_id] = lock
-                # "stopped" was news for the tabs open when the turn ended
-                replay = [{**self._shown_busy, "stopped": False}, *self._turn_frames]
+                # "stopped" was news for the tabs open when the turn ended;
+                # "replay" tells the tab this turn began before it connected
+                # (so its history, loaded after this, has the user message)
+                replay = [
+                    {**self._shown_busy, "stopped": False, "replay": True},
+                    *self._turn_frames,
+                ]
             try:
                 for frame in replay:
                     await ws.send_json(frame)

@@ -552,7 +552,7 @@
             let data;
             try { data = JSON.parse(evt.data); } catch (e) { data = { type: 'message', content: evt.data }; }
             if (heldFrames) heldFrames.push(data);
-            else handleFrame(data, false);
+            else handleFrame(data);
         };
     }
 
@@ -570,7 +570,7 @@
                 for (let i = 0; i < frames.length; i++) {
                     // a frame started another reload: the rest wait for that one
                     if (heldFrames) { heldFrames.push(...frames.slice(i)); break; }
-                    handleFrame(frames[i], true);
+                    handleFrame(frames[i]);
                 }
             }
         }
@@ -597,11 +597,9 @@
     const otherConv = data => data.conversation_id != null && activeConvId != null &&
                               data.conversation_id !== activeConvId;
 
-    // caughtUp: the frame waited while the history loaded, so the history may
-    // already contain what it shows.
-    function handleFrame(data, caughtUp) {
+    function handleFrame(data) {
         if (data.type === 'busy') {
-            onBusy(data, caughtUp);
+            onBusy(data);
         } else if (data.type === 'trajectory') {
             if (otherConv(data)) return;
             // follows the turn's reply once its trajectory is stored; a turn
@@ -655,7 +653,7 @@
     const SWITCH_LOCKED = 'Wait for the agent to finish (or stop it) first';
     const SWITCH_LOCKED_MSG = 'The agent is still working. Wait for it to finish, or stop it, before switching conversations.';
 
-    function onBusy({ busy, stopped, conversation_id: convId }, caughtUp) {
+    function onBusy({ busy, stopped, replay, conversation_id: convId }) {
         agentBusy = busy;
         if (busy) {
             const mine = pendingTurn;
@@ -665,8 +663,10 @@
             // A turn this tab didn't start (another tab, or a message sent
             // before a reload) or one in another conversation: show that
             // conversation from the history, which already has its message.
+            // Only the state replayed on connect is already in the history the
+            // tab loaded then; a turn that started while it loaded is not.
             const elsewhere = convId != null && convId !== activeConvId;
-            if (convId != null && (elsewhere || (!mine && !caughtUp))) {
+            if (convId != null && (elsewhere || (!mine && !replay))) {
                 activeConvId = convId;
                 holdFrames(async () => {
                     clearMessages();
