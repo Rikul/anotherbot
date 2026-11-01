@@ -32,6 +32,7 @@ from ..tools.sched_tasks_tool import (
 from ..tools.get_city_state import GetCityState
 from ..tools.get_datetime import GetDateTime
 from ..tools.helper_agent import HelperAgentTool
+from ..tools.memory import SaveMemoryTool, SearchMemoryTool, DeleteMemoryTool
 from . import mcp_manager as mcp
 from .tool import MAX_TOOL_RESULT_LENGTH
 
@@ -60,6 +61,9 @@ tool_registry = {
     "get_city_state": GetCityState,
     "get_datetime": GetDateTime,
     "helper_agent": HelperAgentTool,
+    "save_memory": SaveMemoryTool,
+    "search_memory": SearchMemoryTool,
+    "delete_memory": DeleteMemoryTool,
 }
 
 all_tool_specs = [tool.spec() for tool in tool_registry.values()]
@@ -80,6 +84,8 @@ _HELPER_AGENT_TOOLS = {
     "get_datetime",
     "list_scheduled_tasks",
     "get_scheduled_task_output",
+    # Read-only: scheduled tasks can use memories but not change them.
+    "search_memory",
 }
 
 helper_tool_specs = [

@@ -7,6 +7,7 @@ import mimetypes
 import os
 import platform
 import re
+import sqlite3
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -15,10 +16,13 @@ from pathlib import Path
 from .. import config
 from .client import Client
 from ..infra.app_logging import log
+from ..infra.memory_store import MemoryStore, format_memory
 from ..infra.tracer import Tracer, redact
 from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
+# How many of the most recent long-term memories go into the system prompt.
+MAX_PROMPT_MEMORIES = 30
 
 
 def _slugify(name: str) -> str:
@@ -64,8 +68,37 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 - Current Channel: {channel}{conv_line}
 """
 
+    sys_prompt += _memories_section()
+
     log.info("Loaded system prompt: %s characters", len(sys_prompt))
     return sys_prompt
+
+
+def _memories_section() -> str:
+    """The "Saved Memories" prompt section (empty if there are none).
+
+    Best-effort: a database problem is logged and the section left out.
+    """
+    try:
+        store = MemoryStore()
+        memories = store.recent(MAX_PROMPT_MEMORIES)
+        total = store.count() if memories else 0
+    except (sqlite3.Error, OSError) as e:
+        log.error("Error loading memories for the system prompt: %s", e)
+        return ""
+    if not memories:
+        return ""
+    lines = "\n".join(f"- {format_memory(m)}" for m in memories)
+    more = (
+        f"\n({total - len(memories)} older memories not shown; use search_memory.)"
+        if total > len(memories)
+        else ""
+    )
+    return f"""
+## Saved Memories
+Long-term facts about the user from earlier conversations ([id] (category) fact — last updated):
+{lines}{more}
+"""
 
 
 class Agent(ABC):
