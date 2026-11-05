@@ -28,6 +28,7 @@ _SCHEMA = (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         content TEXT NOT NULL,
         category TEXT,
+        core INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
     )
@@ -65,7 +66,7 @@ _SCHEMA = (
     """,
 )
 
-_COLUMNS = "id, content, category, created_at, updated_at"
+_COLUMNS = "id, content, category, core, created_at, updated_at"
 
 
 def _now() -> str:
@@ -77,8 +78,9 @@ def _row_to_dict(row) -> dict:
         "id": row[0],
         "content": row[1],
         "category": row[2],
-        "created_at": row[3],
-        "updated_at": row[4],
+        "core": bool(row[3]),
+        "created_at": row[4],
+        "updated_at": row[5],
     }
 
 
@@ -136,6 +138,12 @@ class MemoryStore:
                     conn.execute("DROP TABLE memories_fts")
                 for stmt in _SCHEMA:
                     conn.execute(stmt)
+                # Tables made before core memories existed.
+                cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)")}
+                if "core" not in cols:
+                    conn.execute(
+                        "ALTER TABLE memories ADD COLUMN core INTEGER NOT NULL DEFAULT 0"
+                    )
                 if rebuild:
                     conn.execute(
                         "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')"
@@ -162,13 +170,22 @@ class MemoryStore:
         return row[0] if row else None
 
     def save(
-        self, content: str, category: str | None = None, memory_id: int | None = None
+        self,
+        content: str,
+        category: str | None = None,
+        memory_id: int | None = None,
+        core: bool | None = None,
     ) -> dict:
         """Add a memory, or replace memory ``memory_id``.
 
-        Returns the stored memory plus ``status``: ``created``, ``updated`` or
-        ``duplicate`` (identical content already stored; nothing was written).
-        Raises ``ValueError`` for empty/too-long content or an unknown id.
+        ``core`` marks a memory that always goes into the system prompt. When
+        updating, ``core=None`` keeps the memory's current setting.
+
+        Returns the stored memory plus ``status``: ``created``, ``updated``,
+        ``duplicate`` (identical content already stored; nothing was written)
+        or ``promoted`` (a duplicate saved with ``core=True`` made the existing
+        one core). Raises ``ValueError`` for empty/too-long content or an
+        unknown id.
         """
         content = (content or "").strip()
         category = (category or "").strip().lower() or None
@@ -187,9 +204,9 @@ class MemoryStore:
                 if memory_id is not None:
                     try:
                         cur = conn.execute(
-                            "UPDATE memories SET content = ?, category = ?, updated_at = ? "
-                            "WHERE id = ?",
-                            (content, category, now, memory_id),
+                            "UPDATE memories SET content = ?, category = ?, "
+                            "core = COALESCE(?, core), updated_at = ? WHERE id = ?",
+                            (content, category, _core_value(core), now, memory_id),
                         )
                     except sqlite3.IntegrityError as e:
                         dup = self._find_content(conn, content)
@@ -202,14 +219,24 @@ class MemoryStore:
                 else:
                     # The unique index turns a concurrent duplicate into a no-op.
                     cur = conn.execute(
-                        "INSERT INTO memories (content, category, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
-                        (content, category, now, now),
+                        "INSERT INTO memories "
+                        "(content, category, core, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                        (content, category, int(bool(core)), now, now),
                     )
                     if cur.rowcount:
                         status, new_id = "created", cur.lastrowid
                     else:
                         status, new_id = "duplicate", self._find_content(conn, content)
+                        if (
+                            core
+                            and conn.execute(
+                                "UPDATE memories SET core = 1, updated_at = ? "
+                                "WHERE id = ? AND core = 0",
+                                (now, new_id),
+                            ).rowcount
+                        ):
+                            status = "promoted"
         finally:
             conn.close()
 
@@ -258,6 +285,19 @@ class MemoryStore:
             return []
         return self.search(text, limit)
 
+    def core(self, limit: int = 20) -> list[dict]:
+        """Core memories (always in the prompt), most recently updated first."""
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                f"SELECT {_COLUMNS} FROM memories WHERE core = 1 "
+                "ORDER BY updated_at DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [_row_to_dict(r) for r in rows]
+
     def recent(self, limit: int = 30) -> list[dict]:
         """The most recently created or updated memories."""
         conn = self._connect()
@@ -294,7 +334,17 @@ class MemoryStore:
         return _row_to_dict(row) if row else None
 
 
+def _core_value(core: bool | None) -> int | None:
+    return None if core is None else int(bool(core))
+
+
 def format_memory(memory: dict) -> str:
-    """One line per memory, as shown to the model: ``[id] (category) content``."""
+    """One line per memory, as shown to the model: ``[id] ★ (category) content``.
+
+    ★ marks a core memory.
+    """
+    star = " ★" if memory.get("core") else ""
     cat = f" ({memory['category']})" if memory.get("category") else ""
-    return f"[{memory['id']}]{cat} {memory['content']} — {memory['updated_at'][:10]}"
+    return (
+        f"[{memory['id']}]{star}{cat} {memory['content']} — {memory['updated_at'][:10]}"
+    )

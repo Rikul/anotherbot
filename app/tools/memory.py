@@ -41,6 +41,16 @@ class SaveMemoryTool(Tool):
                             "type": "integer",
                             "description": "ID of an existing memory to replace.",
                         },
+                        "core": {
+                            "type": "boolean",
+                            "description": (
+                                "Always keep this memory in your context, in every "
+                                "conversation: who the user is (name, location, time "
+                                "zone, language), hard constraints and standing "
+                                "instructions. Use sparingly. When updating, omit to "
+                                "keep the current setting."
+                            ),
+                        },
                     },
                     "required": ["content"],
                 },
@@ -48,17 +58,28 @@ class SaveMemoryTool(Tool):
         }
 
     @staticmethod
-    def call(content: str, category: str = None, memory_id: int = None) -> str:
+    def call(
+        content: str, category: str = None, memory_id: int = None, core: bool = None
+    ) -> str:
         """Save the memory and report its ID and whether it was new."""
-        log.info("save_memory called (id=%s, category=%s)", memory_id, category)
+        log.info(
+            "save_memory called (id=%s, category=%s, core=%s)",
+            memory_id,
+            category,
+            core,
+        )
         try:
-            memory = MemoryStore().save(content, category, memory_id)
+            memory = MemoryStore().save(content, category, memory_id, core)
         except ValueError as e:
             return f"Memory not saved: {e}"
         status = memory["status"]
+        line = format_memory(memory)
         if status == "duplicate":
-            return f"Already remembered: {format_memory(memory)}"
-        return f"Memory {status}: {format_memory(memory)}"
+            return f"Already remembered: {line}"
+        if status == "promoted":
+            return f"Already remembered; now a core memory: {line}"
+        kind = "Core memory" if memory["core"] else "Memory"
+        return f"{kind} {status}: {line}"
 
 
 class SearchMemoryTool(Tool):

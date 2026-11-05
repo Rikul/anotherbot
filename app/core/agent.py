@@ -21,13 +21,18 @@ from ..infra.tracer import Tracer, redact
 from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
-# Long-term memories in the system prompt: up to MAX_RELEVANT_MEMORIES that
-# match the user's message, then the most recent ones, MAX_PROMPT_MEMORIES in all.
+# Long-term memories in the system prompt, in this order:
+# - core memories (the user's name, hard constraints, …): always, up to
+#   MAX_CORE_MEMORIES / MAX_CORE_MEMORY_CHARS so they can't be crowded out;
+# - up to MAX_RELEVANT_MEMORIES that match the user's message;
+# - the most recent ones.
+# MAX_PROMPT_MEMORIES / MAX_PROMPT_MEMORY_CHARS cap the whole section, so
+# memories can't crowd out the conversation (each may be 1000 characters).
 MAX_PROMPT_MEMORIES = 30
-MAX_RELEVANT_MEMORIES = 10
-# ...and at most this many characters of them, so memories can't crowd out the
-# conversation (each memory may be up to 1000 characters).
 MAX_PROMPT_MEMORY_CHARS = 6000
+MAX_CORE_MEMORIES = 20
+MAX_CORE_MEMORY_CHARS = 2500
+MAX_RELEVANT_MEMORIES = 10
 
 
 def _slugify(name: str) -> str:
@@ -83,30 +88,44 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 def _memories_section(query: str = "") -> str:
     """The "Saved Memories" prompt section (empty if there are none).
 
-    Memories matching ``query`` come first, then the most recently updated
-    ones, within MAX_PROMPT_MEMORIES entries and MAX_PROMPT_MEMORY_CHARS.
+    Core memories first, then memories matching ``query``, then the most
+    recently updated ones (see the MAX_*_MEMOR* limits above).
     Best-effort: a database problem is logged and the section left out.
     """
     try:
         store = MemoryStore()
-        relevant = store.relevant(query, MAX_RELEVANT_MEMORIES) if query else []
-        recent = store.recent(MAX_PROMPT_MEMORIES)
+        core = store.core(MAX_CORE_MEMORIES)
+        # Fetch extra: rows already listed as core are skipped below.
+        extra = len(core)
+        relevant = store.relevant(query, MAX_RELEVANT_MEMORIES + extra) if query else []
+        recent = store.recent(MAX_PROMPT_MEMORIES + extra)
         total = store.count() if recent else 0
     except (sqlite3.Error, OSError) as e:
         log.error("Error loading memories for the system prompt: %s", e)
         return ""
 
-    picked = _pick_memory_lines(relevant, recent)
-    shown = len(picked["relevant"]) + len(picked["recent"])
+    picked = _pick_memory_lines(core, relevant, recent)
+    return _format_memory_section(picked, total)
+
+
+def _format_memory_section(picked: dict[str, list[str]], total: int) -> str:
+    """Render the picked lines under their headings ("" if there are none)."""
+    shown = sum(len(lines) for lines in picked.values())
     if not shown:
         return ""
 
-    parts = []
-    if picked["relevant"]:
-        parts.append("Related to the user's message:\n" + "\n".join(picked["relevant"]))
-    if picked["recent"]:
-        label = "Other recent memories:" if picked["relevant"] else "Recent memories:"
-        parts.append(label + "\n" + "\n".join(picked["recent"]))
+    headings = {
+        "core": "About the user (core memories, always kept):",
+        "relevant": "Related to the user's message:",
+        "recent": "Other recent memories:"
+        if shown > len(picked["recent"])
+        else "Recent memories:",
+    }
+    parts = [
+        headings[kind] + "\n" + "\n".join(lines)
+        for kind, lines in picked.items()
+        if lines
+    ]
     hidden = total - shown
     if hidden:
         parts.append(
@@ -115,28 +134,57 @@ def _memories_section(query: str = "") -> str:
     body = "\n\n".join(parts)
     return f"""
 ## Saved Memories
-Long-term facts about the user from earlier conversations ([id] (category) fact — last updated):
+Long-term facts about the user from earlier conversations ([id] ★core (category) fact — last updated):
 
 {body}
 """
 
 
-def _pick_memory_lines(relevant: list[dict], recent: list[dict]) -> dict:
-    """Format relevant then recent memories, skipping repeats, within the
-    MAX_PROMPT_MEMORIES / MAX_PROMPT_MEMORY_CHARS limits (one always fits)."""
-    seen, used = set(), 0
-    picked: dict[str, list[str]] = {"relevant": [], "recent": []}
-    for kind, memories in (("relevant", relevant), ("recent", recent)):
-        for m in memories:
-            if m["id"] in seen or len(seen) >= MAX_PROMPT_MEMORIES:
-                continue
-            line = f"- {format_memory(m)}"
-            if seen and used + len(line) > MAX_PROMPT_MEMORY_CHARS:
-                return picked
-            seen.add(m["id"])
-            picked[kind].append(line)
-            used += len(line) + 1
-    return picked
+def _pick_memory_lines(
+    core: list[dict], relevant: list[dict], recent: list[dict]
+) -> dict[str, list[str]]:
+    """Format core, relevant and recent memories, skipping repeats.
+
+    Each group has its own entry/character limits, and the whole section is
+    capped by MAX_PROMPT_MEMORIES / MAX_PROMPT_MEMORY_CHARS. The first line
+    always fits, however long.
+    """
+    seen: set[int] = set()
+    total = [0]  # characters used so far, shared by every group
+    return {
+        "core": _take_memories(
+            core, MAX_CORE_MEMORIES, MAX_CORE_MEMORY_CHARS, seen, total
+        ),
+        "relevant": _take_memories(
+            relevant, MAX_RELEVANT_MEMORIES, MAX_PROMPT_MEMORY_CHARS, seen, total
+        ),
+        "recent": _take_memories(
+            recent, MAX_PROMPT_MEMORIES, MAX_PROMPT_MEMORY_CHARS, seen, total
+        ),
+    }
+
+
+def _take_memories(
+    memories: list[dict], max_count: int, max_chars: int, seen: set, total: list
+) -> list[str]:
+    """Lines for one group of memories, updating ``seen`` and ``total``."""
+    lines, group_chars = [], 0
+    for m in memories:
+        if m["id"] in seen:
+            continue
+        line = f"- {format_memory(m)}"
+        size = len(line) + 1
+        if len(lines) >= max_count or len(seen) >= MAX_PROMPT_MEMORIES:
+            break
+        if seen and (
+            group_chars + size > max_chars or total[0] + size > MAX_PROMPT_MEMORY_CHARS
+        ):
+            break
+        seen.add(m["id"])
+        lines.append(line)
+        group_chars += size
+        total[0] += size
+    return lines
 
 
 class Agent(ABC):

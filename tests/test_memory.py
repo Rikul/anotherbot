@@ -327,3 +327,96 @@ def test_old_unstemmed_index_is_rebuilt(tmp_path):
     assert [m["content"] for m in store.search("dog")] == ["User owns two dogs"]
     store.save("User has a cat")  # triggers still keep the index in sync
     assert store.search("cats")[0]["content"] == "User has a cat"
+
+
+# --- core memories ---
+
+
+def test_core_flag_on_insert_and_kept_on_update(store):
+    m = store.save("User's name is Rikul", "personal", core=True)
+    assert m["core"] is True
+    updated = store.save("User's name is Rikul Patel", memory_id=m["id"])
+    assert updated["core"] is True  # core omitted -> unchanged
+    demoted = store.save("User's name is Rikul Patel", memory_id=m["id"], core=False)
+    assert demoted["core"] is False
+    assert store.save("User likes tea")["core"] is False
+
+
+def test_duplicate_save_with_core_promotes(store):
+    m = store.save("User lives in Denver")
+    again = store.save("user lives in denver", core=True)
+    assert again["status"] == "promoted" and again["id"] == m["id"]
+    assert again["core"] is True
+    assert store.save("User lives in Denver", core=True)["status"] == "duplicate"
+
+
+def test_core_lists_only_core_newest_first(store):
+    a = store.save("fact a", core=True)
+    store.save("fact b")
+    c = store.save("fact c", core=True)
+    assert [m["id"] for m in store.core()] == [c["id"], a["id"]]
+
+
+def test_old_table_gets_core_column(tmp_path):
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT, content TEXT "
+        "NOT NULL, category TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO memories (content, created_at, updated_at) VALUES ('old', 'x', 'x')"
+    )
+    conn.commit()
+    conn.close()
+    store = MemoryStore(db_path=db)
+    assert store.get(1)["core"] is False
+    assert store.save("new", core=True)["core"] is True
+
+
+def test_save_tool_reports_core():
+    out = SaveMemoryTool.call("User's name is Rikul", "personal", core=True)
+    assert out.startswith("Core memory created: [1] ★ (personal)")
+    SaveMemoryTool.call("User lives in Denver")
+    assert "now a core memory" in SaveMemoryTool.call("User lives in Denver", core=True)
+    assert "★" in SearchMemoryTool.call("Rikul")
+
+
+def test_sys_prompt_keeps_core_memory_when_buried():
+    store = MemoryStore()
+    name = store.save("User's name is Rikul", "personal", core=True)
+    for i in range(40):
+        store.save(f"newer fact number {i}")
+    section = get_default_sys_prompt({"memory_query": "what's the weather?"}).split(
+        "## Saved Memories"
+    )[1]
+    assert section.index("About the user") < section.index("Other recent memories:")
+    assert f"[{name['id']}] ★ (personal) User's name is Rikul" in section
+    assert section.count("User's name is Rikul") == 1
+    assert "newer fact number 39" in section
+
+
+def test_core_memory_not_repeated_as_relevant():
+    store = MemoryStore()
+    store.save("User is allergic to peanuts", core=True)
+    store.save("User likes peanut-free granola")
+    section = get_default_sys_prompt({"memory_query": "peanuts snack"}).split(
+        "## Saved Memories"
+    )[1]
+    assert section.count("allergic to peanuts") == 1
+    assert "Related to the user's message:\n- [2]" in section
+
+
+def test_core_budget_leaves_room_for_others(monkeypatch):
+    monkeypatch.setattr(agent_module, "MAX_CORE_MEMORY_CHARS", 150)
+    store = MemoryStore()
+    for i in range(10):
+        store.save(f"core fact {i} " + "x" * 40, core=True)
+    store.save("an ordinary recent fact")
+    section = get_default_sys_prompt().split("## Saved Memories")[1]
+    core_part = section.split("About the user")[1].split("\n\n")[0]
+    core_lines = [line for line in core_part.splitlines() if line.startswith("- [")]
+    assert 1 <= len(core_lines) < 10
+    assert sum(len(line) + 1 for line in core_lines) <= 150 + 80  # first always fits
+    # Core memories that didn't fit compete with the rest under "recent".
+    assert "an ordinary recent fact" in section
