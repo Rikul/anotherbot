@@ -155,3 +155,73 @@ def test_sys_prompt_survives_db_error():
         prompt = get_default_sys_prompt()
     assert "## Saved Memories" not in prompt
     assert "## Current System Context" in prompt
+
+
+# --- review fixes ---
+
+
+def test_unique_index_blocks_duplicate_from_another_connection(store):
+    """The duplicate check is enforced by the db, not only by save()'s lookup."""
+    store.save("User is vegetarian")
+    conn = sqlite3.connect(store.db_path)
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO memories (content, created_at, updated_at) VALUES (?, '', '')",
+            ("USER IS VEGETARIAN",),
+        )
+    conn.close()
+
+
+def test_concurrent_saves_store_one_row(store):
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(8) as pool:
+        results = list(pool.map(lambda _: store.save("User likes tea"), range(16)))
+    assert store.count() == 1
+    assert {r["id"] for r in results} == {results[0]["id"]}
+    assert [r["status"] for r in results].count("created") == 1
+
+
+def test_update_to_existing_content_is_refused(store):
+    store.save("User likes tea")
+    other = store.save("User likes coffee")
+    with pytest.raises(ValueError, match="already says that"):
+        store.save("user likes tea", memory_id=other["id"])
+    assert store.get(other["id"])["content"] == "User likes coffee"
+
+
+def test_sys_prompt_memory_char_budget(monkeypatch):
+    monkeypatch.setattr(agent_module, "MAX_PROMPT_MEMORY_CHARS", 200)
+    store = MemoryStore()
+    for i in range(10):
+        store.save(f"fact {i} " + "x" * 80)
+    section = get_default_sys_prompt().split("## Saved Memories")[1]
+    shown = [line for line in section.splitlines() if line.startswith("- [")]
+    assert 1 <= len(shown) < 10
+    assert sum(len(line) for line in shown) <= 200 + 100  # first line always fits
+    assert f"{10 - len(shown)} older memories not shown" in section
+
+
+def test_sys_prompt_always_shows_one_long_memory(monkeypatch):
+    monkeypatch.setattr(agent_module, "MAX_PROMPT_MEMORY_CHARS", 10)
+    MemoryStore().save("a fairly long memory that exceeds the budget")
+    assert "exceeds the budget" in get_default_sys_prompt()
+
+
+@pytest.mark.asyncio
+async def test_helper_agent_refuses_off_list_tools():
+    from types import SimpleNamespace
+
+    from app.core.helper_agent import HelperAgent
+
+    with patch("app.core.agent.Client"):
+        helper = HelperAgent()
+    call = SimpleNamespace(
+        function=SimpleNamespace(name="save_memory", arguments='{"content": "x"}')
+    )
+    result = await helper.handle_tool_call(call)
+    assert "not available to the helper agent" in result
+    assert MemoryStore().count() == 0
+
+    call.function = SimpleNamespace(name="search_memory", arguments='{"query": "x"}')
+    assert await helper.handle_tool_call(call) == "No matching memories."

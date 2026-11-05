@@ -32,6 +32,11 @@ _SCHEMA = (
         updated_at TEXT NOT NULL
     )
     """,
+    # Makes the duplicate check atomic across connections.
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_memories_content
+    ON memories(lower(content))
+    """,
     """
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
         content, category, content='memories', content_rowid='id'
@@ -117,6 +122,13 @@ class MemoryStore:
             conn.close()
         return _row_to_dict(row) if row else None
 
+    @staticmethod
+    def _find_content(conn, content: str) -> int | None:
+        row = conn.execute(
+            "SELECT id FROM memories WHERE lower(content) = lower(?)", (content,)
+        ).fetchone()
+        return row[0] if row else None
+
     def save(
         self, content: str, category: str | None = None, memory_id: int | None = None
     ) -> dict:
@@ -141,28 +153,31 @@ class MemoryStore:
         try:
             with conn:
                 if memory_id is not None:
-                    cur = conn.execute(
-                        "UPDATE memories SET content = ?, category = ?, updated_at = ? "
-                        "WHERE id = ?",
-                        (content, category, now, memory_id),
-                    )
+                    try:
+                        cur = conn.execute(
+                            "UPDATE memories SET content = ?, category = ?, updated_at = ? "
+                            "WHERE id = ?",
+                            (content, category, now, memory_id),
+                        )
+                    except sqlite3.IntegrityError as e:
+                        dup = self._find_content(conn, content)
+                        raise ValueError(
+                            f"Memory {dup} already says that; delete one of them instead."
+                        ) from e
                     if cur.rowcount == 0:
                         raise ValueError(f"No memory with id {memory_id}.")
                     status, new_id = "updated", memory_id
                 else:
-                    dup = conn.execute(
-                        "SELECT id FROM memories WHERE lower(content) = lower(?)",
-                        (content,),
-                    ).fetchone()
-                    if dup:
-                        status, new_id = "duplicate", dup[0]
-                    else:
-                        cur = conn.execute(
-                            "INSERT INTO memories (content, category, created_at, updated_at) "
-                            "VALUES (?, ?, ?, ?)",
-                            (content, category, now, now),
-                        )
+                    # The unique index turns a concurrent duplicate into a no-op.
+                    cur = conn.execute(
+                        "INSERT INTO memories (content, category, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING",
+                        (content, category, now, now),
+                    )
+                    if cur.rowcount:
                         status, new_id = "created", cur.lastrowid
+                    else:
+                        status, new_id = "duplicate", self._find_content(conn, content)
         finally:
             conn.close()
 
@@ -223,16 +238,17 @@ class MemoryStore:
 
     def delete(self, memory_id: int) -> dict | None:
         """Delete a memory; returns the deleted memory, or None if it didn't exist."""
-        memory = self.get(memory_id)
-        if memory is None:
-            return None
         conn = self._connect()
         try:
             with conn:
-                conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
+                # RETURNING reads and deletes the same row in one statement.
+                row = conn.execute(
+                    f"DELETE FROM memories WHERE id = ? RETURNING {_COLUMNS}",
+                    (memory_id,),
+                ).fetchone()
         finally:
             conn.close()
-        return memory
+        return _row_to_dict(row) if row else None
 
 
 def format_memory(memory: dict) -> str:

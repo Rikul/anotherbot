@@ -23,6 +23,9 @@ from . import runtime
 MAX_CONTEXT_MESSAGES = 1000
 # How many of the most recent long-term memories go into the system prompt.
 MAX_PROMPT_MEMORIES = 30
+# ...and at most this many characters of them, so memories can't crowd out the
+# conversation (each memory may be up to 1000 characters).
+MAX_PROMPT_MEMORY_CHARS = 6000
 
 
 def _slugify(name: str) -> str:
@@ -86,14 +89,20 @@ def _memories_section() -> str:
     except (sqlite3.Error, OSError) as e:
         log.error("Error loading memories for the system prompt: %s", e)
         return ""
-    if not memories:
+    lines, used = [], 0
+    for m in memories:
+        line = f"- {format_memory(m)}"
+        if lines and used + len(line) > MAX_PROMPT_MEMORY_CHARS:
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if not lines:
         return ""
-    lines = "\n".join(f"- {format_memory(m)}" for m in memories)
+    hidden = total - len(lines)
     more = (
-        f"\n({total - len(memories)} older memories not shown; use search_memory.)"
-        if total > len(memories)
-        else ""
+        f"\n({hidden} older memories not shown; use search_memory.)" if hidden else ""
     )
+    lines = "\n".join(lines)
     return f"""
 ## Saved Memories
 Long-term facts about the user from earlier conversations ([id] (category) fact — last updated):

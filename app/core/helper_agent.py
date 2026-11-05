@@ -25,6 +25,17 @@ class HelperAgent(Agent):
         log.info("Running HelperAgent with prompt: %s", prompt)
         return await self.agent_loop(prompt)
 
+    async def handle_tool_call(self, tool_call) -> str:
+        # The model only sees helper_tool_specs, but refuse anything else it
+        # names anyway (e.g. save_memory, add_scheduled_task).
+        from .tool_calls import helper_tool_specs  # pylint: disable=import-outside-toplevel
+
+        name = tool_call.function.name
+        if name not in {s["function"]["name"] for s in helper_tool_specs}:
+            log.warning("HelperAgent refused off-list tool call: %s", name)
+            return f"Tool {name} is not available to the helper agent."
+        return await super().handle_tool_call(tool_call)
+
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         # Lazy: tool_calls -> scheduled_tasks -> helper_agent (circular import).
         from .tool_calls import helper_tool_specs  # pylint: disable=import-outside-toplevel
