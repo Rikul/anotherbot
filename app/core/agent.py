@@ -21,8 +21,10 @@ from ..infra.tracer import Tracer, redact
 from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
-# How many of the most recent long-term memories go into the system prompt.
+# Long-term memories in the system prompt: up to MAX_RELEVANT_MEMORIES that
+# match the user's message, then the most recent ones, MAX_PROMPT_MEMORIES in all.
 MAX_PROMPT_MEMORIES = 30
+MAX_RELEVANT_MEMORIES = 10
 # ...and at most this many characters of them, so memories can't crowd out the
 # conversation (each memory may be up to 1000 characters).
 MAX_PROMPT_MEMORY_CHARS = 6000
@@ -37,7 +39,8 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 
     Args:
         context: optional ``channel``, ``conversation_id`` and
-            ``conversation_name`` to include.
+            ``conversation_name`` to include, and ``memory_query`` (the
+            user's latest message) to pick relevant memories with.
     """
     ctx = context or {}
     channel = ctx.get("channel", "cli")
@@ -71,43 +74,69 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 - Current Channel: {channel}{conv_line}
 """
 
-    sys_prompt += _memories_section()
+    sys_prompt += _memories_section(ctx.get("memory_query", ""))
 
     log.info("Loaded system prompt: %s characters", len(sys_prompt))
     return sys_prompt
 
 
-def _memories_section() -> str:
+def _memories_section(query: str = "") -> str:
     """The "Saved Memories" prompt section (empty if there are none).
 
+    Memories matching ``query`` come first, then the most recently updated
+    ones, within MAX_PROMPT_MEMORIES entries and MAX_PROMPT_MEMORY_CHARS.
     Best-effort: a database problem is logged and the section left out.
     """
     try:
         store = MemoryStore()
-        memories = store.recent(MAX_PROMPT_MEMORIES)
-        total = store.count() if memories else 0
+        relevant = store.relevant(query, MAX_RELEVANT_MEMORIES) if query else []
+        recent = store.recent(MAX_PROMPT_MEMORIES)
+        total = store.count() if recent else 0
     except (sqlite3.Error, OSError) as e:
         log.error("Error loading memories for the system prompt: %s", e)
         return ""
-    lines, used = [], 0
-    for m in memories:
-        line = f"- {format_memory(m)}"
-        if lines and used + len(line) > MAX_PROMPT_MEMORY_CHARS:
-            break
-        lines.append(line)
-        used += len(line) + 1
-    if not lines:
+
+    picked = _pick_memory_lines(relevant, recent)
+    shown = len(picked["relevant"]) + len(picked["recent"])
+    if not shown:
         return ""
-    hidden = total - len(lines)
-    more = (
-        f"\n({hidden} older memories not shown; use search_memory.)" if hidden else ""
-    )
-    lines = "\n".join(lines)
+
+    parts = []
+    if picked["relevant"]:
+        parts.append("Related to the user's message:\n" + "\n".join(picked["relevant"]))
+    if picked["recent"]:
+        label = "Other recent memories:" if picked["relevant"] else "Recent memories:"
+        parts.append(label + "\n" + "\n".join(picked["recent"]))
+    hidden = total - shown
+    if hidden:
+        parts.append(
+            f"({hidden} more memories not shown; use search_memory to look for them.)"
+        )
+    body = "\n\n".join(parts)
     return f"""
 ## Saved Memories
 Long-term facts about the user from earlier conversations ([id] (category) fact — last updated):
-{lines}{more}
+
+{body}
 """
+
+
+def _pick_memory_lines(relevant: list[dict], recent: list[dict]) -> dict:
+    """Format relevant then recent memories, skipping repeats, within the
+    MAX_PROMPT_MEMORIES / MAX_PROMPT_MEMORY_CHARS limits (one always fits)."""
+    seen, used = set(), 0
+    picked: dict[str, list[str]] = {"relevant": [], "recent": []}
+    for kind, memories in (("relevant", relevant), ("recent", recent)):
+        for m in memories:
+            if m["id"] in seen or len(seen) >= MAX_PROMPT_MEMORIES:
+                continue
+            line = f"- {format_memory(m)}"
+            if seen and used + len(line) > MAX_PROMPT_MEMORY_CHARS:
+                return picked
+            seen.add(m["id"])
+            picked[kind].append(line)
+            used += len(line) + 1
+    return picked
 
 
 class Agent(ABC):
@@ -280,6 +309,22 @@ class Agent(ABC):
                 log.info("Auto-named conversation %s: %r", conv_id, name)
         except Exception as e:  # pylint: disable=broad-exception-caught  # naming is best-effort
             log.warning("Auto-naming conversation %s failed: %s", conv_id, e)
+
+    def _memory_query(self, message: str) -> str:
+        """Text to pick relevant memories with: this message plus the previous
+        user message, so a short follow-up ("and tomorrow?") keeps its topic."""
+        for msg in reversed(self.messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, list):
+                content = " ".join(
+                    p.get("text", "") for p in content if isinstance(p, dict)
+                )
+            if isinstance(content, str) and content.strip():
+                return f"{message}\n{content}"
+            break
+        return message
 
     # --- shared tool dispatch ---
 

@@ -145,7 +145,7 @@ def test_sys_prompt_caps_memories(monkeypatch):
     prompt = get_default_sys_prompt()
     assert "fact 4" in prompt and "fact 3" in prompt
     assert "fact 0" not in prompt
-    assert "3 older memories not shown" in prompt
+    assert "3 more memories not shown" in prompt
 
 
 def test_sys_prompt_survives_db_error():
@@ -199,7 +199,7 @@ def test_sys_prompt_memory_char_budget(monkeypatch):
     shown = [line for line in section.splitlines() if line.startswith("- [")]
     assert 1 <= len(shown) < 10
     assert sum(len(line) for line in shown) <= 200 + 100  # first line always fits
-    assert f"{10 - len(shown)} older memories not shown" in section
+    assert f"{10 - len(shown)} more memories not shown" in section
 
 
 def test_sys_prompt_always_shows_one_long_memory(monkeypatch):
@@ -225,3 +225,105 @@ async def test_helper_agent_refuses_off_list_tools():
 
     call.function = SimpleNamespace(name="search_memory", arguments='{"query": "x"}')
     assert await helper.handle_tool_call(call) == "No matching memories."
+
+
+# --- relevance ---
+
+
+def test_fts_query_drops_stopwords():
+    from app.infra.memory_store import _fts_query
+
+    assert _fts_query("What do I like to eat?") == '"eat"'
+    # Nothing but stopwords: keep them rather than search for nothing.
+    assert _fts_query("what is it") == '"what" OR "is" OR "it"'
+
+
+def test_relevant_matches_message_keywords(store):
+    store.save("User is vegetarian", "personal")
+    tea = store.save("User drinks green tea every morning", "preference")
+    store.save("User works at a bank", "work")
+    assert [m["id"] for m in store.relevant("Can you suggest a tea for me?")] == [
+        tea["id"]
+    ]
+
+
+def test_relevant_ignores_messages_without_keywords(store):
+    store.save("User is vegetarian")
+    assert store.relevant("hi, how are you?") == []
+    assert store.relevant("") == []
+
+
+def test_every_memory_says_user_but_that_is_not_relevance(store):
+    store.save("User has a dog")
+    assert store.relevant("my user account") == []
+
+
+def test_sys_prompt_puts_relevant_memories_first(monkeypatch):
+    monkeypatch.setattr(agent_module, "MAX_PROMPT_MEMORIES", 3)
+    store = MemoryStore()
+    old = store.save("User is allergic to peanuts", "personal")
+    for i in range(5):
+        store.save(f"recent fact {i}")
+    prompt = get_default_sys_prompt(
+        {"memory_query": "any snack ideas without peanuts?"}
+    )
+    section = prompt.split("## Saved Memories")[1]
+    assert "Related to the user's message:" in section
+    assert section.index("allergic to peanuts") < section.index(
+        "Other recent memories:"
+    )
+    assert section.count("allergic to peanuts") == 1  # not repeated under recent
+    assert "recent fact 4" in section and "recent fact 3" in section
+    assert "recent fact 0" not in section
+    assert f"[{old['id']}]" in section
+
+
+def test_sys_prompt_without_match_shows_recent_only():
+    MemoryStore().save("User is allergic to peanuts")
+    section = get_default_sys_prompt({"memory_query": "hello"}).split(
+        "## Saved Memories"
+    )[1]
+    assert "Related to the user's message" not in section
+    assert "Recent memories:" in section
+
+
+def test_memory_query_includes_previous_user_message():
+    from app.core.helper_agent import HelperAgent
+
+    with patch("app.core.agent.Client"):
+        agent = HelperAgent()
+    assert agent._memory_query("and tomorrow?") == "and tomorrow?"
+    agent.messages += [
+        {"role": "user", "content": [{"type": "text", "text": "weather in Denver"}]},
+        {"role": "assistant", "content": "Sunny."},
+    ]
+    assert agent._memory_query("and tomorrow?") == "and tomorrow?\nweather in Denver"
+
+
+def test_search_matches_word_forms(store):
+    m = store.save("User is allergic to peanuts")
+    assert store.relevant("is this peanut free?")[0]["id"] == m["id"]
+    hike = store.save("User hikes on weekends")
+    assert store.search("hiking")[0]["id"] == hike["id"]
+
+
+def test_old_unstemmed_index_is_rebuilt(tmp_path):
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL, category TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE VIRTUAL TABLE memories_fts USING fts5(
+            content, category, content='memories', content_rowid='id');
+        INSERT INTO memories (content, created_at, updated_at)
+            VALUES ('User owns two dogs', '', '');
+        INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');
+        """
+    )
+    conn.close()
+    store = MemoryStore(db_path=db)
+    assert [m["content"] for m in store.search("dog")] == ["User owns two dogs"]
+    store.save("User has a cat")  # triggers still keep the index in sync
+    assert store.search("cats")[0]["content"] == "User has a cat"

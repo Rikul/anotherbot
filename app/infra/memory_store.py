@@ -39,7 +39,8 @@ _SCHEMA = (
     """,
     """
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-        content, category, content='memories', content_rowid='id'
+        content, category, content='memories', content_rowid='id',
+        tokenize='porter unicode61'
     )
     """,
     """
@@ -81,14 +82,34 @@ def _row_to_dict(row) -> dict:
     }
 
 
+# Words too common to say anything about relevance. "user" is here because
+# memories are written as "User likes …", so it would match every one.
+_STOPWORDS = frozenset(
+    """
+    a about above after again all am an and any are as at be because been before
+    being below between both but by can could did do does doing down during each
+    few for from further had has have having he her here hers him his how i if in
+    into is it its just me more most my no nor not now of off on once only or other
+    our out over own same she should so some such than that the their them then
+    there these they this those through to too under until up very was we were what
+    when where which while who whom why will with would you your yours
+    hi hello hey please thanks thank ok okay yes yeah also get got like know want
+    need tell give make let us one user
+    """.split()
+)
+
+
 def _fts_query(query: str) -> str:
     """Turn free text into a safe FTS5 query: each word quoted, OR'd together.
 
     Quoting stops user text (``"``, ``*``, ``-``, ``OR``…) from being parsed as
     FTS syntax; OR plus bm25 ranking means rows matching more words come first.
+    Stopwords and one-letter words are dropped (unless nothing else is left),
+    so "what do I like to eat" searches for "eat", not "what" or "do".
     """
-    words = re.findall(r"\w+", query.lower())
-    return " OR ".join(f'"{w}"' for w in words)
+    words = list(dict.fromkeys(re.findall(r"\w+", query.lower())))
+    keywords = [w for w in words if len(w) > 1 and w not in _STOPWORDS]
+    return " OR ".join(f'"{w}"' for w in (keywords or words)[:50])
 
 
 class MemoryStore:
@@ -106,8 +127,19 @@ class MemoryStore:
         conn = self._connect()
         try:
             with conn:
+                # An index made before stemming was added: drop it and rebuild.
+                row = conn.execute(
+                    "SELECT sql FROM sqlite_master WHERE name = 'memories_fts'"
+                ).fetchone()
+                rebuild = bool(row) and "porter" not in row[0]
+                if rebuild:
+                    conn.execute("DROP TABLE memories_fts")
                 for stmt in _SCHEMA:
                     conn.execute(stmt)
+                if rebuild:
+                    conn.execute(
+                        "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')"
+                    )
         finally:
             conn.close()
 
@@ -214,6 +246,17 @@ class MemoryStore:
         finally:
             conn.close()
         return [_row_to_dict(r) for r in rows]
+
+    def relevant(self, text: str, limit: int = 10) -> list[dict]:
+        """Memories related to ``text`` (e.g. the user's message), best first.
+
+        Unlike ``search()``, returns nothing when ``text`` has no keywords
+        instead of falling back to the most recent memories.
+        """
+        words = re.findall(r"\w+", (text or "").lower())
+        if not any(len(w) > 1 and w not in _STOPWORDS for w in words):
+            return []
+        return self.search(text, limit)
 
     def recent(self, limit: int = 30) -> list[dict]:
         """The most recently created or updated memories."""
