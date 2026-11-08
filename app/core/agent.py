@@ -179,7 +179,10 @@ def _take_memories(
     for m in memories:
         if m["id"] in seen:
             continue
-        line = f"- {format_memory(m)}"
+        # Escape angle brackets so a memory can't close the <saved_memories>
+        # fence; newlines are already collapsed by MemoryStore.save().
+        text = " ".join(format_memory(m).split())
+        line = "- " + text.replace("<", "&lt;").replace(">", "&gt;")
         size = len(line) + 1
         if len(lines) >= max_count or len(seen) >= MAX_PROMPT_MEMORIES:
             break

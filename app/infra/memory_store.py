@@ -180,7 +180,7 @@ class MemoryStore:
         """Add a memory, or replace memory ``memory_id``.
 
         ``core`` marks a memory that always goes into the system prompt. When
-        updating, ``core=None`` keeps the memory's current setting.
+        updating, ``core=None`` and ``category=None`` keep the current values.
 
         Returns the stored memory plus ``status``: ``created``, ``updated``,
         ``duplicate`` (identical content already stored; nothing was written)
@@ -188,7 +188,9 @@ class MemoryStore:
         one core). Raises ``ValueError`` for empty/too-long content or an
         unknown id.
         """
-        content = (content or "").strip()
+        # One line per memory: newlines would let a memory forge extra lines
+        # in the system prompt.
+        content = " ".join((content or "").split())
         category = (category or "").strip().lower() or None
         if not content:
             raise ValueError("Memory content is empty.")
@@ -205,7 +207,7 @@ class MemoryStore:
                 if memory_id is not None:
                     try:
                         cur = conn.execute(
-                            "UPDATE memories SET content = ?, category = ?, "
+                            "UPDATE memories SET content = ?, category = COALESCE(?, category), "
                             "core = COALESCE(?, core), updated_at = ? WHERE id = ?",
                             (content, category, _core_value(core), now, memory_id),
                         )

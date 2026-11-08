@@ -35,7 +35,10 @@ class SaveMemoryTool(Tool):
                         "category": {
                             "type": "string",
                             "enum": _CATEGORIES,
-                            "description": "Kind of memory.",
+                            "description": (
+                                "Kind of memory. When updating, omit to keep the "
+                                "current one."
+                            ),
                         },
                         "memory_id": {
                             "type": "integer",
