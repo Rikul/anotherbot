@@ -244,6 +244,8 @@ class MemoryStore:
             conn.close()
 
         memory = self.get(new_id)
+        if memory is None:  # deleted by another connection in the meantime
+            raise ValueError("The memory was deleted while saving; try again.")
         memory["status"] = status
         return memory
 
