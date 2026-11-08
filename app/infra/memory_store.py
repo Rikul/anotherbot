@@ -21,6 +21,7 @@ from .app_logging import log
 DB_PATH: Path = APP_DB
 
 MAX_MEMORY_LENGTH = 1000
+MAX_CATEGORY_LENGTH = 50
 
 _SCHEMA = (
     """
@@ -191,7 +192,10 @@ class MemoryStore:
         # One line per memory: newlines would let a memory forge extra lines
         # in the system prompt.
         content = " ".join((content or "").split())
-        category = (category or "").strip().lower() or None
+        # Same treatment as content, and short: it is shown on every line.
+        category = (
+            " ".join((category or "").split()).lower()[:MAX_CATEGORY_LENGTH] or None
+        )
         if not content:
             raise ValueError("Memory content is empty.")
         if len(content) > MAX_MEMORY_LENGTH:

@@ -480,3 +480,9 @@ def test_save_reports_concurrent_delete(store):
     with patch.object(MemoryStore, "get", return_value=None):
         with pytest.raises(ValueError, match="deleted while saving"):
             store.save("User likes jazz")
+
+
+def test_category_is_normalised_and_capped(store):
+    m = store.save("User likes chess", "  Board\n\nGames  " + "x" * 200)
+    assert m["category"].startswith("board games ")
+    assert len(m["category"]) == 50
