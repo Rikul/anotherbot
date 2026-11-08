@@ -10,7 +10,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
 - **MCP Servers**: Connect any [Model Context Protocol](https://modelcontextprotocol.io) server via `mcp_servers.json` — tools are auto-discovered and available alongside built-ins
 - **Tool Calling**: File I/O, shell commands, web fetch, web search (text/images/video/news/books), calculator, Hacker News, todo list
-- **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing)
+- **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing, `computer-use` for driving a throwaway desktop in a container with Claude's computer toolset — needs `ANTHROPIC_API_KEY` and Docker or `docker compose --profile desktop up -d desktop`)
 - **Persistent History**: Per-channel SQLite message history at `~/.anotherbot/app.db` (shared with scheduled tasks)
 
 

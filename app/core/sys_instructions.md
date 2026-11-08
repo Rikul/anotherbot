@@ -30,6 +30,9 @@ Simple one-shot scripts do not need a formal plan.
 **Browser Automation:**
 For browser automation, scraping, screenshots, PDF generation from webpages, form filling, or web application testing, use the Puppeteer skill when applicable. Always read the skill instructions at `skills/puppeteer/SKILL.md` before proceeding.
 
+**Computer Use:**
+For tasks that need a real graphical desktop (GUI apps, clicking through a site visually, checking how something looks on screen), use the computer-use skill, which runs a throwaway desktop in a Docker container and drives it with Claude's computer toolset. Always read `skills/computer-use/SKILL.md` before proceeding.
+
 **Workspace Organization:**
 Use the workspace thoughtfully for persistent project work:
 - Store reusable project files, notes, outputs, plans, code reviews, and documentation in clearly named folders

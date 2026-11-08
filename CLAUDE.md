@@ -55,6 +55,8 @@ MCP servers are configured separately in `$ANOTHERBOT_HOME/mcp_servers.json` (sa
 
 For Docker, `compose.yaml` is the easy path (`docker compose up -d --build` reads the repo-root `.env`, forces `WEBSOCKET_HOST=0.0.0.0` and `ANOTHERBOT_HOME=/data`, and publishes `${WEBSOCKET_PORT:-8765}` on both sides). With plain `docker run`, pass env vars with `-e`/`--env-file`. `.dockerignore` excludes `.env` files so secrets are never baked into the image. See `Dockerfile` and the Docker section in README.
 
+`compose.yaml` also has an optional `desktop` service (profile `desktop`, built from `app/skills/computer-use/desktop`): a passwordless Xvnc desktop for the `computer-use` skill, reachable from the bot as `VNC_HOST=desktop` and published only on host loopback. The skill (`app/skills/computer-use/`: `setup.sh`, `desktop.sh`, `run_task.py`) drives it with Claude's computer toolset via the claude-quickstarts example VNC driver (fetched at a pinned commit) and needs `ANTHROPIC_API_KEY`, which is not part of `config`.
+
 ## Architecture
 
 ### Agent Loop

@@ -23,5 +23,17 @@ services:
     volumes:
       - anotherbot-data:/data
 
+  # Optional throwaway desktop for the computer-use skill (app/skills/computer-use).
+  #   docker compose --profile desktop up -d --build desktop
+  # The bot reaches it at VNC_HOST=desktop; the passwordless VNC port is only
+  # published on the host's loopback, for watching with a VNC viewer.
+  desktop:
+    build: app/skills/computer-use/desktop
+    image: anotherbot-desktop
+    profiles: [desktop]
+    shm_size: 512m
+    ports:
+      - "127.0.0.1:5900:5900"
+
 volumes:
   anotherbot-data:
