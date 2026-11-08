@@ -129,12 +129,13 @@ class MemoryStore:
         conn = self._connect()
         try:
             with conn:
-                # An index made before stemming was added: drop it and rebuild.
+                # Rebuild the index if it is missing (e.g. a memories table from
+                # elsewhere) or was made before stemming was added.
                 row = conn.execute(
                     "SELECT sql FROM sqlite_master WHERE name = 'memories_fts'"
                 ).fetchone()
-                rebuild = bool(row) and "porter" not in row[0]
-                if rebuild:
+                rebuild = not row or "porter" not in row[0]
+                if row and rebuild:
                     conn.execute("DROP TABLE memories_fts")
                 for stmt in _SCHEMA:
                     conn.execute(stmt)
