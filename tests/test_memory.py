@@ -486,3 +486,11 @@ def test_category_is_normalised_and_capped(store):
     m = store.save("User likes chess", "  Board\n\nGames  " + "x" * 200)
     assert m["category"].startswith("board games ")
     assert len(m["category"]) == 50
+
+
+def test_memory_phrasing_verbs_are_not_relevance(store):
+    store.save("User prefers metric units")
+    store.save("User likes green tea")
+    dark = store.save("User wants dark mode in every editor")
+    assert [m["id"] for m in store.relevant("I prefer dark mode")] == [dark["id"]]
+    assert store.relevant("what do you think I'd like?") == []

@@ -85,8 +85,9 @@ def _row_to_dict(row) -> dict:
     }
 
 
-# Words too common to say anything about relevance. "user" is here because
-# memories are written as "User likes …", so it would match every one.
+# Words too common to say anything about relevance. "user" and verbs like
+# "prefers"/"likes" are here because memories are written as "User prefers …",
+# so (after stemming) they would match most of them.
 _STOPWORDS = frozenset(
     """
     a about above after again all am an and any are as at be because been before
@@ -98,6 +99,8 @@ _STOPWORDS = frozenset(
     when where which while who whom why will with would you your yours
     hi hello hey please thanks thank ok okay yes yeah also get got like know want
     need tell give make let us one user
+    likes liked wants wanted needs needed prefer prefers preferred love loves loved
+    use uses used
     """.split()
 )
 
