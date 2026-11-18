@@ -126,7 +126,7 @@ def _format_memory_section(picked: dict[str, list[str]], total: int) -> str:
         for kind, lines in picked.items()
         if lines
     ]
-    hidden = total - shown
+    hidden = max(0, total - shown)  # count() is a separate query
     if hidden:
         parts.append(
             f"({hidden} more memories not shown; use search_memory to look for them.)"
