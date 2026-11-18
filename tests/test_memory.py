@@ -845,3 +845,22 @@ async def test_guard_fails_closed_on_database_error(bg_agent):
         )
     assert out.startswith("Not done") and "locked" in out
     assert MemoryStore().get(name["id"]) is not None
+
+
+def test_case_duplicate_cleanup_keeps_most_recently_updated(tmp_path):
+    db = tmp_path / "dups2.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL, category TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        INSERT INTO memories (content, created_at, updated_at) VALUES
+            ('User likes Coffee', '', '2026-11-02'),
+            ('user likes coffee', '', '2026-11-01');
+        """
+    )
+    conn.close()
+    assert [m["content"] for m in MemoryStore(db_path=db).recent()] == [
+        "User likes Coffee"
+    ]

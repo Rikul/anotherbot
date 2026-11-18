@@ -216,8 +216,10 @@ class MemoryStore:
 
     @staticmethod
     def _drop_case_duplicates(conn) -> None:
-        """Before the unique index on lower(content) exists, keep only the newest
-        of memories that differ just in letter case, so creating it can't fail."""
+        """Before the unique index on lower(content) exists, keep only the most
+        recently updated of memories that differ just in letter case, so
+        creating it can't fail. (Such tables predate the core column, so no
+        core flag can be lost here.)"""
         has_table = conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories'"
         ).fetchone()
@@ -226,8 +228,11 @@ class MemoryStore:
         ).fetchone()
         if has_table and not has_index:
             removed = conn.execute(
-                "DELETE FROM memories WHERE id NOT IN "
-                "(SELECT MAX(id) FROM memories GROUP BY lower(content))"
+                # Keep the most recently updated copy of each group.
+                "DELETE FROM memories WHERE id NOT IN (SELECT id FROM ("
+                "SELECT id, ROW_NUMBER() OVER (PARTITION BY lower(content) "
+                "ORDER BY updated_at DESC, id DESC) AS rn FROM memories) "
+                "WHERE rn = 1)"
             ).rowcount
             if removed:
                 log.warning("Removed %d duplicate memories before indexing", removed)
