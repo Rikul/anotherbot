@@ -308,6 +308,16 @@ class MemoryStore:
                             ).rowcount
                         ):
                             status = "promoted"
+                        # A different category given for the same fact wins.
+                        if (
+                            category
+                            and conn.execute(
+                                "UPDATE memories SET category = ?, updated_at = ? "
+                                "WHERE id = ? AND category IS NOT ?",
+                                (category, now, new_id, category),
+                            ).rowcount
+                        ):
+                            status = "updated" if status == "duplicate" else status
         finally:
             conn.close()
 

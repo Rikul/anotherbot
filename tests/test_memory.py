@@ -612,3 +612,12 @@ def test_save_warns_when_core_memories_overflow(monkeypatch):
     assert "more than 2 core memories" in SaveMemoryTool.call("fact c", core=True)
     assert "Warning" not in SaveMemoryTool.call("fact d")  # non-core saves stay quiet
     assert ms.MAX_CORE_MEMORIES == 20
+
+
+def test_duplicate_save_with_new_category_updates_it(store):
+    m = store.save("User likes tea", "other")
+    again = store.save("user likes tea", "preference")
+    assert again["id"] == m["id"] and again["status"] == "updated"
+    assert again["category"] == "preference"
+    assert store.save("User likes tea", "preference")["status"] == "duplicate"
+    assert store.save("User likes tea")["category"] == "preference"  # omitted: kept
