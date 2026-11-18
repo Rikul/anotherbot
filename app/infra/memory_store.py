@@ -243,6 +243,19 @@ class MemoryStore:
             conn.close()
         return _row_to_dict(row) if row else None
 
+    def find(self, content: str) -> dict | None:
+        """The stored memory whose text matches ``content`` (as ``save()``
+        normalises and compares it), or None."""
+        content = " ".join(str(content or "").split())
+        if not content:
+            return None
+        conn = self._connect()
+        try:
+            memory_id = self._find_content(conn, content)
+        finally:
+            conn.close()
+        return self.get(memory_id) if memory_id else None
+
     @staticmethod
     def _find_content(conn, content: str) -> int | None:
         row = conn.execute(

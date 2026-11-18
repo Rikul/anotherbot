@@ -779,3 +779,21 @@ async def test_core_memory_cannot_be_deleted_after_untrusted_output(bg_agent):
     )
     assert out.startswith("Not done")
     assert MemoryStore().get(name["id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_core_memory_untouched_by_duplicate_save_after_untrusted_output(bg_agent):
+    name = MemoryStore().save("User's name is Rikul", "personal", core=True)
+    before = MemoryStore().get(name["id"])
+    bg_agent._untrusted_output_seen = True
+    out = await bg_agent.handle_tool_call(
+        _call("save_memory", {"content": "user's name is rikul", "category": "other"})
+    )
+    assert out.startswith("Not done")
+    assert MemoryStore().get(name["id"]) == before
+
+
+def test_find_matches_like_save(store):
+    m = store.save("User likes  tea")
+    assert store.find("user likes tea")["id"] == m["id"]
+    assert store.find("") is None and store.find("nothing") is None

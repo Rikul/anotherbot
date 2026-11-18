@@ -449,14 +449,20 @@ class Agent(ABC):
         ):
             return ""
         memory_id = tool_args.get("memory_id")
-        if memory_id is None:
-            return ""
         try:
-            existing = MemoryStore().get(int(memory_id))
+            if memory_id is not None:
+                existing = MemoryStore().get(int(memory_id))
+            elif tool_name == "save_memory":
+                # Re-saving a core memory's text would touch it through the
+                # duplicate path (category, updated_at).
+                existing = MemoryStore().find(tool_args.get("content"))
+            else:
+                return ""
         except (TypeError, ValueError, sqlite3.Error):
-            return ""  # let save_memory report the bad id itself
+            return ""  # let the tool report the bad id itself
         if not existing or not existing["core"]:
             return ""
+        memory_id = existing["id"]
         log.warning("save_memory: refused edit of core memory %s", memory_id)
         return (
             f"Not done: memory {memory_id} is a core memory, and this reply has "
