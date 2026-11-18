@@ -2,7 +2,12 @@
 
 from ..core.tool import Tool
 from ..infra.app_logging import log
-from ..infra.memory_store import MAX_MEMORY_LENGTH, MemoryStore, format_memory
+from ..infra.memory_store import (
+    MAX_CORE_MEMORIES,
+    MAX_MEMORY_LENGTH,
+    MemoryStore,
+    format_memory,
+)
 
 _CATEGORIES = ["preference", "personal", "work", "project", "other"]
 
@@ -71,8 +76,9 @@ class SaveMemoryTool(Tool):
             category,
             core,
         )
+        store = MemoryStore()
         try:
-            memory = MemoryStore().save(content, category, memory_id, core)
+            memory = store.save(content, category, memory_id, core)
         except ValueError as e:
             return f"Memory not saved: {e}"
         status = memory["status"]
@@ -80,9 +86,25 @@ class SaveMemoryTool(Tool):
         if status == "duplicate":
             return f"Already remembered: {line}"
         if status == "promoted":
-            return f"Already remembered; now a core memory: {line}"
-        kind = "Core memory" if memory["core"] else "Memory"
-        return f"{kind} {status}: {line}"
+            reply = f"Already remembered; now a core memory: {line}"
+        else:
+            kind = "Core memory" if memory["core"] else "Memory"
+            reply = f"{kind} {status}: {line}"
+        if memory["core"]:
+            reply += _core_overflow_note(store)
+        return reply
+
+
+def _core_overflow_note(store: MemoryStore) -> str:
+    """A warning when there are more core memories than the prompt shows."""
+    count = len(store.core(MAX_CORE_MEMORIES + 1))
+    if count <= MAX_CORE_MEMORIES:
+        return ""
+    return (
+        f"\nWarning: there are more than {MAX_CORE_MEMORIES} core memories, and only "
+        f"the {MAX_CORE_MEMORIES} most recently updated are always shown. Demote "
+        "less important ones (save_memory with memory_id and core=false)."
+    )
 
 
 class SearchMemoryTool(Tool):

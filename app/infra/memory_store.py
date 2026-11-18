@@ -69,6 +69,36 @@ _SCHEMA = (
 
 _COLUMNS = "id, content, category, core, created_at, updated_at"
 
+# How many core memories the system prompt always shows (most recently updated).
+MAX_CORE_MEMORIES = 20
+
+# Databases whose schema this process has already checked or migrated.
+_CURRENT_SCHEMA: set[Path] = set()
+_SCHEMA_OBJECTS = {
+    "memories",
+    "idx_memories_content",
+    "memories_fts",
+    "memories_ai",
+    "memories_ad",
+    "memories_au",
+}
+
+
+def _schema_is_current(conn) -> bool:
+    """Read-only check that every table, index and trigger is in place and
+    up to date, so no migration (and no write lock) is needed."""
+    rows = dict(
+        conn.execute(
+            "SELECT name, sql FROM sqlite_master "
+            f"WHERE name IN ({','.join('?' * len(_SCHEMA_OBJECTS))})",
+            sorted(_SCHEMA_OBJECTS),
+        ).fetchall()
+    )
+    if set(rows) != _SCHEMA_OBJECTS or "porter" not in (rows["memories_fts"] or ""):
+        return False
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(memories)")}
+    return "core" in cols
+
 
 def _now() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -129,9 +159,16 @@ class MemoryStore:
         return get_db_connection(self.db_path)
 
     def _ensure_schema(self) -> None:
+        # MemoryStore() is built on every turn: skip the (write-locking)
+        # migration once the schema is known to be current.
+        if self.db_path in _CURRENT_SCHEMA:
+            return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = self._connect()
         try:
+            if _schema_is_current(conn):
+                _CURRENT_SCHEMA.add(self.db_path)
+                return
             with conn:
                 # One transaction for the whole migration: sqlite3 doesn't wrap
                 # DDL in one on its own, so a crash between dropping and
@@ -158,6 +195,7 @@ class MemoryStore:
                     conn.execute(
                         "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')"
                     )
+            _CURRENT_SCHEMA.add(self.db_path)
         finally:
             conn.close()
 

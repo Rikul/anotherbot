@@ -578,3 +578,37 @@ def test_schema_migration_runs_in_one_transaction(tmp_path):
     assert [m["content"] for m in MemoryStore(db_path=db).search("dog")] == [
         "User owns two dogs"
     ]
+
+
+def test_current_schema_is_not_migrated_again(tmp_path):
+    from app.infra import memory_store as ms
+
+    db = tmp_path / "fresh.db"
+    MemoryStore(db_path=db)
+    ms._CURRENT_SCHEMA.clear()  # as in a new process
+
+    statements = []
+    real_connect = ms.get_db_connection
+
+    def tracing_connect(path):
+        conn = real_connect(path)
+        conn.set_trace_callback(statements.append)
+        return conn
+
+    with patch.object(ms, "get_db_connection", tracing_connect):
+        MemoryStore(db_path=db)  # read-only check, then cached
+        MemoryStore(db_path=db)  # skipped entirely
+    assert not any("BEGIN" in s or "CREATE" in s for s in statements)
+    assert sum("sqlite_master" in s for s in statements) == 1
+
+
+def test_save_warns_when_core_memories_overflow(monkeypatch):
+    from app.infra import memory_store as ms
+    from app.tools import memory as memory_tools
+
+    monkeypatch.setattr(memory_tools, "MAX_CORE_MEMORIES", 2)
+    assert "Warning" not in SaveMemoryTool.call("fact a", core=True)
+    assert "Warning" not in SaveMemoryTool.call("fact b", core=True)
+    assert "more than 2 core memories" in SaveMemoryTool.call("fact c", core=True)
+    assert "Warning" not in SaveMemoryTool.call("fact d")  # non-core saves stay quiet
+    assert ms.MAX_CORE_MEMORIES == 20

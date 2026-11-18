@@ -16,7 +16,7 @@ from pathlib import Path
 from .. import config
 from .client import Client
 from ..infra.app_logging import log
-from ..infra.memory_store import MemoryStore, format_memory
+from ..infra.memory_store import MAX_CORE_MEMORIES, MemoryStore, format_memory
 from ..infra.tracer import Tracer, redact
 from . import runtime
 
@@ -30,7 +30,6 @@ MAX_CONTEXT_MESSAGES = 1000
 # memories can't crowd out the conversation (each may be 1000 characters).
 MAX_PROMPT_MEMORIES = 30
 MAX_PROMPT_MEMORY_CHARS = 6000
-MAX_CORE_MEMORIES = 20
 MAX_CORE_MEMORY_CHARS = 2500
 MAX_RELEVANT_MEMORIES = 10
 
