@@ -300,9 +300,9 @@ class MemoryStore:
             except sqlite3.Error as e:
                 log.warning("Memory FTS search failed (%s), falling back to LIKE", e)
                 rows = conn.execute(
-                    f"SELECT {_COLUMNS} FROM memories WHERE content LIKE ? "
+                    f"SELECT {_COLUMNS} FROM memories WHERE content LIKE ? ESCAPE '\\' "
                     "ORDER BY updated_at DESC LIMIT ?",
-                    (f"%{query.strip()}%", limit),
+                    (f"%{_like_escape(query.strip())}%", limit),
                 ).fetchall()
         finally:
             conn.close()
@@ -366,6 +366,11 @@ class MemoryStore:
         finally:
             conn.close()
         return _row_to_dict(row) if row else None
+
+
+def _like_escape(text: str) -> str:
+    """Make %, _ and \\ match literally in a LIKE ... ESCAPE '\\' pattern."""
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _core_value(core: bool | None) -> int | None:

@@ -523,3 +523,18 @@ def test_case_duplicates_are_merged_before_unique_index(tmp_path):
         "user likes coffee",
     ]
     assert [m["content"] for m in store.search("coffee")] == ["user likes coffee"]
+
+
+def test_like_fallback_treats_wildcards_literally(store):
+    from app.infra.memory_store import _like_escape
+
+    assert _like_escape(r"50%_a\b") == r"50\%\_a\\b"
+    store.save("User saves 50% of income")
+    store.save("User has a cat")
+    conn = sqlite3.connect(store.db_path)
+    rows = conn.execute(
+        "SELECT content FROM memories WHERE content LIKE ? ESCAPE '\\'",
+        (f"%{_like_escape('%')}%",),
+    ).fetchall()
+    conn.close()
+    assert rows == [("User saves 50% of income",)]
