@@ -23,17 +23,14 @@ from . import runtime
 MAX_CONTEXT_MESSAGES = 1000
 
 # Tools whose output is the bot's own data, not outside content. Any other
-# tool (web, search, files, shell, MCP, helper agent, and search_memory, since
-# a memory may hold text saved from such output) counts as untrusted for
+# tool (web, search, files, shell, MCP, helper agent, and search_memory or the
+# to-do list tools, whose items may hold text copied from such output)
+# counts as untrusted for
 # the core-memory guards in Agent._refuse_core_edit / _guard_core_save.
 TRUSTED_OUTPUT_TOOLS = frozenset(
     {
         "save_memory",
         "delete_memory",
-        "todo_add",
-        "todo_list",
-        "todo_update",
-        "todo_clear",
         "calculator",
         "get_datetime",
     }
@@ -474,8 +471,16 @@ class Agent(ABC):
                 existing = MemoryStore().find(tool_args.get("content"))
             else:
                 return ""
-        except (TypeError, ValueError, sqlite3.Error):
+        except (TypeError, ValueError):
             return ""  # let the tool report the bad id itself
+        except sqlite3.Error as e:
+            # Can't tell whether it's a core memory (e.g. database locked):
+            # refuse rather than let the edit through unchecked.
+            log.warning("Core-memory check failed (%s); refusing %s", e, tool_name)
+            return (
+                "Not done: couldn't check whether this is a core memory "
+                f"({e}). Try again in a moment."
+            )
         if not existing or not existing["core"]:
             return ""
         memory_id = existing["id"]

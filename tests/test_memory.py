@@ -695,7 +695,7 @@ async def test_guard_keeps_existing_core_flag_on_update(bg_agent):
 @pytest.mark.asyncio
 async def test_trusted_tools_do_not_trip_the_guard(bg_agent):
     await bg_agent.handle_tool_call(_call("calculator", {"expression": "1+1"}))
-    await bg_agent.handle_tool_call(_call("todo_list", {}))
+    await bg_agent.handle_tool_call(_call("get_datetime", {}))
     assert bg_agent._untrusted_output_seen is False
 
 
@@ -825,3 +825,23 @@ def test_schema_cache_keeps_one_entry_per_database(tmp_path):
         store.save(f"fact {i}")
         MemoryStore(db_path=db)
     assert list(ms._CURRENT_SCHEMA).count(db) == 1
+
+
+@pytest.mark.asyncio
+async def test_todo_output_is_untrusted(bg_agent):
+    await bg_agent.handle_tool_call(_call("todo_list", {}))
+    assert bg_agent._untrusted_output_seen is True
+
+
+@pytest.mark.asyncio
+async def test_guard_fails_closed_on_database_error(bg_agent):
+    name = MemoryStore().save("User's name is Rikul", core=True)
+    bg_agent._untrusted_output_seen = True
+    with patch.object(
+        MemoryStore, "get", side_effect=sqlite3.OperationalError("database is locked")
+    ):
+        out = await bg_agent.handle_tool_call(
+            _call("delete_memory", {"memory_id": name["id"]})
+        )
+    assert out.startswith("Not done") and "locked" in out
+    assert MemoryStore().get(name["id"]) is not None
