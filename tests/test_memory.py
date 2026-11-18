@@ -705,3 +705,32 @@ async def test_guard_resets_each_turn(bg_agent):
     with patch.object(agent_module.Agent, "_run_loop", return_value="done"):
         await bg_agent._loop([], [])
     assert bg_agent._untrusted_output_seen is False
+
+
+def test_relevance_ignores_category_words(store):
+    store.save("User is a nurse on night shifts", "work")
+    store.save("User's manager is Dana", "work")
+    project = store.save("User's work laptop is a ThinkPad")
+    assert [m["id"] for m in store.relevant("my work laptop is slow")] == [
+        project["id"]
+    ]
+    # search_memory still matches categories
+    assert len(store.search("work")) == 3
+
+
+@pytest.mark.parametrize("query", [42, ["tea"], None, {"q": "tea"}])
+def test_search_tolerates_non_string_query(store, query):
+    store.save("User likes tea")
+    assert isinstance(store.search(query), list)
+    assert isinstance(store.relevant(query), list)
+    assert isinstance(SearchMemoryTool.call(query), str)
+
+
+def test_replaced_database_is_checked_again(tmp_path):
+    db = tmp_path / "swap.db"
+    MemoryStore(db_path=db).save("User likes tea")
+    db.unlink()
+    for suffix in ("-wal", "-shm"):
+        (tmp_path / f"swap.db{suffix}").unlink(missing_ok=True)
+    sqlite3.connect(db).close()  # an empty replacement file
+    assert MemoryStore(db_path=db).save("User likes coffee")["status"] == "created"

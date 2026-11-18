@@ -73,7 +73,7 @@ _COLUMNS = "id, content, category, core, created_at, updated_at"
 MAX_CORE_MEMORIES = 20
 
 # Databases whose schema this process has already checked or migrated.
-_CURRENT_SCHEMA: set[Path] = set()
+_CURRENT_SCHEMA: set[tuple] = set()
 _SCHEMA_OBJECTS = {
     "memories",
     "idx_memories_content",
@@ -82,6 +82,21 @@ _SCHEMA_OBJECTS = {
     "memories_ad",
     "memories_au",
 }
+
+
+def _file_key(path: Path) -> tuple:
+    """The database file's identity, so a deleted or replaced file (e.g. a
+    restored backup) is checked again rather than trusted from the cache.
+
+    The modification time is included because a new file can get the old
+    one's inode; it also changes on ordinary writes, which only costs a
+    cheap read-only re-check.
+    """
+    try:
+        st = path.stat()
+    except OSError:
+        return (path, None)
+    return (path, st.st_dev, st.st_ino, st.st_mtime_ns)
 
 
 def _schema_is_current(conn) -> bool:
@@ -161,13 +176,13 @@ class MemoryStore:
     def _ensure_schema(self) -> None:
         # MemoryStore() is built on every turn: skip the (write-locking)
         # migration once the schema is known to be current.
-        if self.db_path in _CURRENT_SCHEMA:
+        if _file_key(self.db_path) in _CURRENT_SCHEMA:
             return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = self._connect()
         try:
             if _schema_is_current(conn):
-                _CURRENT_SCHEMA.add(self.db_path)
+                _CURRENT_SCHEMA.add(_file_key(self.db_path))
                 return
             with conn:
                 # One transaction for the whole migration: sqlite3 doesn't wrap
@@ -195,7 +210,7 @@ class MemoryStore:
                     conn.execute(
                         "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')"
                     )
-            _CURRENT_SCHEMA.add(self.db_path)
+            _CURRENT_SCHEMA.add(_file_key(self.db_path))
         finally:
             conn.close()
 
@@ -327,18 +342,25 @@ class MemoryStore:
         memory["status"] = status
         return memory
 
-    def search(self, query: str, limit: int = 10) -> list[dict]:
+    def search(
+        self, query: str, limit: int = 10, content_only: bool = False
+    ) -> list[dict]:
         """Memories matching ``query``, best match first.
 
         An empty query (or one with no words) returns the most recent ones.
+        ``content_only`` ignores categories, so a word like "work" doesn't
+        match every memory filed under it.
         """
+        query = "" if query is None else str(query)  # models may send other types
         try:
             limit = max(1, min(int(limit or 10), 100))
         except (TypeError, ValueError):  # models sometimes send null or text
             limit = 10
-        fts = _fts_query(query or "")
+        fts = _fts_query(query)
         if not fts:
             return self.recent(limit)
+        if content_only:
+            fts = f"content : ({fts})"
 
         conn = self._connect()
         try:
@@ -366,10 +388,11 @@ class MemoryStore:
         Unlike ``search()``, returns nothing when ``text`` has no keywords
         instead of falling back to the most recent memories.
         """
-        words = re.findall(r"\w+", (text or "").lower())
+        text = "" if text is None else str(text)
+        words = re.findall(r"\w+", text.lower())
         if not any(len(w) > 1 and w not in _STOPWORDS for w in words):
             return []
-        return self.search(text, limit)
+        return self.search(text, limit, content_only=True)
 
     def core(self, limit: int = 20) -> list[dict]:
         """Core memories (always in the prompt), most recently updated first."""
