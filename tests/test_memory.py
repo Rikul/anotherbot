@@ -538,3 +538,43 @@ def test_like_fallback_treats_wildcards_literally(store):
     ).fetchall()
     conn.close()
     assert rows == [("User saves 50% of income",)]
+
+
+def test_schema_migration_runs_in_one_transaction(tmp_path):
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL, category TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE UNIQUE INDEX idx_memories_content ON memories(lower(content));
+        CREATE VIRTUAL TABLE memories_fts USING fts5(
+            content, category, content='memories', content_rowid='id');
+        INSERT INTO memories (content, created_at, updated_at)
+            VALUES ('User owns two dogs', '', '');
+        INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');
+        """
+    )
+    conn.close()
+
+    real_execute = sqlite3.Connection.execute
+
+    class FailingRebuild(sqlite3.Connection):
+        def execute(self, sql, *args):
+            if "VALUES ('rebuild')" in sql:
+                raise sqlite3.OperationalError("simulated crash")
+            return real_execute(self, sql, *args)
+
+    from app.infra import memory_store as ms
+
+    with patch.object(
+        ms, "get_db_connection", lambda p: sqlite3.connect(p, factory=FailingRebuild)
+    ):
+        with pytest.raises(sqlite3.OperationalError):
+            MemoryStore(db_path=db)
+    # The failed migration rolled back: the old index is still there, so the
+    # next start retries the rebuild and the memory is searchable.
+    assert [m["content"] for m in MemoryStore(db_path=db).search("dog")] == [
+        "User owns two dogs"
+    ]

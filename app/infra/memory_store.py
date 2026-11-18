@@ -133,6 +133,10 @@ class MemoryStore:
         conn = self._connect()
         try:
             with conn:
+                # One transaction for the whole migration: sqlite3 doesn't wrap
+                # DDL in one on its own, so a crash between dropping and
+                # rebuilding the search index could leave it empty for good.
+                conn.execute("BEGIN IMMEDIATE")
                 self._drop_case_duplicates(conn)
                 # Rebuild the index if it is missing (e.g. a memories table from
                 # elsewhere) or was made before stemming was added.
