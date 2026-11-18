@@ -24,7 +24,7 @@ MAX_CONTEXT_MESSAGES = 1000
 
 # Tools whose output is the bot's own data, not outside content. Any other
 # tool (web, search, files, shell, MCP, helper agent) counts as untrusted for
-# the core-memory guard in Agent._guard_core_save.
+# the core-memory guards in Agent._refuse_core_edit / _guard_core_save.
 TRUSTED_OUTPUT_TOOLS = frozenset(
     {
         "save_memory",
@@ -421,6 +421,9 @@ class Agent(ABC):
                     "User denied permission to run this tool. Ask for permission "
                     "to run the tool again if you want to try running it."
                 )
+            refusal = self._refuse_core_edit(tool_name, tool_args)
+            if refusal:
+                return refusal
             note = self._guard_core_save(tool_name, tool_args)
             await self._on_tool_start(tool_name, tool_args)
             result = await run_tool_async(tool_name=tool_name, tool_args=tool_args)
@@ -431,6 +434,36 @@ class Agent(ABC):
             error_msg = f"Error running tool {tool_name}: {str(e)}"
             log.error(error_msg)
             return error_msg
+
+    def _refuse_core_edit(self, tool_name: str, tool_args: dict) -> str:
+        """After untrusted tool output, refuse to rewrite or delete a core memory.
+
+        Otherwise injected content could change what a core memory says (and
+        so what every future prompt says) without ever setting core=true, or
+        remove one.
+        Returns the refusal text, or "" to let the call run.
+        """
+        if (
+            tool_name not in ("save_memory", "delete_memory")
+            or not self._untrusted_output_seen
+        ):
+            return ""
+        memory_id = tool_args.get("memory_id")
+        if memory_id is None:
+            return ""
+        try:
+            existing = MemoryStore().get(int(memory_id))
+        except (TypeError, ValueError, sqlite3.Error):
+            return ""  # let save_memory report the bad id itself
+        if not existing or not existing["core"]:
+            return ""
+        log.warning("save_memory: refused edit of core memory %s", memory_id)
+        return (
+            f"Not done: memory {memory_id} is a core memory, and this reply has "
+            "already read web, file or tool output, so it can't be changed or "
+            "deleted now. "
+            "If the user wants it changed, they can confirm in their next message."
+        )
 
     def _guard_core_save(self, tool_name: str, tool_args: dict) -> str:
         """Stop untrusted content from planting a core memory.

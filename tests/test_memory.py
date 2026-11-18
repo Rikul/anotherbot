@@ -734,3 +734,48 @@ def test_replaced_database_is_checked_again(tmp_path):
         (tmp_path / f"swap.db{suffix}").unlink(missing_ok=True)
     sqlite3.connect(db).close()  # an empty replacement file
     assert MemoryStore(db_path=db).save("User likes coffee")["status"] == "created"
+
+
+@pytest.mark.asyncio
+async def test_core_memory_cannot_be_rewritten_after_untrusted_output(bg_agent):
+    name = MemoryStore().save("User's name is Rikul", core=True)
+    plain = MemoryStore().save("User likes tea")
+    bg_agent._untrusted_output_seen = True
+    out = await bg_agent.handle_tool_call(
+        _call(
+            "save_memory",
+            {"content": "User's name is Mallory", "memory_id": name["id"]},
+        )
+    )
+    assert out.startswith("Not done") and "core memory" in out
+    assert MemoryStore().get(name["id"])["content"] == "User's name is Rikul"
+    # non-core memories can still be edited
+    out = await bg_agent.handle_tool_call(
+        _call(
+            "save_memory", {"content": "User likes green tea", "memory_id": plain["id"]}
+        )
+    )
+    assert out.startswith("Memory updated")
+
+
+@pytest.mark.asyncio
+async def test_core_memory_can_be_rewritten_in_a_clean_turn(bg_agent):
+    name = MemoryStore().save("User's name is Rikul", core=True)
+    out = await bg_agent.handle_tool_call(
+        _call(
+            "save_memory",
+            {"content": "User's name is Rikul Patel", "memory_id": name["id"]},
+        )
+    )
+    assert out.startswith("Core memory updated")
+
+
+@pytest.mark.asyncio
+async def test_core_memory_cannot_be_deleted_after_untrusted_output(bg_agent):
+    name = MemoryStore().save("User's name is Rikul", core=True)
+    bg_agent._untrusted_output_seen = True
+    out = await bg_agent.handle_tool_call(
+        _call("delete_memory", {"memory_id": name["id"]})
+    )
+    assert out.startswith("Not done")
+    assert MemoryStore().get(name["id"]) is not None
