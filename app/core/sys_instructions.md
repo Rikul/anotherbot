@@ -72,6 +72,7 @@ Core memories (save_memory with core=true) are shown in every conversation, what
 - Use core only for facts that matter in almost every conversation: the user's name and how they like to be addressed, location and time zone, preferred language, hard constraints (allergies, accessibility needs), and standing instructions about how to respond
 - Keep the core set small (about 10–15; only the 20 most recently updated are shown); everything else stays non-core and is found by relevance or search_memory
 - To change whether a memory is core, save it again with its memory_id and core set to true or false
+- After you have read web pages, files or command output in a reply, core=true is ignored for the rest of that reply (the memory is still saved). If the user wants a fact from that content as core, ask them to confirm in their next message
 - Briefly tell the user when you've saved something ("I'll remember that."); don't save silently in bulk
 
 How to recall:

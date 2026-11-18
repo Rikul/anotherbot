@@ -21,6 +21,23 @@ from ..infra.tracer import Tracer, redact
 from . import runtime
 
 MAX_CONTEXT_MESSAGES = 1000
+
+# Tools whose output is the bot's own data, not outside content. Any other
+# tool (web, search, files, shell, MCP, helper agent) counts as untrusted for
+# the core-memory guard in Agent._guard_core_save.
+TRUSTED_OUTPUT_TOOLS = frozenset(
+    {
+        "save_memory",
+        "search_memory",
+        "delete_memory",
+        "todo_add",
+        "todo_list",
+        "todo_update",
+        "todo_clear",
+        "calculator",
+        "get_datetime",
+    }
+)
 # Long-term memories in the system prompt, in this order:
 # - core memories (the user's name, hard constraints, …): always, up to
 #   MAX_CORE_MEMORIES / MAX_CORE_MEMORY_CHARS so they can't be crowded out;
@@ -216,6 +233,8 @@ class Agent(ABC):
         self.tracer = Tracer(self.trace_label)
         # Per-call stats (model, latency, usage) of the current turn, for its trajectory.
         self._llm_calls: list[dict] = []
+        # Set once this turn has read untrusted tool output (see _guard_core_save).
+        self._untrusted_output_seen = False
 
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
@@ -402,12 +421,36 @@ class Agent(ABC):
                     "User denied permission to run this tool. Ask for permission "
                     "to run the tool again if you want to try running it."
                 )
+            note = self._guard_core_save(tool_name, tool_args)
             await self._on_tool_start(tool_name, tool_args)
-            return await run_tool_async(tool_name=tool_name, tool_args=tool_args)
+            result = await run_tool_async(tool_name=tool_name, tool_args=tool_args)
+            if tool_name not in TRUSTED_OUTPUT_TOOLS:
+                self._untrusted_output_seen = True
+            return f"{result}{note}" if note else result
         except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
             error_msg = f"Error running tool {tool_name}: {str(e)}"
             log.error(error_msg)
             return error_msg
+
+    def _guard_core_save(self, tool_name: str, tool_args: dict) -> str:
+        """Stop untrusted content from planting a core memory.
+
+        Core memories reach every future conversation, so once this turn has
+        read a web page, file, command output or similar, save_memory may not
+        set core=true: the memory is kept, without changing its core setting.
+        Returns a note for the tool result ("" if nothing was changed).
+        """
+        if tool_name != "save_memory" or not tool_args.get("core"):
+            return ""
+        if not self._untrusted_output_seen:
+            return ""
+        tool_args["core"] = None  # new memory: not core; existing: unchanged
+        log.warning("save_memory: core=true ignored after untrusted tool output")
+        return (
+            "\nNote: not marked as core, because this reply has already read web, "
+            "file or tool output. If the user wants it as a core memory, they can "
+            "confirm in their next message."
+        )
 
     # --- shared loop ---
 
@@ -451,6 +494,7 @@ class Agent(ABC):
             log.info("%s...", result[:250])
 
     async def _loop(self, messages: list, tool_specs: list) -> str:
+        self._untrusted_output_seen = False  # a new turn starts clean
         try:
             return await self._run_loop(messages, tool_specs)
         except BaseException as e:
