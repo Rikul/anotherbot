@@ -88,6 +88,7 @@ class CliAgent(Agent):
                 "channel": self.channel_str,
                 "conversation_id": self.conversation_id,
                 "conversation_name": conv["name"] if conv else "New Conversation",
+                "memory_query": self._memory_query(message),
             }
         )
         system = (
