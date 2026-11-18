@@ -16,7 +16,7 @@ from ..infra.conversations import ConversationStore
 from . import runtime
 from ..channels.commands import BotCommand, build_command_registry
 from ..tools.todo import init_task_todos
-from ..infra import restart
+from ..infra import restart, self_update
 
 _MAX_EMPTY_RETRIES = 5
 
@@ -76,12 +76,37 @@ class BackgroundAgent(Agent):
                     "Restart the bot, loading the latest code.",
                     self._restart_cmd,
                 ),
+                BotCommand(
+                    "update",
+                    "Pull the latest code from git, then restart.",
+                    self._update_cmd,
+                ),
             ),
         )
 
     async def _restart_cmd(self, _args: str = "") -> str:
         restart.request_restart()
         return "Restarting... I'll be back in a few seconds."
+
+    async def _update_cmd(self, args: str = "") -> str:
+        """Handle ``/update [check|rebase|merge|force|stash]`` for this checkout.
+
+        git work runs in a worker thread: fetching and merging are I/O that can
+        take seconds, and blocking the loop would stall every channel.
+        """
+        tokens = args.split()
+        strategy = next((t for t in tokens if t in self_update.STRATEGIES), "ff-only")
+
+        if "check" in tokens:
+            report = await asyncio.to_thread(self_update.check)
+        else:
+            report = await asyncio.to_thread(
+                self_update.update,
+                strategy=strategy,
+                allow_dirty="force" in tokens,
+                stash="stash" in tokens,
+            )
+        return self_update.format_report(report)
 
     async def _stop_cmd(self, _args: str = "") -> str:
         # Listed in /help, but every channel answers /stop itself so it can

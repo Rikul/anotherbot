@@ -33,6 +33,7 @@ from ..tools.get_city_state import GetCityState
 from ..tools.get_datetime import GetDateTime
 from ..tools.helper_agent import HelperAgentTool
 from ..tools.memory import SaveMemoryTool, SearchMemoryTool, DeleteMemoryTool
+from ..tools.self_update import SelfUpdateTool
 from . import mcp_manager as mcp
 from .tool import MAX_TOOL_RESULT_LENGTH
 
@@ -64,6 +65,7 @@ tool_registry = {
     "save_memory": SaveMemoryTool,
     "search_memory": SearchMemoryTool,
     "delete_memory": DeleteMemoryTool,
+    "self_update": SelfUpdateTool,
 }
 
 all_tool_specs = [tool.spec() for tool in tool_registry.values()]
