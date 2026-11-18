@@ -261,7 +261,10 @@ class MemoryStore:
 
         An empty query (or one with no words) returns the most recent ones.
         """
-        limit = max(1, min(int(limit), 100))
+        try:
+            limit = max(1, min(int(limit or 10), 100))
+        except (TypeError, ValueError):  # models sometimes send null or text
+            limit = 10
         fts = _fts_query(query or "")
         if not fts:
             return self.recent(limit)

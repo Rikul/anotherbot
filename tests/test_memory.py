@@ -494,3 +494,10 @@ def test_memory_phrasing_verbs_are_not_relevance(store):
     dark = store.save("User wants dark mode in every editor")
     assert [m["id"] for m in store.relevant("I prefer dark mode")] == [dark["id"]]
     assert store.relevant("what do you think I'd like?") == []
+
+
+@pytest.mark.parametrize("limit", [None, "abc", 0, -5, 500])
+def test_search_tolerates_bad_limit(store, limit):
+    store.save("User likes tea")
+    assert store.search("tea", limit)[0]["content"] == "User likes tea"
+    assert "tea" in SearchMemoryTool.call("tea", limit)
