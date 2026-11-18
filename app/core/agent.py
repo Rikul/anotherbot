@@ -80,7 +80,7 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
     sys_prompt += f"""
 
 ## Current System Context
-- Conversation started on   {now.strftime("%Y-%m-%d %H:%M:%S")} {now.astimezone().tzname()}
+- Current time (server): {now.strftime("%Y-%m-%d %H:%M:%S")} {now.astimezone().tzname()}
 - Day of Week: {now.strftime("%A")}
 - OS:         {platform.system()} {platform.release()}
 - Shell:      {os.environ.get("SHELL", "unknown")}
