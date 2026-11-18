@@ -501,3 +501,25 @@ def test_search_tolerates_bad_limit(store, limit):
     store.save("User likes tea")
     assert store.search("tea", limit)[0]["content"] == "User likes tea"
     assert "tea" in SearchMemoryTool.call("tea", limit)
+
+
+def test_case_duplicates_are_merged_before_unique_index(tmp_path):
+    db = tmp_path / "dups.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE memories (id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL, category TEXT,
+            created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        INSERT INTO memories (content, created_at, updated_at)
+            VALUES ('User likes Coffee', '', ''), ('user likes coffee', '', ''),
+                   ('User has a cat', '', '');
+        """
+    )
+    conn.close()
+    store = MemoryStore(db_path=db)  # must not raise IntegrityError
+    assert sorted(m["content"] for m in store.recent()) == [
+        "User has a cat",
+        "user likes coffee",
+    ]
+    assert [m["content"] for m in store.search("coffee")] == ["user likes coffee"]

@@ -133,6 +133,7 @@ class MemoryStore:
         conn = self._connect()
         try:
             with conn:
+                self._drop_case_duplicates(conn)
                 # Rebuild the index if it is missing (e.g. a memories table from
                 # elsewhere) or was made before stemming was added.
                 row = conn.execute(
@@ -155,6 +156,24 @@ class MemoryStore:
                     )
         finally:
             conn.close()
+
+    @staticmethod
+    def _drop_case_duplicates(conn) -> None:
+        """Before the unique index on lower(content) exists, keep only the newest
+        of memories that differ just in letter case, so creating it can't fail."""
+        has_table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'memories'"
+        ).fetchone()
+        has_index = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'idx_memories_content'"
+        ).fetchone()
+        if has_table and not has_index:
+            removed = conn.execute(
+                "DELETE FROM memories WHERE id NOT IN "
+                "(SELECT MAX(id) FROM memories GROUP BY lower(content))"
+            ).rowcount
+            if removed:
+                log.warning("Removed %d duplicate memories before indexing", removed)
 
     def get(self, memory_id: int) -> dict | None:
         """Return one memory, or None if it doesn't exist."""
