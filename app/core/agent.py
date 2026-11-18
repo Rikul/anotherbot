@@ -23,12 +23,12 @@ from . import runtime
 MAX_CONTEXT_MESSAGES = 1000
 
 # Tools whose output is the bot's own data, not outside content. Any other
-# tool (web, search, files, shell, MCP, helper agent) counts as untrusted for
+# tool (web, search, files, shell, MCP, helper agent, and search_memory, since
+# a memory may hold text saved from such output) counts as untrusted for
 # the core-memory guards in Agent._refuse_core_edit / _guard_core_save.
 TRUSTED_OUTPUT_TOOLS = frozenset(
     {
         "save_memory",
-        "search_memory",
         "delete_memory",
         "todo_add",
         "todo_list",
@@ -211,6 +211,18 @@ def _take_memories(
         group_chars += size
         total[0] += size
     return lines
+
+
+def _normalise_memory_id(value):
+    """A memory id as an int, the way SQLite's INTEGER affinity reads it
+    ("3", "3.0", 3.0 -> 3); anything else is returned unchanged."""
+    if value is None or isinstance(value, bool):
+        return value
+    try:
+        number = float(str(value).strip())
+    except ValueError:
+        return value
+    return int(number) if number.is_integer() else value
 
 
 class Agent(ABC):
@@ -448,10 +460,14 @@ class Agent(ABC):
             or not self._untrusted_output_seen
         ):
             return ""
-        memory_id = tool_args.get("memory_id")
+        memory_id = _normalise_memory_id(tool_args.get("memory_id"))
+        if memory_id is not None:
+            # Pass the canonical id on, so the tool hits the row checked here
+            # (SQLite would also match "1.0" or " 1" to id 1).
+            tool_args["memory_id"] = memory_id
         try:
             if memory_id is not None:
-                existing = MemoryStore().get(int(memory_id))
+                existing = MemoryStore().get(memory_id)
             elif tool_name == "save_memory":
                 # Re-saving a core memory's text would touch it through the
                 # duplicate path (category, updated_at).

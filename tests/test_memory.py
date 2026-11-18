@@ -695,7 +695,7 @@ async def test_guard_keeps_existing_core_flag_on_update(bg_agent):
 @pytest.mark.asyncio
 async def test_trusted_tools_do_not_trip_the_guard(bg_agent):
     await bg_agent.handle_tool_call(_call("calculator", {"expression": "1+1"}))
-    await bg_agent.handle_tool_call(_call("search_memory", {"query": "x"}))
+    await bg_agent.handle_tool_call(_call("todo_list", {}))
     assert bg_agent._untrusted_output_seen is False
 
 
@@ -797,3 +797,31 @@ def test_find_matches_like_save(store):
     m = store.save("User likes  tea")
     assert store.find("user likes tea")["id"] == m["id"]
     assert store.find("") is None and store.find("nothing") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw_id", ["{id}.0", " {id} ", "{id}"])
+async def test_guard_normalises_memory_id(bg_agent, raw_id):
+    name = MemoryStore().save("User's name is Rikul", core=True)
+    bg_agent._untrusted_output_seen = True
+    mid = raw_id.format(id=name["id"])
+    out = await bg_agent.handle_tool_call(_call("delete_memory", {"memory_id": mid}))
+    assert out.startswith("Not done")
+    assert MemoryStore().get(name["id"]) is not None
+
+
+@pytest.mark.asyncio
+async def test_search_memory_output_is_untrusted(bg_agent):
+    await bg_agent.handle_tool_call(_call("search_memory", {"query": "x"}))
+    assert bg_agent._untrusted_output_seen is True
+
+
+def test_schema_cache_keeps_one_entry_per_database(tmp_path):
+    from app.infra import memory_store as ms
+
+    db = tmp_path / "grow.db"
+    store = MemoryStore(db_path=db)
+    for i in range(5):
+        store.save(f"fact {i}")
+        MemoryStore(db_path=db)
+    assert list(ms._CURRENT_SCHEMA).count(db) == 1

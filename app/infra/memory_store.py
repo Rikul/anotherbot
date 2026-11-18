@@ -73,7 +73,7 @@ _COLUMNS = "id, content, category, core, created_at, updated_at"
 MAX_CORE_MEMORIES = 20
 
 # Databases whose schema this process has already checked or migrated.
-_CURRENT_SCHEMA: set[tuple] = set()
+_CURRENT_SCHEMA: dict[Path, tuple] = {}  # db path -> file identity last checked
 _SCHEMA_OBJECTS = {
     "memories",
     "idx_memories_content",
@@ -176,13 +176,13 @@ class MemoryStore:
     def _ensure_schema(self) -> None:
         # MemoryStore() is built on every turn: skip the (write-locking)
         # migration once the schema is known to be current.
-        if _file_key(self.db_path) in _CURRENT_SCHEMA:
+        if _CURRENT_SCHEMA.get(self.db_path) == _file_key(self.db_path):
             return
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = self._connect()
         try:
             if _schema_is_current(conn):
-                _CURRENT_SCHEMA.add(_file_key(self.db_path))
+                _CURRENT_SCHEMA[self.db_path] = _file_key(self.db_path)
                 return
             with conn:
                 # One transaction for the whole migration: sqlite3 doesn't wrap
@@ -210,7 +210,7 @@ class MemoryStore:
                     conn.execute(
                         "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')"
                     )
-            _CURRENT_SCHEMA.add(_file_key(self.db_path))
+            _CURRENT_SCHEMA[self.db_path] = _file_key(self.db_path)
         finally:
             conn.close()
 
