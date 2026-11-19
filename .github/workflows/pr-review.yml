@@ -22,4 +22,5 @@ jobs:
           base_url: https://openrouter.ai/api/v1
           api_key: ${{ secrets.OPENROUTER_API_KEY }}
           model: anthropic/claude-haiku-5.5
+          max_tokens: 64000
           effort: high
