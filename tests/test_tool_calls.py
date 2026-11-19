@@ -373,3 +373,52 @@ async def test_parallel_bash_calls_do_not_overlap(tmp_path):
     cmd = f"echo start >> {log}; sleep 0.2; echo end >> {log}"
     await asyncio.gather(*(run_tool("bash", {"command": cmd}) for _ in range(3)))
     assert log.read_text().split() == ["start", "end"] * 3
+
+
+@pytest.mark.asyncio
+async def test_after_the_cap_later_calls_fail_at_once():
+    """The 60 s is counted once from the cancel, not again for every call."""
+    import asyncio
+    import threading
+    import time
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    release = threading.Event()
+
+    class HungTool(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "hung2"}}
+
+        @staticmethod
+        def call() -> str:
+            release.wait(5)
+            return "late"
+
+    try:
+        with (
+            patch.dict(tool_calls.tool_registry, {"hung2": HungTool}),
+            patch.object(tool_calls, "UNFINISHED_WAIT_SECS", 0.3),
+        ):
+            task = asyncio.ensure_future(tool_calls.run_tool("hung2", {}))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            first = await tool_calls.run_tool("todo_list", {})  # waits ~0.3 s
+            start = time.monotonic()
+            second = await tool_calls.run_tool("todo_list", {})
+            third = await tool_calls.run_tool("todo_list", {})
+            elapsed = time.monotonic() - start
+        assert first.startswith("Error: not run")
+        assert second.startswith("Error: not run") and third == second
+        assert elapsed < 0.1  # no fresh wait per call
+    finally:
+        release.set()
+        for _ in range(100):
+            if not tool_calls.unfinished_tools():
+                break
+            await asyncio.sleep(0.02)

@@ -117,6 +117,9 @@ async def run_tool_async(tool_name: str, tool_args: dict) -> str:
 # call waits for them first (see _wait_for_unfinished), so their side effects
 # can't overlap a later tool's, while the cancelled turn itself ends at once.
 _unfinished: dict[asyncio.Future, str] = {}
+# When each of those calls was cancelled (loop time): the wait for a thread is
+# measured from then, not restarted by every later call.
+_unfinished_since: dict[asyncio.Future, float] = {}
 
 
 def unfinished_tools() -> list[str]:
@@ -129,12 +132,17 @@ UNFINISHED_WAIT_SECS = 60.0
 
 
 async def _wait_for_unfinished() -> str:
-    """Wait for cancelled calls' threads; returns "" or, after
-    UNFINISHED_WAIT_SECS, an error for the model (a hung thread must not stall
-    every later tool call, in every channel)."""
-    deadline = asyncio.get_running_loop().time() + UNFINISHED_WAIT_SECS
+    """Wait for cancelled calls' threads; returns "" or an error for the model.
+
+    A thread gets UNFINISHED_WAIT_SECS from when its call was cancelled; once
+    the oldest one has run past that, every call fails at once instead of
+    each waiting the full time again (a hung thread must not stall every
+    later tool call, in every channel).
+    """
+    loop = asyncio.get_running_loop()
     while _unfinished:
-        left = deadline - asyncio.get_running_loop().time()
+        oldest = min(_unfinished_since.get(f, loop.time()) for f in _unfinished)
+        left = oldest + UNFINISHED_WAIT_SECS - loop.time()
         if left <= 0:
             names = ", ".join(unfinished_tools())
             log.warning(
@@ -151,6 +159,7 @@ async def _wait_for_unfinished() -> str:
 
 def _forget_unfinished(future: asyncio.Future) -> None:
     _unfinished.pop(future, None)
+    _unfinished_since.pop(future, None)
     if not future.cancelled():
         future.exception()  # retrieved, so asyncio doesn't warn about it
 
@@ -230,6 +239,7 @@ async def _run_in_thread(name: str, func, tool_args: dict):
         except asyncio.CancelledError:
             if not future.done():
                 _unfinished[future] = name
+                _unfinished_since[future] = asyncio.get_running_loop().time()
                 future.add_done_callback(_forget_unfinished)
             raise
 
