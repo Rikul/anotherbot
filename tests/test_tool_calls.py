@@ -268,3 +268,53 @@ async def test_parallel_sync_tools_do_not_overlap():
         )
     assert results == ["ok"] * 4
     assert peak == 1
+
+
+@pytest.mark.asyncio
+async def test_call_waiting_on_the_lock_rechecks_unfinished_threads():
+    """B waits for the lock while A runs; A is cancelled (thread still running).
+    B must not start until A's thread is done."""
+    import asyncio
+    import threading
+    import time
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    order = []
+    a_started = threading.Event()
+
+    class A(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "a"}}
+
+        @staticmethod
+        def call() -> str:
+            a_started.set()
+            time.sleep(0.3)
+            order.append("a done")
+            return "a"
+
+    class B(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "b"}}
+
+        @staticmethod
+        def call() -> str:
+            order.append("b ran")
+            return "b"
+
+    with patch.dict(tool_calls.tool_registry, {"a": A, "b": B}):
+        task_a = asyncio.ensure_future(tool_calls.run_tool("a", {}))
+        while not a_started.is_set():
+            await asyncio.sleep(0.01)
+        task_b = asyncio.ensure_future(tool_calls.run_tool("b", {}))
+        await asyncio.sleep(0.05)  # B is now waiting for the lock
+        task_a.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task_a
+        assert await asyncio.wait_for(task_b, 3) == "b"
+    assert order == ["a done", "b ran"]

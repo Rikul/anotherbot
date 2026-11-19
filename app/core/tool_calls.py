@@ -175,6 +175,11 @@ async def _run_in_thread(name: str, func, tool_args: dict):
     takes effect at once; the next tool call waits for it there.
     """
     async with _get_thread_lock():
+        # Check again under the lock: a call that was holding it may have been
+        # cancelled (its thread still running) while this one waited for it.
+        blocked = await _wait_for_unfinished()
+        if blocked:
+            return blocked
         future = asyncio.ensure_future(asyncio.to_thread(func, **tool_args))
         try:
             return await asyncio.shield(future)
