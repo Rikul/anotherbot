@@ -1,6 +1,7 @@
 """Built-in tool registry and dispatch (MCP tools are routed via ``mcp_manager``)."""
 
 import asyncio
+import inspect
 import json
 import os
 
@@ -110,12 +111,18 @@ async def run_tool(tool_name: str, tool_args: dict) -> str:
 
     Errors are returned as text so the model can see them. The working
     directory is restored afterwards, in case the tool changed it.
+    Synchronous tools (``bash``, file and web tools, …) run in a worker
+    thread, so a slow one doesn't freeze the event loop: the other channels,
+    the TUI's screen and Ctrl+C keep working meanwhile.
     """
     original_cwd = os.getcwd()
 
     try:
         func = tool_registry[tool_name].call
-        result = func(**tool_args)
+        if inspect.iscoroutinefunction(func):
+            result = await func(**tool_args)
+        else:
+            result = await asyncio.to_thread(func, **tool_args)
         if asyncio.iscoroutine(result):
             result = await result
     except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model

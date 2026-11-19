@@ -1,6 +1,7 @@
 """Tests for the interactive terminal UI (app/cli/tui.py)."""
 
 import asyncio
+import io
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,6 +10,7 @@ import pytest
 from prompt_toolkit.completion import CompleteEvent
 from prompt_toolkit.document import Document
 from rich.console import Console
+from rich.text import Text
 
 from app.cli import tui as tui_mod
 from app.cli.cli_agent import INTERRUPTED_REPLY, CliAgent
@@ -118,7 +120,10 @@ def tui(tmp_path):
 
 
 def _out(t):
-    return t.console.export_text(clear=True)
+    """Everything shown since the last call."""
+    text = t.transcript.text()
+    t.transcript.clear()
+    return text
 
 
 def test_tui_agent_uses_ui(tui):
@@ -151,7 +156,7 @@ async def test_parallel_permission_prompts_are_serialised(tui):
     active = 0
     peak = 0
 
-    async def read():
+    async def read(_name=""):
         nonlocal active, peak
         active += 1
         peak = max(peak, active)
@@ -251,26 +256,20 @@ def test_show_history(tui):
 
 
 @pytest.mark.asyncio
-async def test_run_loop_exits_on_eof_and_dispatches(tui):
-    inputs = iter(["", "/raw", "//slash text", "hello"])
-
-    async def read_input():
-        try:
-            return next(inputs)
-        except StopIteration:
-            raise EOFError from None
-
-    tui.read_input = read_input
+async def test_handle_input_dispatches(tui):
     tui.run_turn = AsyncMock()
-    await tui.run()
+    assert await tui.handle_input("   ") is True
+    assert await tui.handle_input("/raw") is True
+    assert await tui.handle_input("//slash text") is True
+    assert await tui.handle_input("hello") is True
+    assert await tui.handle_input("/exit") is False
     assert [c.args[0] for c in tui.run_turn.await_args_list] == [
         "/slash text",
         "hello",
     ]
-    assert "Bye." in _out(tui)
 
 
-def test_quiet_console_logging_keeps_file_handler(tmp_path):
+def test_console_logging_routed_to_tui(tui, tmp_path):
     import logging
 
     root = logging.getLogger()
@@ -280,12 +279,14 @@ def test_quiet_console_logging_keeps_file_handler(tmp_path):
             logging.StreamHandler(),
             logging.FileHandler(tmp_path / "x.log"),
         ]
-        console = Console(record=True)
-        tui_mod._quiet_console_logging(console)
+        tui_mod._route_console_logging(tui)
         kinds = [type(h) for h in root.handlers]
         assert logging.FileHandler in kinds
         assert tui_mod._ConsoleLogHandler in kinds
         assert logging.StreamHandler not in kinds
+        logging.getLogger("x").warning("careful \x1b]0;title\x07")
+        out = _out(tui)
+        assert "warning: careful" in out and "\x1b" not in out
     finally:
         for h in root.handlers:
             if h not in saved:
@@ -383,7 +384,8 @@ def test_untrusted_text_never_reaches_terminal_with_escapes():
     t.agent.messages = [{"role": "user", "content": f"q {OSC52}"}]
     t.show_history(1)
 
-    out = console.export_text(styles=True)
+    out = "".join(t.transcript.raw)
+    assert "\x1b[" in out  # rendered with styles, so escapes are really checked
     # rich's own styling uses CSI (ESC [); no OSC (ESC ]) or BEL may get through
     assert "\x1b]" not in out
     assert "\x07" not in out
@@ -420,39 +422,135 @@ def test_extract_attachments_skips_unresolvable_tokens(tmp_path):
     assert extract_attachments(text, cwd=tmp_path) == [str(tmp_path / "ok.txt")]
 
 
-def test_discard_typeahead_flushes_a_tty():
-    with (
-        patch("sys.stdin") as stdin,
-        patch("termios.tcflush") as flush,
-    ):
-        stdin.isatty.return_value = True
-        stdin.fileno.return_value = 7
-        tui_mod.discard_typeahead()
-    flush.assert_called_once()
-    assert flush.call_args.args[0] == 7
-
-
-def test_discard_typeahead_ignores_non_tty():
-    with patch("sys.stdin") as stdin, patch("termios.tcflush") as flush:
-        stdin.isatty.return_value = False
-        tui_mod.discard_typeahead()
-    flush.assert_not_called()
+@pytest.mark.asyncio
+async def test_permission_prompt_ignores_keys_typed_ahead(tui):
+    """Keys pressed right as the prompt appears don't answer it."""
+    task = asyncio.ensure_future(tui._read_permission_key("bash"))
+    await asyncio.sleep(0)
+    assert tui.permission_pending
+    tui.answer_permission("yes")  # already being typed: ignored
+    await asyncio.sleep(0)
+    assert not task.done()
+    await asyncio.sleep(tui_mod._PERMISSION_GRACE_SECS + 0.05)
+    tui.answer_permission("no")
+    assert await asyncio.wait_for(task, 2) == "no"
+    assert not tui.permission_pending
 
 
 @pytest.mark.asyncio
-async def test_permission_prompt_ignores_keys_typed_ahead(tui):
-    """Keys already waiting when the prompt opens don't answer it."""
-    from prompt_toolkit.application import create_app_session
+async def test_ctrl_c_interrupt_is_not_delayed_by_grace(tui):
+    task = asyncio.ensure_future(tui._read_permission_key("bash"))
+    await asyncio.sleep(0)
+    tui.on_ctrl_c()
+    assert await asyncio.wait_for(task, 2) == "interrupt"
+
+
+# --- full-screen layout ------------------------------------------------------
+
+
+def test_transcript_rewraps_on_width_change():
+    from app.cli.tui import Transcript
+
+    tr = Transcript(Console(file=io.StringIO(), width=40))
+    tr.add(Text("word " * 20))
+    narrow = len(tr.lines(40))
+    wide = len(tr.lines(200))
+    assert narrow > wide == 1
+
+
+def test_output_pane_is_bottom_anchored_and_scrolls(tui):
+    from app.cli.tui import _OutputControl
+
+    for i in range(50):
+        tui.print(Text(f"line {i}"))
+    control = _OutputControl(tui)
+    content = control.create_content(width=100, height=10)
+    assert control.vertical_scroll(None) == content.line_count - 10  # at the end
+    tui.scroll(5)
+    control.create_content(width=100, height=10)
+    assert control.vertical_scroll(None) == content.line_count - 15
+    tui.scroll(10_000)  # clamped to the top
+    control.create_content(width=100, height=10)
+    assert control.vertical_scroll(None) == 0
+
+
+def test_on_ctrl_c_clears_input_then_arms_exit(tui):
+    tui.input.text = "draft"
+    tui.on_ctrl_c()
+    assert tui.input.text == ""
+    with patch.object(tui, "quit") as quit_:
+        tui.on_ctrl_c()
+        quit_.assert_not_called()  # first press only arms it
+        tui.on_ctrl_c()
+        quit_.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_submit_queues_while_busy(tui):
+    tui._turn_task = asyncio.get_running_loop().create_future()  # pretend busy
+    tui.input.text = "next one"
+    tui.submit()
+    assert tui.input.text == ""
+    assert tui._inbox.get_nowait() == "next one"
+    assert "Queued" in tui._toast
+    tui._turn_task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_switching_conversation_shows_it_from_the_top(tui):
+    tui.print(Text("old stuff"))
+
+    async def fake_load(_args):
+        tui.agent.conversation_id = 2
+        tui.agent.messages = [
+            {"role": "user", "content": "earlier question"},
+            {"role": "assistant", "content": "earlier answer"},
+        ]
+        return "Loaded conversation [2] other"
+
+    from app.channels.commands import BotCommand
+
+    tui.registry.register(BotCommand("load", "x", fake_load))
+    await tui.run_command("/load 2")
+    out = _out(tui)
+    assert "old stuff" not in out
+    assert "earlier question" in out and "earlier answer" in out
+    assert out.index("earlier answer") < out.index("Loaded conversation")
+
+
+@pytest.mark.asyncio
+async def test_full_screen_app_runs_a_turn_and_quits(tui):
+    """Drive the real app with a pipe input: type a message, then Ctrl+D."""
     from prompt_toolkit.input import create_pipe_input
     from prompt_toolkit.output import DummyOutput
 
-    with (
-        create_pipe_input() as pipe,
-        create_app_session(input=pipe, output=DummyOutput()),
-    ):
-        pipe.send_text("y")  # typed during the turn
-        task = asyncio.ensure_future(tui._read_permission_key())
-        await asyncio.sleep(tui_mod._PERMISSION_GRACE_SECS + 0.2)
-        assert not task.done()  # the early "y" was ignored
-        pipe.send_text("n")
-        assert await asyncio.wait_for(task, 2) == "no"
+    tui.agent.agent_loop = AsyncMock(return_value="ok")
+    with create_pipe_input() as pipe:
+        runner = asyncio.ensure_future(tui.run(input=pipe, output=DummyOutput()))
+        await asyncio.sleep(0.2)
+        pipe.send_text("hello there\r")
+        for _ in range(50):
+            if tui.agent.agent_loop.await_count:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.1)
+        pipe.send_text("\x04")  # Ctrl+D on an empty input
+        await asyncio.wait_for(runner, 3)
+    tui.agent.agent_loop.assert_awaited_once_with("hello there", None)
+    assert "❯ hello there" in _out(tui)
+
+
+def test_toolbar_drops_hints_that_do_not_fit(tui):
+    from prompt_toolkit.formatted_text import to_formatted_text
+    from prompt_toolkit.formatted_text.utils import fragment_list_width
+
+    with patch.object(tui, "_columns", return_value=200):
+        wide = tui._toolbar()
+    with patch.object(tui, "_columns", return_value=70):
+        narrow = tui._toolbar()
+    assert "scroll" in "".join(t for _, t, *_ in to_formatted_text(wide))
+    narrow_text = "".join(t for _, t, *_ in to_formatted_text(narrow))
+    assert "cmds" not in narrow_text  # no room left for hints at all
+    with patch.object(tui, "_columns", return_value=120):
+        mid = to_formatted_text(tui._toolbar())
+    assert fragment_list_width(mid) <= 120

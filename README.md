@@ -125,24 +125,25 @@ There is no `cli` subcommand: running without a command starts the CLI agent. `-
 
 ### Terminal UI
 
-`./run.sh` in a terminal starts an inline TUI (it does not take over the screen; output stays in your scrollback). When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
+`./run.sh` in a terminal opens a full-screen TUI. The conversation so far fills the screen (scrollable), the input box sits at the bottom between two rules, and a status bar sits under it. While a turn runs, a spinner line shows the elapsed time and the running tool, and you can already type your next message: Enter queues it for after the turn. On exit the terminal's previous contents come back. When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
 
 | Key / input | Action |
 |---|---|
-| Enter | Send (or accept the highlighted completion) |
+| Enter | Send (or accept the highlighted completion); queued while a turn runs |
 | Alt+Enter, Ctrl+J, or `\` at the end of a line | New line |
 | Tab | Complete `/commands`, conversation ids after `/load`, `/fork`, `/rename`, `/export`, `/delete`, and `@paths` |
 | `@path/to/file` | Attach that file to the message (images are sent as images) |
 | Up / Down, Ctrl+R | Input history (kept in `$ANOTHERBOT_HOME/cli_history`) |
 | Shift+Tab | Toggle auto-approve for tool calls |
-| Ctrl+C | Interrupt the running turn; at the prompt, clear the line, twice to quit |
-| Ctrl+D | Quit |
-| Ctrl+L | Clear the screen |
+| Ctrl+C | Interrupt the running turn; otherwise clear the input, twice to quit |
+| Ctrl+D | Quit (on an empty input) |
+| PageUp / PageDown, mouse wheel | Scroll the conversation (hold Shift to select text with the mouse) |
+| Ctrl+L | Clear the conversation pane |
 | `//text` | Send a message that starts with `/` |
 
-Tool permission prompts take one key: `y`/Enter yes, `n`/Esc no, `a` always allow this tool for the session, `!` approve everything, Ctrl+C interrupts the turn. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
+Tool permission prompts replace the input box and take one key: `y`/Enter yes, `n`/Esc no, `a` always allow this tool for the session, `!` approve everything, Ctrl+C interrupts the turn. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
 
-Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; also shown after `/load` or `/fork`), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
+Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; switching conversations with `/load`, `/fork`, `/new` or `/delete` redraws the pane with that conversation's history), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
 
 ### Web UI
 
