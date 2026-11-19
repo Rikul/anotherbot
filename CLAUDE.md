@@ -64,16 +64,20 @@ The shared loop lives in `Agent._loop()` (`app/core/agent.py`). Subclasses overr
 
 | Hook | CliAgent | BackgroundAgent | HelperAgent |
 |---|---|---|---|
-| `_on_thinking` | print | send via mq | — |
-| `_check_permission` | ask stdin | — (always allow) | — |
-| `_on_tool_start` | — | send status via mq | — |
-| `_on_response` | print | send via mq | — |
+| `_on_thinking` | `ui.thinking` (print without a UI) | send via mq | — |
+| `_check_permission` | `ui.ask_permission` (ask stdin without a UI; skipped with `-y`) | — (always allow) | — |
+| `_on_tool_start` | `ui.tool_start` | send status via mq | — |
+| `_on_response` | `ui.response` (print without a UI) | send via mq | — |
 | `_on_no_choices` | raise | exponential backoff | raise |
 | `_should_stop` | — | `channel.has_stopped` | — |
 
 Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gather`. After each turn, the full message chain (assistant tool-call message + tool results + final response) is saved to `self.messages` at full length. `MessageHistory` (SQLite) stores only user + final assistant text for cross-session persistence.
 
 **Trajectories.** Agents with `saves_trajectories = True` (`CliAgent`, `BackgroundAgent`; not `HelperAgent`) collect per-call stats (`model`, `duration_s`, `finish_reason`, `usage`) in `_llm_calls` during `_run_loop`, and after each turn `Agent._save_trajectory()` stores the turn in the `trajectories` table (`message_id` PK → the final assistant `messages` row, which `MessageHistory.add_message()` now returns; `conversation_id`; `data` JSON; `created_at`). The JSON holds the system prompt, a history-message count, the turn's own messages (user message, assistant tool calls/reasoning, tool results, final reply; attachment data URLs redacted with `tracer.redact`), the `llm_calls` list and summed `usage_total`. Saving is best-effort (logged, never raised). `ConversationStore.delete()` removes a conversation's trajectories and `fork()` copies them to the new message rows. `BackgroundAgent` then awaits `Channel.on_trajectory_saved(message_id, conversation_id, metadata)` (no-op by default).
+
+### Command Line
+
+`parse_args()` (`app/main.py`) puts every option on the top-level parser; the only subcommand is `background`. With no command, `args.command` is set to `"cli"` and `main()` calls `run_cli()`. `-p`, `-y` and `-i` with `background` are a parser error; `-q`, `--trace` and `--tracedir` apply to both. `max_iterations` falls back to `MAX_ITERATIONS` when `-i` isn't given. `Dockerfile` and `restart.sh` run `run.sh background`.
 
 ### Terminal UI
 

@@ -92,20 +92,29 @@ Message history and conversations are stored in `$ANOTHERBOT_HOME/app.db` (SQLit
 ## Usage
 
 ```bash
-./run.sh -p "your prompt here"
+./run.sh [options]                # CLI agent: interactive terminal UI, or one prompt with -p
+./run.sh [options] background     # Telegram / Discord / web UI server
 
-# Flags
--p, --prompt          Run this prompt once and exit (omit to start the REPL)
+# Options
+-p, --prompt          Run this prompt once, print the reply as plain text and exit
+                      (omit to start the terminal UI)
 -y, --auto-approve    Skip tool permission prompts
 -q, --quiet           Don't print log messages to the console (still written to the log file)
 -i, --max-iterations  Max agentic loop iterations (default: MAX_ITERATIONS or 250)
+--trace               Trace LLM calls to JSONL files (also /trace on|off)
+--tracedir DIR        Trace output directory (default: $ANOTHERBOT_HOME/trace)
 ```
+
+There is no `cli` subcommand: running without a command starts the CLI agent. `-p`, `-y` and `-i` apply to the CLI agent only and are rejected with `background`; `-q`, `--trace` and `--tracedir` work with both. Options go before `background` (e.g. `./run.sh -q background`).
 
 ### Examples
 
 ```bash
-# Interactive REPL session
+# Interactive terminal UI
 ./run.sh
+
+# Terminal UI with tools auto-approved (toggle later with Shift+Tab or /yolo)
+./run.sh -y
 
 # Single-shot, auto-approved
 ./run.sh -p "Create a hello world script" -y
