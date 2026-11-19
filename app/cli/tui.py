@@ -263,6 +263,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes
         self._activity = ""  # what the spinner says we're doing
         self._turn_started = 0.0
         self._perm_lock = asyncio.Lock()
+        self._turn_task: asyncio.Future | None = None  # the running agent turn
+        self._interrupting = False  # Ctrl+C at a permission prompt, turn ending
         self._exit_armed_at = 0.0
         self._toast = ""  # short message shown in the status bar…
         self._toast_until = 0.0  # …until this time.monotonic()
@@ -409,6 +411,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes
 
     def tool_result(self, name: str, result: str) -> None:
         """A dim one-line preview of what the tool returned."""
+        if self._interrupting:
+            return  # the turn is being cancelled; "denied" would be misleading
         failed = (result or "").startswith(
             (f"Error running tool {name}", "User denied permission")
         )
@@ -424,7 +428,11 @@ class Tui:  # pylint: disable=too-many-instance-attributes
         self.console.print(self._render(self.last_reply))
 
     async def ask_permission(self, name: str, args: dict) -> bool:
-        """Single-key prompt: y/Enter yes, n/Esc no, a always this tool, ! everything."""
+        """Single-key prompt: y/Enter yes, n/Esc no, a always this tool, ! everything.
+
+        Ctrl+C interrupts the whole turn, as it does while the spinner runs (the
+        prompt reads keys in raw mode, so no SIGINT reaches run_turn's handler).
+        """
         if name in self.allowed_tools or self.agent.auto_approve:
             return True
         async with self._perm_lock:  # parallel tool calls ask one at a time
@@ -436,6 +444,11 @@ class Tui:  # pylint: disable=too-many-instance-attributes
                 answer = await self._read_permission_key()
             finally:
                 self._resume_spinner()
+        if answer == "interrupt":
+            self._interrupting = True
+            if self._turn_task is not None:
+                self._turn_task.cancel()
+            return False
         if answer == "always":
             self.allowed_tools.add(name)
             self.console.print(
@@ -477,7 +490,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes
         kb = KeyBindings()
         answers = {
             "y": "yes", "Y": "yes", "enter": "yes",
-            "n": "no", "N": "no", "escape": "no", "c-c": "no", "c-d": "no",
+            "n": "no", "N": "no", "escape": "no", "c-d": "no",
+            "c-c": "interrupt",
             "a": "always", "A": "always",
             "!": "all",
         }  # fmt: skip
@@ -492,12 +506,15 @@ class Tui:  # pylint: disable=too-many-instance-attributes
             "  <perm.key>y</perm.key>es  <perm.key>n</perm.key>o  "
             "<perm.key>a</perm.key>lways this tool  "
             "<perm.key>!</perm.key> approve all  "
+            "<perm.key>Ctrl+C</perm.key> interrupt  "
         )
         session: PromptSession = PromptSession(key_bindings=kb, style=STYLE)
         try:
             with patch_stdout(raw=True):
                 return await session.prompt_async(prompt) or "no"
-        except (KeyboardInterrupt, EOFError):
+        except KeyboardInterrupt:
+            return "interrupt"
+        except EOFError:
             return "no"
 
     # --- spinner ---------------------------------------------------------------
@@ -538,6 +555,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes
         self._turn_started = time.monotonic()
         self._activity = "thinking"
         task = asyncio.ensure_future(self.agent.agent_loop(text, metadata))
+        self._turn_task = task
+        self._interrupting = False
         ticker = asyncio.ensure_future(self._tick_spinner())
         loop = asyncio.get_running_loop()
         old_handler = signal.getsignal(signal.SIGINT)
@@ -554,6 +573,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes
                 await asyncio.wait({task})
         finally:
             self._status = None
+            self._turn_task = None
             ticker.cancel()
             if handler_set:
                 loop.remove_signal_handler(signal.SIGINT)

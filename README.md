@@ -140,7 +140,7 @@ There is no `cli` subcommand: running without a command starts the CLI agent. `-
 | Ctrl+L | Clear the screen |
 | `//text` | Send a message that starts with `/` |
 
-Tool permission prompts take one key: `y`/Enter yes, `n`/Esc no, `a` always allow this tool for the session, `!` approve everything. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
+Tool permission prompts take one key: `y`/Enter yes, `n`/Esc no, `a` always allow this tool for the session, `!` approve everything, Ctrl+C interrupts the turn. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
 
 Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; also shown after `/load` or `/fork`), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
 

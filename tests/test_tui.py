@@ -387,3 +387,25 @@ def test_untrusted_text_never_reaches_terminal_with_escapes():
     # rich's own styling uses CSI (ESC [); no OSC (ESC ]) or BEL may get through
     assert "\x1b]" not in out
     assert "\x07" not in out
+
+
+@pytest.mark.asyncio
+async def test_ctrl_c_at_permission_prompt_interrupts_the_turn(tui):
+    """Ctrl+C in the (raw-mode) permission prompt cancels the whole turn."""
+    ran = []
+
+    async def turn(*_):
+        allowed = await tui.ask_permission("bash", {"command": "ls"})
+        ran.append(allowed)
+        # what CliAgent.handle_tool_call does next; not shown while interrupting
+        tui.tool_result("bash", "User denied permission to run this tool.")
+        await asyncio.sleep(10)
+
+    tui.agent.agent_loop = turn
+    with patch.object(tui, "_read_permission_key", AsyncMock(return_value="interrupt")):
+        await asyncio.wait_for(tui.run_turn("hi"), timeout=2)
+    # ask_permission returns False and the cancel lands at the next await
+    assert ran == [False]
+    out = _out(tui)
+    assert "Interrupted" in out
+    assert "User denied" not in out
