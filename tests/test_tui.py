@@ -568,3 +568,11 @@ async def test_busy_line_cleans_the_tool_name(tui):
     tui.on_ctrl_c()
     await task
     tui._turn_task.cancel()
+
+
+def test_escape_does_not_answer_a_permission_prompt(tui):
+    """Alt+Enter starts with Escape; it must not deny a pending tool call."""
+    from prompt_toolkit.keys import Keys
+
+    kb = tui._key_bindings()
+    assert not [b for b in kb.bindings if b.keys == (Keys.Escape,)]

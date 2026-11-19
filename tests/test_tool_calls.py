@@ -137,8 +137,8 @@ async def test_todo_tools_do_not_run_in_a_thread():
 
 
 @pytest.mark.asyncio
-async def test_cancelled_run_tool_waits_for_its_thread():
-    """A cancelled turn must not end while its sync tool is still running."""
+async def test_cancel_is_immediate_and_next_tool_waits_for_the_thread():
+    """Ctrl+C ends the call at once; the next tool call waits for the old thread."""
     import asyncio
     import threading
     import time
@@ -148,6 +148,7 @@ async def test_cancelled_run_tool_waits_for_its_thread():
     from app.core.tool import Tool
 
     finished = threading.Event()
+    order = []
 
     class SlowTool(Tool):
         @staticmethod
@@ -156,14 +157,32 @@ async def test_cancelled_run_tool_waits_for_its_thread():
 
         @staticmethod
         def call() -> str:
-            time.sleep(0.3)
+            time.sleep(0.4)
+            order.append("slow done")
             finished.set()
             return "done"
 
-    with patch.dict(tool_calls.tool_registry, {"slow": SlowTool}):
+    class NextTool(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "next"}}
+
+        @staticmethod
+        def call() -> str:
+            order.append("next ran")
+            return "ok"
+
+    with patch.dict(tool_calls.tool_registry, {"slow": SlowTool, "next": NextTool}):
         task = asyncio.ensure_future(tool_calls.run_tool("slow", {}))
         await asyncio.sleep(0.05)
+        start = time.monotonic()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert finished.is_set()  # the thread finished before the cancel landed
+        assert time.monotonic() - start < 0.2  # didn't wait for the thread
+        assert not finished.is_set()
+        assert tool_calls.unfinished_tools() == ["slow"]
+
+        assert await tool_calls.run_tool("next", {}) == "ok"
+    assert order == ["slow done", "next ran"]  # no overlap
+    assert tool_calls.unfinished_tools() == []

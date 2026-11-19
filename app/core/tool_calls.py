@@ -102,27 +102,48 @@ def get_all_tool_specs() -> list[dict]:
 async def run_tool_async(tool_name: str, tool_args: dict) -> str:
     """Run a tool by name: MCP tools via the MCP manager, the rest via run_tool()."""
     if mcp.mcp_manager.is_mcp_tool(tool_name):
+        await _wait_for_unfinished()
         return await mcp.mcp_manager.call_tool(tool_name, tool_args)
     return await run_tool(tool_name=tool_name, tool_args=tool_args)
 
 
-async def _run_in_thread(func, tool_args: dict):
+# Worker threads of sync tool calls whose caller was cancelled (Ctrl+C), by
+# tool name. A thread can't be stopped, so these keep running; every new tool
+# call waits for them first (see _wait_for_unfinished), so their side effects
+# can't overlap a later tool's, while the cancelled turn itself ends at once.
+_unfinished: dict[asyncio.Future, str] = {}
+
+
+def unfinished_tools() -> list[str]:
+    """Names of tools from cancelled calls that are still running in a thread."""
+    return sorted(set(_unfinished.values()))
+
+
+async def _wait_for_unfinished() -> None:
+    while _unfinished:
+        await asyncio.wait(set(_unfinished))
+
+
+def _forget_unfinished(future: asyncio.Future) -> None:
+    _unfinished.pop(future, None)
+    if not future.cancelled():
+        future.exception()  # retrieved, so asyncio doesn't warn about it
+
+
+async def _run_in_thread(name: str, func, tool_args: dict):
     """Run a sync tool in a worker thread.
 
-    A thread can't be stopped, so if the caller is cancelled (Ctrl+C in the
-    TUI), wait for the thread to finish before passing the cancellation on.
-    Otherwise the cancelled turn would end while the tool is still writing
-    files, and the next turn could overlap its side effects.
+    If the caller is cancelled, the thread is left to finish on its own and
+    recorded in ``_unfinished``, so the cancellation (e.g. Ctrl+C in the TUI)
+    takes effect at once.
     """
     future = asyncio.ensure_future(asyncio.to_thread(func, **tool_args))
     try:
         return await asyncio.shield(future)
     except asyncio.CancelledError:
-        while not future.done():
-            try:
-                await asyncio.wait({future})
-            except asyncio.CancelledError:
-                continue  # cancelled again: still let the thread finish first
+        if not future.done():
+            _unfinished[future] = name
+            future.add_done_callback(_forget_unfinished)
         raise
 
 
@@ -136,6 +157,7 @@ async def run_tool(tool_name: str, tool_args: dict) -> str:
     the TUI's screen and Ctrl+C keep working meanwhile. Tools with
     ``runs_in_thread = False`` run on the loop instead.
     """
+    await _wait_for_unfinished()  # a cancelled call's thread finishes first
     original_cwd = os.getcwd()
 
     try:
@@ -144,7 +166,7 @@ async def run_tool(tool_name: str, tool_args: dict) -> str:
         if inspect.iscoroutinefunction(func):
             result = await func(**tool_args)
         elif tool.runs_in_thread:
-            result = await _run_in_thread(func, tool_args)
+            result = await _run_in_thread(tool_name, func, tool_args)
         else:
             result = func(**tool_args)
         if asyncio.iscoroutine(result):

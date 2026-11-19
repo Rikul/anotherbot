@@ -18,7 +18,11 @@ class BashTool(Tool):
             "type": "function",
             "function": {
                 "name": "bash",
-                "description": "Execute a shell command",
+                "description": (
+                    "Execute a shell command. It runs without a terminal or stdin, "
+                    "so anything that prompts (sudo, ssh/git passwords, pagers) fails: "
+                    "use non-interactive flags (sudo -n, GIT_TERMINAL_PROMPT=0, --yes)."
+                ),
                 "parameters": {
                     "type": "object",
                     "required": ["command"],

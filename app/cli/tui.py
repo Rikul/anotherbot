@@ -65,7 +65,7 @@ from rich.text import Text
 
 from .. import config
 from ..channels.commands import CommandRegistry, build_command_registry
-from ..core import runtime
+from ..core import runtime, tool_calls
 from ..infra.app_logging import log
 from .cli_agent import CliAgent
 from .tui_text import (  # noqa: F401  # re-exported for callers and tests
@@ -518,7 +518,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
 
         answers = {
             "y": "yes", "Y": "yes", "enter": "yes",
-            "n": "no", "N": "no", "escape": "no",
+            "n": "no", "N": "no",
             "a": "always", "A": "always",
             "!": "all",
         }  # fmt: skip
@@ -737,6 +737,15 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
 
         if task.cancelled():
             self.print(Text("⏹ Interrupted", style="yellow"))
+            still = tool_calls.unfinished_tools()
+            if still:
+                self.print(
+                    Text(
+                        f"  {', '.join(clean(n) for n in still)} is still finishing "
+                        "in the background; the next tool call waits for it.",
+                        style="dim",
+                    )
+                )
         elif task.exception() is not None:
             err = task.exception()
             log.debug("Turn failed", exc_info=err)
