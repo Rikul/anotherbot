@@ -692,3 +692,20 @@ def test_user_messages_get_a_tinted_full_width_band(tui):
     line = cap.get().splitlines()[0]
     assert "48;2;48;48;48" in line  # the #303030 background
     assert len(Text.from_ansi(line).plain) == 30
+
+
+@pytest.mark.asyncio
+async def test_mouse_is_left_to_the_terminal_until_slash_mouse(tui):
+    """Capture off by default (native selection and zoom); /mouse toggles it."""
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe:
+        app = tui.build_app(input=pipe, output=DummyOutput())
+        assert tui.mouse_enabled is False
+        assert app.mouse_support() is False
+        await tui.run_command("/mouse")
+        assert app.mouse_support() is True
+        assert "wheel scrolls" in _out(tui)
+        await tui.run_command("/mouse")
+        assert app.mouse_support() is False

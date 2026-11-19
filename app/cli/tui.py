@@ -19,7 +19,9 @@ Features:
 - single-key tool permission prompts (yes / no / always for this tool /
   approve everything), Shift+Tab toggles auto-approve;
 - Ctrl+C interrupts a running turn; otherwise it clears the input, and twice
-  in a row (or Ctrl+D) quits. PageUp/PageDown and the mouse wheel scroll.
+  in a row (or Ctrl+D) quits. PageUp/PageDown scroll; the mouse is left to
+  the terminal (select text, Ctrl+wheel zoom) unless /mouse turns on wheel
+  scrolling.
 """
 
 from __future__ import annotations
@@ -91,6 +93,7 @@ LOCAL_COMMANDS = {
     "history": "Show recent messages of this conversation. Usage: /history [n]",
     "copy": "Copy the last reply to the clipboard.",
     "raw": "Toggle markdown rendering of replies.",
+    "mouse": "Toggle mouse capture: wheel scrolling on, but text selection and zoom off.",
     "yolo": "Toggle auto-approve for tool calls (also Shift+Tab).",
     "exit": "Quit.",
     "quit": "Quit.",
@@ -175,6 +178,9 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         )
         self.registry: CommandRegistry = build_command_registry(self.agent)
         self.render_markdown = True
+        # Off by default: with mouse capture on, the terminal sends every mouse
+        # event to the app, so text can't be selected or zoomed (Ctrl+wheel).
+        self.mouse_enabled = False
         self.last_reply = ""
         self.allowed_tools: set[str] = set()
         self.session_tokens = {"in": 0, "out": 0}
@@ -342,7 +348,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             key_bindings=self._key_bindings(),
             style=STYLE,
             full_screen=True,
-            mouse_support=True,
+            mouse_support=Condition(lambda: self.mouse_enabled),
             **app_kwargs,
         )
         return self.app
@@ -398,6 +404,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             parts.append(f"{format_tokens(toks)} tok")
         if not self.render_markdown:
             parts.append("raw")
+        if self.mouse_enabled:
+            parts.append("mouse")
         if self.scroll_up:
             parts.append(f"<toolbar.warn>↑ {self.scroll_up} lines</toolbar.warn>")
         left = "  │  ".join(parts)
@@ -804,6 +812,17 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         self.render_markdown = not self.render_markdown
         mode = "markdown" if self.render_markdown else "raw text"
         self.print(Text(f"Replies render as {mode} (new replies).", "dim"))
+
+    def _cmd_mouse(self, _args: str) -> None:
+        self.mouse_enabled = not self.mouse_enabled
+        msg = (
+            "Mouse on: the wheel scrolls the conversation. Hold Shift to select "
+            "text; /mouse again to give the mouse back to the terminal."
+            if self.mouse_enabled
+            else "Mouse off: select text and zoom as usual; PageUp/PageDown scroll."
+        )
+        self.print(Text(msg, "dim"))
+        self.invalidate()
 
     def _cmd_yolo(self, _args: str) -> None:
         on = self.toggle_auto_approve()
