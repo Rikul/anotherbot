@@ -400,7 +400,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         elapsed = int(time.monotonic() - self._turn_started)
         frame = _SPINNER[int(time.monotonic() * 10) % len(_SPINNER)]
         activity = (
-            f"waiting for you: allow {self._perm_name}?"
+            f"waiting for you: allow {clean(self._perm_name)}?"
             if self.permission_pending
             else self._activity
         )

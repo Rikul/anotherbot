@@ -1,52 +1,71 @@
-from unittest.mock import patch, MagicMock
+"""Tests for the bash tool (real, short shell commands)."""
+
+import asyncio
+import os
+import time
+
+import pytest
 
 from app.tools.bash import BashTool
 
 bash = BashTool.call
 
 
-def test_bash_runs_simple_command():
-    with patch("app.tools.bash.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="hello\n", stderr="", returncode=0)
-        result = bash("echo hello")
-    assert "hello" in result
+@pytest.mark.asyncio
+async def test_bash_runs_simple_command():
+    assert "hello" in await bash("echo hello")
 
 
-def test_bash_returns_stderr_on_failure():
-    with patch("app.tools.bash.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(
-            stdout="", stderr="stderr: No such file or directory\n", returncode=1
-        )
-        result = bash("ls /nonexistent_path_xyz")
-    assert result  # should contain some output (error in stderr)
-    assert "No such file" in result or "cannot access" in result or "stderr" in result
+@pytest.mark.asyncio
+async def test_bash_returns_stderr_on_failure():
+    result = await bash("ls /nonexistent_path_xyz")
+    assert "[stderr]" in result
+    assert "No such file" in result or "cannot access" in result
 
 
-def test_bash_captures_stdout():
-    with patch("app.tools.bash.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="abc", stderr="", returncode=0)
-        result = bash("printf 'abc'")
-    assert "abc" in result
+@pytest.mark.asyncio
+async def test_bash_captures_stdout():
+    assert await bash("printf 'abc'") == "abc"
 
 
-def test_bash_timeout_error():
-    with patch("app.tools.bash.subprocess.run", side_effect=Exception("timed out")):
-        result = bash("sleep 100")
-    assert "Error" in result
+@pytest.mark.asyncio
+async def test_bash_timeout_error():
+    start = time.monotonic()
+    result = await bash("sleep 100", timeout=1)
+    assert "timed out" in result and "Error" in result
+    assert time.monotonic() - start < 5
 
 
-def test_bash_multiline_output():
-    with patch("app.tools.bash.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="a\nb\nc\n", stderr="", returncode=0)
-        result = bash("printf 'a\nb\nc'")
-    assert "a" in result
-    assert "b" in result
-    assert "c" in result
+@pytest.mark.asyncio
+async def test_bash_multiline_output():
+    assert await bash("printf 'a\\nb\\nc'") == "a\nb\nc"
 
 
-def test_bash_returns_combined_stderr():
-    with patch("app.tools.bash.subprocess.run") as mock_run:
-        mock_run.return_value = MagicMock(stdout="out\n", stderr="err\n", returncode=0)
-        result = bash("echo out && echo err >&2")
+@pytest.mark.asyncio
+async def test_bash_returns_combined_stderr():
+    result = await bash("echo out && echo err >&2")
     assert "out" in result
-    assert "err" in result
+    assert "[stderr]\nerr" in result
+
+
+@pytest.mark.asyncio
+async def test_bash_cancel_kills_the_command(tmp_path):
+    """Cancelling the call (Ctrl+C in the TUI) kills the shell and its children."""
+    marker = tmp_path / "pid"
+    task = asyncio.ensure_future(bash(f"sleep 30 & echo $! > {marker}; wait"))
+    for _ in range(100):
+        if marker.exists() and marker.read_text().strip():
+            break
+        await asyncio.sleep(0.02)
+    child = int(marker.read_text())
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    for _ in range(100):
+        try:
+            os.kill(child, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.02)
+    else:
+        pytest.fail("the backgrounded sleep survived the cancel")

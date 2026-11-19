@@ -554,3 +554,17 @@ def test_toolbar_drops_hints_that_do_not_fit(tui):
     with patch.object(tui, "_columns", return_value=120):
         mid = to_formatted_text(tui._toolbar())
     assert fragment_list_width(mid) <= 120
+
+
+@pytest.mark.asyncio
+async def test_busy_line_cleans_the_tool_name(tui):
+    from prompt_toolkit.formatted_text import to_formatted_text
+
+    tui._turn_task = asyncio.get_running_loop().create_future()  # busy
+    task = asyncio.ensure_future(tui._read_permission_key("evil\x1b]0;x\x07"))
+    await asyncio.sleep(0)
+    text = "".join(t for _, t, *_ in to_formatted_text(tui._busy_line()))
+    assert "allow evil]0;x?" in text and "\x1b" not in text
+    tui.on_ctrl_c()
+    await task
+    tui._turn_task.cancel()
