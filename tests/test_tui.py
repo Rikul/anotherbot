@@ -544,16 +544,30 @@ def test_toolbar_drops_hints_that_do_not_fit(tui):
     from prompt_toolkit.formatted_text import to_formatted_text
     from prompt_toolkit.formatted_text.utils import fragment_list_width
 
-    with patch.object(tui, "_columns", return_value=200):
-        wide = tui._toolbar()
-    with patch.object(tui, "_columns", return_value=70):
-        narrow = tui._toolbar()
-    assert "scroll" in "".join(t for _, t, *_ in to_formatted_text(wide))
-    narrow_text = "".join(t for _, t, *_ in to_formatted_text(narrow))
-    assert "cmds" not in narrow_text  # no room left for hints at all
-    with patch.object(tui, "_columns", return_value=120):
-        mid = to_formatted_text(tui._toolbar())
-    assert fragment_list_width(mid) <= 120
+    from app.core import runtime
+
+    # Fix the status parts' width, so the result doesn't depend on test order.
+    with patch.dict(
+        runtime._store,
+        {"model": "deepseek/deepseek-v4.1-flash", "conversation_name": "x"},
+    ):
+        _check_toolbar_widths(tui, to_formatted_text, fragment_list_width)
+
+
+def _check_toolbar_widths(tui, to_formatted_text, fragment_list_width):
+    def bar(columns):
+        with patch.object(tui, "_columns", return_value=columns):
+            return to_formatted_text(tui._toolbar())
+
+    def text(frags):
+        return "".join(t for _, t, *_ in frags)
+
+    assert "scroll" in text(bar(200))  # every hint fits
+    for columns in (60, 70, 90, 100, 120):
+        # Hints are dropped, never cut off: the bar fits the terminal...
+        assert fragment_list_width(bar(columns)) <= columns
+    assert "scroll" not in text(bar(70))  # ...so a narrow one shows fewer
+    assert "cmds" not in text(bar(40))  # and none when there's no room
 
 
 @pytest.mark.asyncio

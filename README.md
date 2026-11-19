@@ -125,12 +125,12 @@ There is no `cli` subcommand: running without a command starts the CLI agent. `-
 
 ### Terminal UI
 
-`./run.sh` in a terminal opens a full-screen TUI. The conversation so far fills the screen (scrollable), the input box sits at the bottom between two rules, and a status bar sits under it. While a turn runs, a spinner line shows the elapsed time and the running tool, and you can already type your next message: Enter queues it for after the turn. On exit the terminal's previous contents come back. When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
+`./run.sh` in a terminal opens a full-screen TUI: it takes over the whole terminal window (the terminal's alternate screen), not the OS window. The conversation so far fills the screen (scrollable), the input box sits at the bottom between two rules, and a status bar sits under it. While a turn runs, a spinner line shows the elapsed time and the running tool, and you can already type your next message: Enter queues it for after the turn. On exit the terminal's previous contents come back. When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
 
 | Key / input | Action |
 |---|---|
 | Enter | Send (or accept the highlighted completion); queued while a turn runs |
-| Ctrl+Enter (sent as Ctrl+J by most terminals), Ctrl+J, Alt+Enter, or `\` at the end of a line | New line. Ctrl+J and a trailing `\` work in every terminal; Alt+Enter only where Alt is sent as Escape |
+| Ctrl+Enter (sent as Ctrl+J by most terminals), Ctrl+J, or `\` at the end of a line | New line. Ctrl+J and a trailing `\` work in every terminal. Alt+Enter also works where the terminal passes it through, but not in Windows Terminal, which uses Alt+Enter to toggle its own fullscreen mode |
 | Tab | Complete `/commands`, conversation ids after `/load`, `/fork`, `/rename`, `/export`, `/delete`, and `@paths` |
 | `@path/to/file` | Attach that file to the message (images are sent as images) |
 | Up / Down, Ctrl+R | Input history (kept in `$ANOTHERBOT_HOME/cli_history`) |

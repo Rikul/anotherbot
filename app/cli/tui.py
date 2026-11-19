@@ -8,7 +8,8 @@ prompt_toolkit, so it re-wraps when the terminal is resized.
 Features:
 
 - line editing, persistent history (Up/Down, Ctrl+R search), multi-line
-  input (Ctrl+Enter / Ctrl+J, Alt+Enter, or end a line with ``\\``), pasting;
+  input (Ctrl+Enter / Ctrl+J, or end a line with ``\\``; Alt+Enter where the
+  terminal passes it through, not Windows Terminal), pasting;
 - you can type while a turn runs; Enter queues the message for after it;
 - completion for slash commands, conversation ids after ``/load`` & co., and
   ``@path`` file attachments;
