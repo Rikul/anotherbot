@@ -65,6 +65,9 @@ LOCAL_COMMANDS = {
 }
 
 _EXIT_CONFIRM_SECS = 2.0
+# Keys arriving this soon after a permission prompt appears are ignored: they
+# were typed before the user could have read it.
+_PERMISSION_GRACE_SECS = 0.3
 _RESULT_PREVIEW_CHARS = 160
 
 # C0 controls except tab/newline, DEL, and C1 controls. ESC in particular
@@ -138,12 +141,31 @@ def extract_attachments(text: str, cwd: Path | None = None) -> list[str]:
     found: list[str] = []
     for match in _ATTACH_RE.finditer(text):
         raw = match.group(1).rstrip(".,;:!?)")
-        path = Path(raw).expanduser()
-        if not path.is_absolute():
-            path = base / path
-        if path.is_file() and str(path) not in found:
+        try:
+            path = Path(raw).expanduser()  # "@~nosuchuser" raises RuntimeError
+            if not path.is_absolute():
+                path = base / path
+            is_file = path.is_file()
+        except (RuntimeError, OSError, ValueError):
+            continue  # not an attachment: leave it as plain text
+        if is_file and str(path) not in found:
             found.append(str(path))
     return found
+
+
+def discard_typeahead() -> None:
+    """Drop keys typed while a turn was running and not yet read.
+
+    They sit in the terminal's line buffer and would otherwise be read by the
+    raw-mode permission prompt as answers ("yes" from the "y" in "hey").
+    """
+    try:
+        import termios  # pylint: disable=import-outside-toplevel  # not on Windows
+
+        if sys.stdin.isatty():
+            termios.tcflush(sys.stdin.fileno(), termios.TCIFLUSH)
+    except (ImportError, OSError, ValueError):
+        pass
 
 
 def osc52_copy(text: str) -> str:
@@ -495,8 +517,17 @@ class Tui:  # pylint: disable=too-many-instance-attributes
             "a": "always", "A": "always",
             "!": "all",
         }  # fmt: skip
+        shown_at = time.monotonic()
+
+        def answer(event, value: str) -> None:
+            if value != "interrupt" and (
+                time.monotonic() - shown_at < _PERMISSION_GRACE_SECS
+            ):
+                return  # typed before the prompt could be read
+            event.app.exit(result=value)
+
         for key, value in answers.items():
-            kb.add(key, eager=True)(lambda e, v=value: e.app.exit(result=v))
+            kb.add(key, eager=True)(lambda e, v=value: answer(e, v))
 
         @kb.add("<any>")
         def _ignore(_event):
@@ -509,6 +540,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes
             "<perm.key>Ctrl+C</perm.key> interrupt  "
         )
         session: PromptSession = PromptSession(key_bindings=kb, style=STYLE)
+        discard_typeahead()
         try:
             with patch_stdout(raw=True):
                 return await session.prompt_async(prompt) or "no"

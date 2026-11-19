@@ -409,3 +409,50 @@ async def test_ctrl_c_at_permission_prompt_interrupts_the_turn(tui):
     out = _out(tui)
     assert "Interrupted" in out
     assert "User denied" not in out
+
+
+# --- review fixes: malformed @tokens, typed-ahead keys -------------------------
+
+
+def test_extract_attachments_skips_unresolvable_tokens(tmp_path):
+    (tmp_path / "ok.txt").write_text("x")
+    text = "ping @~nosuchuser-xyz and @ok.txt and @\x00bad"
+    assert extract_attachments(text, cwd=tmp_path) == [str(tmp_path / "ok.txt")]
+
+
+def test_discard_typeahead_flushes_a_tty():
+    with (
+        patch("sys.stdin") as stdin,
+        patch("termios.tcflush") as flush,
+    ):
+        stdin.isatty.return_value = True
+        stdin.fileno.return_value = 7
+        tui_mod.discard_typeahead()
+    flush.assert_called_once()
+    assert flush.call_args.args[0] == 7
+
+
+def test_discard_typeahead_ignores_non_tty():
+    with patch("sys.stdin") as stdin, patch("termios.tcflush") as flush:
+        stdin.isatty.return_value = False
+        tui_mod.discard_typeahead()
+    flush.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_permission_prompt_ignores_keys_typed_ahead(tui):
+    """Keys already waiting when the prompt opens don't answer it."""
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with (
+        create_pipe_input() as pipe,
+        create_app_session(input=pipe, output=DummyOutput()),
+    ):
+        pipe.send_text("y")  # typed during the turn
+        task = asyncio.ensure_future(tui._read_permission_key())
+        await asyncio.sleep(tui_mod._PERMISSION_GRACE_SECS + 0.2)
+        assert not task.done()  # the early "y" was ignored
+        pipe.send_text("n")
+        assert await asyncio.wait_for(task, 2) == "no"
