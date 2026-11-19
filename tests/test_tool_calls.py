@@ -229,3 +229,42 @@ async def test_hung_cancelled_thread_does_not_block_later_tools_forever():
             if not tool_calls.unfinished_tools():
                 break
             await asyncio.sleep(0.02)
+
+
+@pytest.mark.asyncio
+async def test_parallel_sync_tools_do_not_overlap():
+    """Parallel calls from one turn run one at a time, as before threading."""
+    import asyncio
+    import threading
+    import time
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    active = 0
+    peak = 0
+    lock = threading.Lock()
+
+    class Busy(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "busy"}}
+
+        @staticmethod
+        def call() -> str:
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            time.sleep(0.05)
+            with lock:
+                active -= 1
+            return "ok"
+
+    with patch.dict(tool_calls.tool_registry, {"busy": Busy}):
+        results = await asyncio.gather(
+            *(tool_calls.run_tool("busy", {}) for _ in range(4))
+        )
+    assert results == ["ok"] * 4
+    assert peak == 1

@@ -576,3 +576,41 @@ def test_escape_does_not_answer_a_permission_prompt(tui):
 
     kb = tui._key_bindings()
     assert not [b for b in kb.bindings if b.keys == (Keys.Escape,)]
+
+
+@pytest.mark.asyncio
+async def test_real_ctrl_c_key_interrupts_at_a_permission_prompt(tui):
+    """Send an actual Ctrl+C byte through the running app while a prompt is
+    shown: the <any> catch-all must not swallow it."""
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    answers = []
+
+    async def turn(*_):
+        answers.append(await tui.ask_permission("bash", {"command": "ls"}))
+        await asyncio.sleep(10)
+
+    tui.agent.agent_loop = turn
+    with create_pipe_input() as pipe:
+        runner = asyncio.ensure_future(tui.run(input=pipe, output=DummyOutput()))
+        await asyncio.sleep(0.2)
+        pipe.send_text("go\r")
+        for _ in range(50):
+            if tui.permission_pending:
+                break
+            await asyncio.sleep(0.05)
+        assert tui.permission_pending
+        pipe.send_text("y")  # within the grace period: ignored
+        await asyncio.sleep(0.05)
+        assert tui.permission_pending
+        pipe.send_text("\x03")  # Ctrl+C
+        for _ in range(50):
+            if not tui.busy:
+                break
+            await asyncio.sleep(0.05)
+        assert answers == [False]  # interrupted, not approved
+        assert not tui.busy  # and the turn was cancelled
+        pipe.send_text("\x04")
+        await asyncio.wait_for(runner, 3)
+    assert "Interrupted" in _out(tui)

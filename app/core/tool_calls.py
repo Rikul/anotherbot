@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import os
+import weakref
 
 from ..infra.app_logging import log
 from ..infra.helpers import trunc_str_with_ellipsis
@@ -152,21 +153,36 @@ def _forget_unfinished(future: asyncio.Future) -> None:
         future.exception()  # retrieved, so asyncio doesn't warn about it
 
 
+# Sync tools run one at a time, as they did when they ran on the event loop:
+# parallel calls from one model turn (two write_file calls to one path, a
+# read racing a write) must not overlap. One lock per event loop.
+_thread_locks: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+def _get_thread_lock() -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    lock = _thread_locks.get(loop)
+    if lock is None:
+        lock = _thread_locks[loop] = asyncio.Lock()
+    return lock
+
+
 async def _run_in_thread(name: str, func, tool_args: dict):
-    """Run a sync tool in a worker thread.
+    """Run a sync tool in a worker thread, one such tool at a time.
 
     If the caller is cancelled, the thread is left to finish on its own and
     recorded in ``_unfinished``, so the cancellation (e.g. Ctrl+C in the TUI)
-    takes effect at once.
+    takes effect at once; the next tool call waits for it there.
     """
-    future = asyncio.ensure_future(asyncio.to_thread(func, **tool_args))
-    try:
-        return await asyncio.shield(future)
-    except asyncio.CancelledError:
-        if not future.done():
-            _unfinished[future] = name
-            future.add_done_callback(_forget_unfinished)
-        raise
+    async with _get_thread_lock():
+        future = asyncio.ensure_future(asyncio.to_thread(func, **tool_args))
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            if not future.done():
+                _unfinished[future] = name
+                future.add_done_callback(_forget_unfinished)
+            raise
 
 
 async def run_tool(tool_name: str, tool_args: dict) -> str:
@@ -175,9 +191,9 @@ async def run_tool(tool_name: str, tool_args: dict) -> str:
     Errors are returned as text so the model can see them. The working
     directory is restored afterwards, in case the tool changed it.
     Synchronous tools (file and web tools, search, …) run in a worker
-    thread, so a slow one doesn't freeze the event loop: the other channels,
-    the TUI's screen and Ctrl+C keep working meanwhile. Tools with
-    ``runs_in_thread = False`` run on the loop instead.
+    thread, one at a time, so a slow one doesn't freeze the event loop: the
+    other channels, the TUI's screen and Ctrl+C keep working meanwhile. Tools
+    with ``runs_in_thread = False`` run on the loop instead.
     """
     blocked = await _wait_for_unfinished()  # a cancelled call's thread first
     if blocked:
