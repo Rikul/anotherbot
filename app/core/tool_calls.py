@@ -102,7 +102,9 @@ def get_all_tool_specs() -> list[dict]:
 async def run_tool_async(tool_name: str, tool_args: dict) -> str:
     """Run a tool by name: MCP tools via the MCP manager, the rest via run_tool()."""
     if mcp.mcp_manager.is_mcp_tool(tool_name):
-        await _wait_for_unfinished()
+        blocked = await _wait_for_unfinished()
+        if blocked:
+            return blocked
         return await mcp.mcp_manager.call_tool(tool_name, tool_args)
     return await run_tool(tool_name=tool_name, tool_args=tool_args)
 
@@ -119,9 +121,29 @@ def unfinished_tools() -> list[str]:
     return sorted(set(_unfinished.values()))
 
 
-async def _wait_for_unfinished() -> None:
+# How long a new tool call waits for such threads before giving up.
+UNFINISHED_WAIT_SECS = 60.0
+
+
+async def _wait_for_unfinished() -> str:
+    """Wait for cancelled calls' threads; returns "" or, after
+    UNFINISHED_WAIT_SECS, an error for the model (a hung thread must not stall
+    every later tool call, in every channel)."""
+    deadline = asyncio.get_running_loop().time() + UNFINISHED_WAIT_SECS
     while _unfinished:
-        await asyncio.wait(set(_unfinished))
+        left = deadline - asyncio.get_running_loop().time()
+        if left <= 0:
+            names = ", ".join(unfinished_tools())
+            log.warning(
+                "Tool call refused: %s from a cancelled call still running", names
+            )
+            return (
+                f"Error: not run, because {names} from an interrupted call is still "
+                f"running after {UNFINISHED_WAIT_SECS:.0f}s and running this now "
+                "could overlap it. Try again later."
+            )
+        await asyncio.wait(set(_unfinished), timeout=left)
+    return ""
 
 
 def _forget_unfinished(future: asyncio.Future) -> None:
@@ -157,7 +179,9 @@ async def run_tool(tool_name: str, tool_args: dict) -> str:
     the TUI's screen and Ctrl+C keep working meanwhile. Tools with
     ``runs_in_thread = False`` run on the loop instead.
     """
-    await _wait_for_unfinished()  # a cancelled call's thread finishes first
+    blocked = await _wait_for_unfinished()  # a cancelled call's thread first
+    if blocked:
+        return blocked
     original_cwd = os.getcwd()
 
     try:

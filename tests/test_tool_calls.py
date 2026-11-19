@@ -186,3 +186,46 @@ async def test_cancel_is_immediate_and_next_tool_waits_for_the_thread():
         assert await tool_calls.run_tool("next", {}) == "ok"
     assert order == ["slow done", "next ran"]  # no overlap
     assert tool_calls.unfinished_tools() == []
+
+
+@pytest.mark.asyncio
+async def test_hung_cancelled_thread_does_not_block_later_tools_forever():
+    import asyncio
+    import threading
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    release = threading.Event()
+
+    class HungTool(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "hung"}}
+
+        @staticmethod
+        def call() -> str:
+            release.wait(5)
+            return "late"
+
+    try:
+        with (
+            patch.dict(tool_calls.tool_registry, {"hung": HungTool}),
+            patch.object(tool_calls, "UNFINISHED_WAIT_SECS", 0.2),
+        ):
+            task = asyncio.ensure_future(tool_calls.run_tool("hung", {}))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            result = await asyncio.wait_for(
+                tool_calls.run_tool("todo_list", {}), timeout=2
+            )
+        assert result.startswith("Error: not run, because hung")
+    finally:
+        release.set()
+        for _ in range(100):
+            if not tool_calls.unfinished_tools():
+                break
+            await asyncio.sleep(0.02)
