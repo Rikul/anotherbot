@@ -100,6 +100,8 @@ LOCAL_COMMANDS = {
 }
 
 _EXIT_CONFIRM_SECS = 2.0
+# Conversation list kept for completion this long (it is read per keystroke).
+_CONV_CACHE_SECS = 1.0
 # Keys arriving this soon after a permission prompt appears are ignored: they
 # were typed before the user could have read it.
 _PERMISSION_GRACE_SECS = 0.3
@@ -180,6 +182,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         self.render_markdown = True
         self.last_reply = ""
         self.allowed_tools: set[str] = set()
+        self._conv_cache: tuple[float, list[dict]] | None = None
         self.session_tokens = {"in": 0, "out": 0}
         self.scroll_up = 0  # lines scrolled up from the bottom of the output
         self.app: Application | None = None
@@ -275,7 +278,12 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         return sorted(cmds.items())
 
     def _conversation_list(self) -> list[dict]:
-        return self.agent.store.list()
+        # Completion runs on every keystroke: share one query per second.
+        now = time.monotonic()
+        cached = self._conv_cache
+        if cached is None or now - cached[0] > _CONV_CACHE_SECS:
+            cached = self._conv_cache = (now, self.agent.store.list())
+        return cached[1]
 
     # --- layout ----------------------------------------------------------------
 

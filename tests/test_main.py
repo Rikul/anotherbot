@@ -484,3 +484,20 @@ def test_cli_subcommand_removed():
 
     with patch("sys.argv", ["prog", "cli"]), pytest.raises(SystemExit):
         parse_args()
+
+
+@pytest.mark.asyncio
+async def test_empty_prompt_exits_instead_of_starting_the_repl(capsys):
+    """-p "" is still one-shot: it must never fall through to the REPL."""
+    agent_mock = MagicMock()
+    agent_mock.agent_loop = AsyncMock()
+    input_loop_mock = MagicMock()
+    with (
+        patch("sys.argv", ["prog", "-p", "  "]),
+        patch("app.cli.cli.CliAgent", return_value=agent_mock),
+        patch("app.cli.cli.input_loop", input_loop_mock),
+    ):
+        await main()
+    input_loop_mock.assert_not_called()
+    agent_mock.agent_loop.assert_not_called()
+    assert "Empty prompt" in capsys.readouterr().err

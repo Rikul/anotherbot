@@ -728,3 +728,15 @@ def test_status_bar_warns_about_a_tool_still_running(tui):
     with patch.object(tool_calls, "unfinished_tools", return_value=["web_fetch"]):
         text = "".join(t for _, t, *_ in to_formatted_text(tui._toolbar()))
     assert "⚠ web_fetch still running" in text
+
+
+def test_conversation_list_is_cached_briefly(tui):
+    from app.cli import tui as tui_mod
+
+    tui.agent.store.list.return_value = [{"id": 1, "name": "a"}]
+    tui._conversation_list()
+    tui._conversation_list()
+    assert tui.agent.store.list.call_count == 1  # one query per burst
+    with patch.object(tui_mod.time, "monotonic", return_value=1e12):
+        tui._conversation_list()
+    assert tui.agent.store.list.call_count == 2  # refreshed after the window
