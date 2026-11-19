@@ -709,3 +709,13 @@ async def test_mouse_is_left_to_the_terminal_until_slash_mouse(tui):
         assert "wheel scrolls" in _out(tui)
         await tui.run_command("/mouse")
         assert app.mouse_support() is False
+
+
+def test_status_bar_warns_about_a_tool_still_running(tui):
+    from prompt_toolkit.formatted_text import to_formatted_text
+
+    from app.core import tool_calls
+
+    with patch.object(tool_calls, "unfinished_tools", return_value=["web_fetch"]):
+        text = "".join(t for _, t, *_ in to_formatted_text(tui._toolbar()))
+    assert "⚠ web_fetch still running" in text

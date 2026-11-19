@@ -129,6 +129,10 @@ def unfinished_tools() -> list[str]:
 
 # How long a new tool call waits for such threads before giving up.
 UNFINISHED_WAIT_SECS = 60.0
+# After this long (from its cancel) a thread that still hasn't returned is
+# abandoned: it stops blocking tool calls, so a thread stuck forever (e.g. on
+# a dead socket) can't disable every tool in every channel until a restart.
+UNFINISHED_ABANDON_SECS = 300.0
 
 
 async def _wait_for_unfinished() -> str:
@@ -140,6 +144,7 @@ async def _wait_for_unfinished() -> str:
     later tool call, in every channel).
     """
     loop = asyncio.get_running_loop()
+    _abandon_stale(loop.time())
     while _unfinished:
         oldest = min(_unfinished_since.get(f, loop.time()) for f in _unfinished)
         left = oldest + UNFINISHED_WAIT_SECS - loop.time()
@@ -151,10 +156,25 @@ async def _wait_for_unfinished() -> str:
             return (
                 f"Error: not run, because {names} from an interrupted call is still "
                 f"running after {UNFINISHED_WAIT_SECS:.0f}s and running this now "
-                "could overlap it. Try again later."
+                "could overlap it. Try again later (it is given up on after "
+                f"{UNFINISHED_ABANDON_SECS:.0f}s)."
             )
         await asyncio.wait(set(_unfinished), timeout=left)
     return ""
+
+
+def _abandon_stale(now: float) -> None:
+    """Stop tracking threads cancelled more than UNFINISHED_ABANDON_SECS ago."""
+    for future, since in list(_unfinished_since.items()):
+        if now - since >= UNFINISHED_ABANDON_SECS and not future.done():
+            log.error(
+                "Abandoning %s: still running %.0fs after its call was cancelled; "
+                "tool calls run again (its side effects may still happen)",
+                _unfinished.get(future, "?"),
+                now - since,
+            )
+            _unfinished.pop(future, None)
+            _unfinished_since.pop(future, None)
 
 
 def _forget_unfinished(future: asyncio.Future) -> None:

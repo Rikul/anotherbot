@@ -406,6 +406,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             parts.append("raw")
         if self.mouse_enabled:
             parts.append("mouse")
+        parts.extend(_stuck_tools_warning())
         if self.scroll_up:
             parts.append(f"<toolbar.warn>↑ {self.scroll_up} lines</toolbar.warn>")
         left = "  │  ".join(parts)
@@ -923,6 +924,15 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             for task in (worker, ticker):
                 task.cancel()
             await asyncio.gather(worker, ticker, return_exceptions=True)
+
+
+def _stuck_tools_warning() -> list[str]:
+    """Status bar part naming tools from interrupted calls still running."""
+    stuck = tool_calls.unfinished_tools()
+    if not stuck:
+        return []
+    names = _h(one_line(", ".join(stuck), 30))
+    return [f"<toolbar.warn>⚠ {names} still running</toolbar.warn>"]
 
 
 def _route_console_logging(tui: Tui) -> None:

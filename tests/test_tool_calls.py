@@ -422,3 +422,47 @@ async def test_after_the_cap_later_calls_fail_at_once():
             if not tool_calls.unfinished_tools():
                 break
             await asyncio.sleep(0.02)
+
+
+@pytest.mark.asyncio
+async def test_a_thread_stuck_forever_is_abandoned_eventually():
+    """Past UNFINISHED_ABANDON_SECS a stuck thread stops blocking tool calls."""
+    import asyncio
+    import threading
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    release = threading.Event()
+
+    class Stuck(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "stuck"}}
+
+        @staticmethod
+        def call() -> str:
+            release.wait(5)
+            return "late"
+
+    try:
+        with (
+            patch.dict(tool_calls.tool_registry, {"stuck": Stuck}),
+            patch.object(tool_calls, "UNFINISHED_WAIT_SECS", 0.1),
+            patch.object(tool_calls, "UNFINISHED_ABANDON_SECS", 0.3),
+        ):
+            task = asyncio.ensure_future(tool_calls.run_tool("stuck", {}))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            refused = await tool_calls.run_tool("todo_list", {})
+            assert refused.startswith("Error: not run")
+            await asyncio.sleep(0.35)
+            ran = await tool_calls.run_tool("todo_list", {})
+            assert not ran.startswith("Error")  # runs again, not refused
+            assert tool_calls.unfinished_tools() == []
+    finally:
+        release.set()
+        await asyncio.sleep(0.05)
