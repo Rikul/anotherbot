@@ -359,3 +359,17 @@ async def test_sync_tools_run_on_daemon_threads_with_context():
         assert await tool_calls.run_tool("probe", {}) == "ok"
         assert "nope" in await tool_calls.run_tool("boom", {})
     assert seen == {"daemon": True, "var": "from caller"}
+
+
+@pytest.mark.asyncio
+async def test_parallel_bash_calls_do_not_overlap(tmp_path):
+    """bash is async now, but parallel calls from one turn still run one at a
+    time, as they did when it blocked the loop."""
+    import asyncio
+
+    from app.core.tool_calls import run_tool
+
+    log = tmp_path / "log"
+    cmd = f"echo start >> {log}; sleep 0.2; echo end >> {log}"
+    await asyncio.gather(*(run_tool("bash", {"command": cmd}) for _ in range(3)))
+    assert log.read_text().split() == ["start", "end"] * 3

@@ -201,6 +201,16 @@ def _start_daemon_thread(name: str, func, tool_args: dict) -> asyncio.Future:
     return future
 
 
+async def _run_exclusive(func, tool_args: dict):
+    """Run an async tool marked ``exclusive`` one at a time, under the same
+    lock as threaded sync tools (and after any unfinished cancelled thread)."""
+    async with _get_thread_lock():
+        blocked = await _wait_for_unfinished()
+        if blocked:
+            return blocked
+        return await func(**tool_args)
+
+
 async def _run_in_thread(name: str, func, tool_args: dict):
     """Run a sync tool in a worker thread, one such tool at a time.
 
@@ -242,7 +252,9 @@ async def run_tool(tool_name: str, tool_args: dict) -> str:
     try:
         tool = tool_registry[tool_name]
         func = tool.call
-        if inspect.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func) and tool.exclusive:
+            result = await _run_exclusive(func, tool_args)
+        elif inspect.iscoroutinefunction(func):
             result = await func(**tool_args)
         elif tool.runs_in_thread:
             result = await _run_in_thread(tool_name, func, tool_args)

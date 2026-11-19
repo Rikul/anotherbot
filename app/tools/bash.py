@@ -12,6 +12,10 @@ from ..infra.app_logging import log
 class BashTool(Tool):
     """Run a shell command (with timeout); return stdout plus any stderr under ``[stderr]``."""
 
+    # Parallel shell commands from one turn must not overlap (git add vs
+    # git commit, two installs in one directory), as when bash blocked.
+    exclusive = True
+
     @staticmethod
     def spec():
         return {

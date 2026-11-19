@@ -30,6 +30,11 @@ class Tool(ABC):  # pylint: disable=too-few-public-methods  # interface: spec() 
     # parallel calls from racing on that state.
     runs_in_thread: bool = True
 
+    # Async tools run concurrently when the model makes parallel calls. One
+    # with side effects that must not overlap (bash) sets this to True to run
+    # one at a time, together with the threaded sync tools.
+    exclusive: bool = False
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not callable(getattr(cls, "call", None)):
