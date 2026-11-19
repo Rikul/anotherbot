@@ -575,7 +575,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         """One line per tool call; also shown on the busy line."""
         width = max(20, self.console.width - len(name) - 6)
         summary = summarize_args(args, width)
-        line = Text("⏺ ", style="cyan")
+        line = Text()
+        line.append("🛠️ ", style="cyan")
         line.append(clean(name), style="bold cyan")
         if summary:
             line.append(f"  {summary}", style="dim")
