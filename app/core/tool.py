@@ -24,6 +24,12 @@ class Tool(ABC):  # pylint: disable=too-few-public-methods  # interface: spec() 
 
     call: Callable[..., Any]
 
+    # Synchronous ``call``s run in a worker thread so they can't block the
+    # event loop. Tools that only touch shared in-memory state (the todo list)
+    # set this to False: they are instant, and running them on the loop keeps
+    # parallel calls from racing on that state.
+    runs_in_thread: bool = True
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not callable(getattr(cls, "call", None)):

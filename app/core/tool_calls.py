@@ -106,23 +106,47 @@ async def run_tool_async(tool_name: str, tool_args: dict) -> str:
     return await run_tool(tool_name=tool_name, tool_args=tool_args)
 
 
+async def _run_in_thread(func, tool_args: dict):
+    """Run a sync tool in a worker thread.
+
+    A thread can't be stopped, so if the caller is cancelled (Ctrl+C in the
+    TUI), wait for the thread to finish before passing the cancellation on.
+    Otherwise the cancelled turn would end while the tool is still writing
+    files, and the next turn could overlap its side effects.
+    """
+    future = asyncio.ensure_future(asyncio.to_thread(func, **tool_args))
+    try:
+        return await asyncio.shield(future)
+    except asyncio.CancelledError:
+        while not future.done():
+            try:
+                await asyncio.wait({future})
+            except asyncio.CancelledError:
+                continue  # cancelled again: still let the thread finish first
+        raise
+
+
 async def run_tool(tool_name: str, tool_args: dict) -> str:
     """Run a built-in tool by name and return its result as a (truncated) string.
 
     Errors are returned as text so the model can see them. The working
     directory is restored afterwards, in case the tool changed it.
-    Synchronous tools (``bash``, file and web tools, …) run in a worker
+    Synchronous tools (file and web tools, search, …) run in a worker
     thread, so a slow one doesn't freeze the event loop: the other channels,
-    the TUI's screen and Ctrl+C keep working meanwhile.
+    the TUI's screen and Ctrl+C keep working meanwhile. Tools with
+    ``runs_in_thread = False`` run on the loop instead.
     """
     original_cwd = os.getcwd()
 
     try:
-        func = tool_registry[tool_name].call
+        tool = tool_registry[tool_name]
+        func = tool.call
         if inspect.iscoroutinefunction(func):
             result = await func(**tool_args)
+        elif tool.runs_in_thread:
+            result = await _run_in_thread(func, tool_args)
         else:
-            result = await asyncio.to_thread(func, **tool_args)
+            result = func(**tool_args)
         if asyncio.iscoroutine(result):
             result = await result
     except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model

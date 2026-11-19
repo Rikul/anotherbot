@@ -69,3 +69,26 @@ async def test_bash_cancel_kills_the_command(tmp_path):
         await asyncio.sleep(0.02)
     else:
         pytest.fail("the backgrounded sleep survived the cancel")
+
+
+@pytest.mark.asyncio
+async def test_kill_uses_taskkill_on_windows():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from app.tools import bash as bash_mod
+
+    proc = MagicMock(pid=1234, returncode=None)
+    proc.wait = AsyncMock(return_value=0)
+    killer = MagicMock()
+    killer.wait = AsyncMock(return_value=0)
+    with (
+        patch.object(bash_mod.os, "name", "nt"),
+        patch.object(
+            bash_mod.asyncio,
+            "create_subprocess_exec",
+            AsyncMock(return_value=killer),
+        ) as exec_,
+    ):
+        await bash_mod._kill(proc)
+    assert exec_.await_args.args == ("taskkill", "/F", "/T", "/PID", "1234")
+    proc.kill.assert_called_once()  # fallback for the shell itself

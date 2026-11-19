@@ -106,3 +106,64 @@ def test_every_registered_tool_has_callable_call_and_matching_spec_name():
     for name, cls in tool_registry.items():
         assert callable(cls.call)
         assert cls.spec()["function"]["name"] == name
+
+
+# --- threads: todo tools stay on the loop, cancellation waits for the thread --
+
+
+@pytest.mark.asyncio
+async def test_parallel_todo_adds_get_unique_ids():
+    import asyncio
+
+    from app.core.tool_calls import run_tool
+    from app.tools.todo import init_task_todos
+
+    init_task_todos()
+    results = await asyncio.gather(
+        *(run_tool("todo_add", {"title": f"t{i}"}) for i in range(50))
+    )
+    ids = [r.split()[1] for r in results]  # "Task <id> added: ..."
+    assert len(set(ids)) == 50
+
+
+@pytest.mark.asyncio
+async def test_todo_tools_do_not_run_in_a_thread():
+    from unittest.mock import patch
+
+    from app.core.tool_calls import run_tool
+
+    with patch("app.core.tool_calls.asyncio.to_thread", side_effect=AssertionError):
+        assert "added" in await run_tool("todo_add", {"title": "x"})
+
+
+@pytest.mark.asyncio
+async def test_cancelled_run_tool_waits_for_its_thread():
+    """A cancelled turn must not end while its sync tool is still running."""
+    import asyncio
+    import threading
+    import time
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    finished = threading.Event()
+
+    class SlowTool(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "slow"}}
+
+        @staticmethod
+        def call() -> str:
+            time.sleep(0.3)
+            finished.set()
+            return "done"
+
+    with patch.dict(tool_calls.tool_registry, {"slow": SlowTool}):
+        task = asyncio.ensure_future(tool_calls.run_tool("slow", {}))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert finished.is_set()  # the thread finished before the cancel landed

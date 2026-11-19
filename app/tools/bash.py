@@ -3,6 +3,7 @@
 import asyncio
 import os
 import signal
+import subprocess
 
 from ..core.tool import Tool
 from ..infra.app_logging import log
@@ -53,7 +54,7 @@ class BashTool(Tool):
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                start_new_session=True,
+                **_NEW_GROUP,
             )
         except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
             log.error("Error executing command '%s': %s", command, e)
@@ -74,12 +75,35 @@ class BashTool(Tool):
         return output
 
 
+# Start the shell in its own process group, so it can be killed with
+# everything it started: a new session on POSIX, a new process group on Windows.
+_NEW_GROUP = (
+    {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    if os.name == "nt"
+    else {"start_new_session": True}
+)
+
+
 async def _kill(proc: asyncio.subprocess.Process) -> None:
-    """Kill the shell and everything it started (its process group)."""
+    """Kill the shell and everything it started."""
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
+        if os.name == "nt":
+            # taskkill /T kills the whole process tree.
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill", "/F", "/T", "/PID", str(proc.pid),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )  # fmt: skip
+            await killer.wait()
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
         pass
+    if proc.returncode is None:
+        try:
+            proc.kill()  # fallback: at least the shell itself
+        except ProcessLookupError:
+            pass
     try:
         await asyncio.wait_for(proc.wait(), 5)
     except (TimeoutError, asyncio.CancelledError):

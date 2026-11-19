@@ -41,6 +41,10 @@ def current_todos() -> TodoList:
 class TodoAddTool(Tool):
     """Add a task to the current todo list."""
 
+    runs_in_thread = (
+        False  # shared in-memory list: run on the loop, never in parallel threads
+    )
+
     @staticmethod
     def spec():
         return {
@@ -84,6 +88,10 @@ class TodoAddTool(Tool):
 class TodoListTool(Tool):
     """List the current todo list's tasks with their statuses."""
 
+    runs_in_thread = (
+        False  # shared in-memory list: run on the loop, never in parallel threads
+    )
+
     @staticmethod
     def spec():
         return {
@@ -116,6 +124,10 @@ class TodoListTool(Tool):
 class TodoClearTool(Tool):
     """Remove every task from the current todo list and reset the IDs."""
 
+    runs_in_thread = (
+        False  # shared in-memory list: run on the loop, never in parallel threads
+    )
+
     @staticmethod
     def spec():
         return {
@@ -140,6 +152,10 @@ class TodoClearTool(Tool):
 
 class TodoUpdateTool(Tool):
     """Set a task's status to ``todo``, ``in_progress`` or ``done``."""
+
+    runs_in_thread = (
+        False  # shared in-memory list: run on the loop, never in parallel threads
+    )
 
     @staticmethod
     def spec():
