@@ -1,9 +1,11 @@
 """Built-in tool registry and dispatch (MCP tools are routed via ``mcp_manager``)."""
 
 import asyncio
+import contextvars
 import inspect
 import json
 import os
+import threading
 import weakref
 
 from ..infra.app_logging import log
@@ -167,6 +169,38 @@ def _get_thread_lock() -> asyncio.Lock:
     return lock
 
 
+def _start_daemon_thread(name: str, func, tool_args: dict) -> asyncio.Future:
+    """Run ``func`` in a new daemon thread; returns a future for its result.
+
+    Like ``asyncio.to_thread`` (the context is copied, so the todo list and
+    other ContextVars carry over), but on a daemon thread: if a cancelled
+    tool hangs, quitting doesn't wait for it, whereas the default executor's
+    threads are joined at interpreter exit.
+    """
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+    context = contextvars.copy_context()
+
+    def settle(setter, value) -> None:
+        if not future.done():
+            setter(value)
+
+    def runner() -> None:
+        try:
+            result = context.run(func, **tool_args)
+        except BaseException as e:  # pylint: disable=broad-exception-caught  # handed to the awaiting task
+            outcome = (future.set_exception, e)
+        else:
+            outcome = (future.set_result, result)
+        try:
+            loop.call_soon_threadsafe(settle, *outcome)
+        except RuntimeError:
+            pass  # the loop is gone (we're quitting): nobody is waiting
+
+    threading.Thread(target=runner, name=f"tool-{name}", daemon=True).start()
+    return future
+
+
 async def _run_in_thread(name: str, func, tool_args: dict):
     """Run a sync tool in a worker thread, one such tool at a time.
 
@@ -180,7 +214,7 @@ async def _run_in_thread(name: str, func, tool_args: dict):
         blocked = await _wait_for_unfinished()
         if blocked:
             return blocked
-        future = asyncio.ensure_future(asyncio.to_thread(func, **tool_args))
+        future = _start_daemon_thread(name, func, tool_args)
         try:
             return await asyncio.shield(future)
         except asyncio.CancelledError:

@@ -130,7 +130,7 @@ There is no `cli` subcommand: running without a command starts the CLI agent. `-
 | Key / input | Action |
 |---|---|
 | Enter | Send (or accept the highlighted completion); queued while a turn runs |
-| Alt+Enter, Ctrl+J, or `\` at the end of a line | New line |
+| Ctrl+Enter (sent as Ctrl+J by most terminals), Ctrl+J, Alt+Enter, or `\` at the end of a line | New line. Ctrl+J and a trailing `\` work in every terminal; Alt+Enter only where Alt is sent as Escape |
 | Tab | Complete `/commands`, conversation ids after `/load`, `/fork`, `/rename`, `/export`, `/delete`, and `@paths` |
 | `@path/to/file` | Attach that file to the message (images are sent as images) |
 | Up / Down, Ctrl+R | Input history (kept in `$ANOTHERBOT_HOME/cli_history`) |

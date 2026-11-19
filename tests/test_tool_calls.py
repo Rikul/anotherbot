@@ -132,7 +132,7 @@ async def test_todo_tools_do_not_run_in_a_thread():
 
     from app.core.tool_calls import run_tool
 
-    with patch("app.core.tool_calls.asyncio.to_thread", side_effect=AssertionError):
+    with patch("app.core.tool_calls._start_daemon_thread", side_effect=AssertionError):
         assert "added" in await run_tool("todo_add", {"title": "x"})
 
 
@@ -318,3 +318,44 @@ async def test_call_waiting_on_the_lock_rechecks_unfinished_threads():
             await task_a
         assert await asyncio.wait_for(task_b, 3) == "b"
     assert order == ["a done", "b ran"]
+
+
+@pytest.mark.asyncio
+async def test_sync_tools_run_on_daemon_threads_with_context():
+    """Daemon threads, so quitting never waits for a hung cancelled tool; the
+    context (e.g. the todo list) is carried over like asyncio.to_thread does."""
+    import contextvars
+    import threading
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    var = contextvars.ContextVar("var")
+    var.set("from caller")
+    seen = {}
+
+    class Probe(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "probe"}}
+
+        @staticmethod
+        def call() -> str:
+            seen["daemon"] = threading.current_thread().daemon
+            seen["var"] = var.get()
+            return "ok"
+
+    class Boom(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "boom"}}
+
+        @staticmethod
+        def call() -> str:
+            raise ValueError("nope")
+
+    with patch.dict(tool_calls.tool_registry, {"probe": Probe, "boom": Boom}):
+        assert await tool_calls.run_tool("probe", {}) == "ok"
+        assert "nope" in await tool_calls.run_tool("boom", {})
+    assert seen == {"daemon": True, "var": "from caller"}
