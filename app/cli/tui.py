@@ -19,9 +19,10 @@ Features:
 - single-key tool permission prompts (yes / no / always for this tool /
   approve everything), Shift+Tab toggles auto-approve;
 - Ctrl+C interrupts a running turn; otherwise it clears the input, and twice
-  in a row (or Ctrl+D) quits. PageUp/PageDown scroll; the mouse is left to
-  the terminal (select text, Ctrl+wheel zoom) unless /mouse turns on wheel
-  scrolling.
+  in a row (or Ctrl+D) quits. PageUp/PageDown scroll the conversation; Up/Down
+  are prompt history. The mouse is left to the terminal (select text,
+  Ctrl+wheel zoom), and the terminal is asked not to turn the wheel into
+  Up/Down keys, which would step through history.
 """
 
 from __future__ import annotations
@@ -93,7 +94,6 @@ LOCAL_COMMANDS = {
     "history": "Show recent messages of this conversation. Usage: /history [n]",
     "copy": "Copy the last reply to the clipboard.",
     "raw": "Toggle markdown rendering of replies.",
-    "mouse": "Toggle mouse capture: wheel scrolling on, but text selection and zoom off.",
     "yolo": "Toggle auto-approve for tool calls (also Shift+Tab).",
     "exit": "Quit.",
     "quit": "Quit.",
@@ -178,9 +178,6 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         )
         self.registry: CommandRegistry = build_command_registry(self.agent)
         self.render_markdown = True
-        # Off by default: with mouse capture on, the terminal sends every mouse
-        # event to the app, so text can't be selected or zoomed (Ctrl+wheel).
-        self.mouse_enabled = False
         self.last_reply = ""
         self.allowed_tools: set[str] = set()
         self.session_tokens = {"in": 0, "out": 0}
@@ -348,7 +345,9 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             key_bindings=self._key_bindings(),
             style=STYLE,
             full_screen=True,
-            mouse_support=Condition(lambda: self.mouse_enabled),
+            # No mouse capture: with it, the terminal sends every mouse event to
+            # the app, so text can't be selected or zoomed (Ctrl+wheel).
+            mouse_support=False,
             **app_kwargs,
         )
         return self.app
@@ -404,8 +403,6 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             parts.append(f"{format_tokens(toks)} tok")
         if not self.render_markdown:
             parts.append("raw")
-        if self.mouse_enabled:
-            parts.append("mouse")
         parts.extend(_stuck_tools_warning())
         if self.scroll_up:
             parts.append(f"<toolbar.warn>↑ {self.scroll_up} lines</toolbar.warn>")
@@ -816,17 +813,6 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         mode = "markdown" if self.render_markdown else "raw text"
         self.print(Text(f"Replies render as {mode} (new replies).", "dim"))
 
-    def _cmd_mouse(self, _args: str) -> None:
-        self.mouse_enabled = not self.mouse_enabled
-        msg = (
-            "Mouse on: the wheel scrolls the conversation. Hold Shift to select "
-            "text; /mouse again to give the mouse back to the terminal."
-            if self.mouse_enabled
-            else "Mouse off: select text and zoom as usual; PageUp/PageDown scroll."
-        )
-        self.print(Text(msg, "dim"))
-        self.invalidate()
-
     def _cmd_yolo(self, _args: str) -> None:
         on = self.toggle_auto_approve()
         msg = (
@@ -897,6 +883,16 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             )
         )
 
+    def _wheel_not_arrows(self) -> None:
+        """Ask the terminal not to send the wheel as Up/Down keys (DEC 1007).
+
+        In the alternate screen many terminals (Windows Terminal, VTE, ...)
+        turn wheel movement into arrow keys, which would step through the
+        prompt history; with this off the wheel does nothing in the TUI.
+        Terminals that don't know the mode ignore it.
+        """
+        _write_raw(self.app, ALT_SCROLL_OFF)
+
     async def _worker(self) -> None:
         """Run submitted messages one at a time, in order."""
         while True:
@@ -919,8 +915,9 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         worker = asyncio.ensure_future(self._worker())
         ticker = asyncio.ensure_future(self._tick())
         try:
-            await app.run_async()
+            await app.run_async(pre_run=self._wheel_not_arrows)
         finally:
+            _write_raw(app, ALT_SCROLL_ON)
             if self._turn_task is not None:
                 self._turn_task.cancel()
             for task in (worker, ticker):
@@ -935,6 +932,23 @@ def _stuck_tools_warning() -> list[str]:
         return []
     names = _h(one_line(", ".join(stuck), 30))
     return [f"<toolbar.warn>⚠ {names} still running</toolbar.warn>"]
+
+
+# DEC private mode 1007 ("alternate scroll"): the wheel sends Up/Down keys in
+# the alternate screen. Off while the TUI runs; back on when it exits (the
+# usual default in the terminals that have it).
+ALT_SCROLL_OFF = "\x1b[?1007l"
+ALT_SCROLL_ON = "\x1b[?1007h"
+
+
+def _write_raw(app: Application | None, sequence: str) -> None:
+    if app is None:
+        return
+    try:
+        app.output.write_raw(sequence)
+        app.output.flush()
+    except Exception:  # pylint: disable=broad-exception-caught  # cosmetic; never fatal
+        log.debug("Couldn't write %r to the terminal", sequence)
 
 
 def _route_console_logging(tui: Tui) -> None:

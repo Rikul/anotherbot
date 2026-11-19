@@ -17,7 +17,6 @@ from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text.utils import split_lines
 from prompt_toolkit.layout.controls import UIContent, UIControl
-from prompt_toolkit.mouse_events import MouseEventType
 from rich.console import Console
 from rich.padding import Padding
 from rich.style import Style as RichStyle
@@ -295,15 +294,6 @@ class _OutputControl(UIControl):
     def vertical_scroll(self, _window) -> int:
         """Top line, so that ``bottom`` is the window's last row."""
         return max(0, self.bottom - self.height + 1)
-
-    def mouse_handler(self, mouse_event):
-        if mouse_event.event_type == MouseEventType.SCROLL_UP:
-            self.tui.scroll(3)
-            return None
-        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
-            self.tui.scroll(-3)
-            return None
-        return NotImplemented
 
     def is_focusable(self) -> bool:
         return False

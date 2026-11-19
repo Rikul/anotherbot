@@ -695,20 +695,29 @@ def test_user_messages_get_a_tinted_full_width_band(tui):
 
 
 @pytest.mark.asyncio
-async def test_mouse_is_left_to_the_terminal_until_slash_mouse(tui):
-    """Capture off by default (native selection and zoom); /mouse toggles it."""
+async def test_no_mouse_capture_and_wheel_arrows_switched_off(tui):
+    """The mouse stays with the terminal; DEC 1007 is reset while the TUI runs
+    (so the wheel doesn't step through history) and restored on exit."""
+    from prompt_toolkit.data_structures import Size
     from prompt_toolkit.input import create_pipe_input
-    from prompt_toolkit.output import DummyOutput
+    from prompt_toolkit.output.vt100 import Vt100_Output
 
+    from app.cli.tui import ALT_SCROLL_OFF, ALT_SCROLL_ON
+
+    written = io.StringIO()
+    output = Vt100_Output(written, lambda: Size(24, 80), term="xterm")
+    tui.agent.agent_loop = AsyncMock(return_value="ok")
     with create_pipe_input() as pipe:
-        app = tui.build_app(input=pipe, output=DummyOutput())
-        assert tui.mouse_enabled is False
-        assert app.mouse_support() is False
-        await tui.run_command("/mouse")
-        assert app.mouse_support() is True
-        assert "wheel scrolls" in _out(tui)
-        await tui.run_command("/mouse")
-        assert app.mouse_support() is False
+        runner = asyncio.ensure_future(tui.run(input=pipe, output=output))
+        await asyncio.sleep(0.3)
+        assert tui.app.mouse_support() is False
+        assert ALT_SCROLL_OFF in written.getvalue()
+        assert "\x1b[?1000h" not in written.getvalue()  # no mouse tracking
+        assert "mouse" not in dict(tui._command_list())
+        pipe.send_text("\x04")
+        await asyncio.wait_for(runner, 3)
+    out = written.getvalue()
+    assert out.rindex(ALT_SCROLL_ON) > out.index(ALT_SCROLL_OFF)
 
 
 def test_status_bar_warns_about_a_tool_still_running(tui):

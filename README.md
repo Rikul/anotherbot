@@ -133,18 +133,19 @@ There is no `cli` subcommand: running without a command starts the CLI agent. `-
 | Ctrl+Enter (sent as Ctrl+J by most terminals), Ctrl+J, or `\` at the end of a line | New line. Ctrl+J and a trailing `\` work in every terminal. Alt+Enter also works where the terminal passes it through, but not in Windows Terminal, which uses Alt+Enter to toggle its own fullscreen mode |
 | Tab | Complete `/commands`, conversation ids after `/load`, `/fork`, `/rename`, `/export`, `/delete`, and `@paths` |
 | `@path/to/file` | Attach that file to the message (images are sent as images) |
-| Up / Down, Ctrl+R | Input history (kept in `$ANOTHERBOT_HOME/cli_history`) |
+| Up / Down, Ctrl+R | Prompt history (kept in `$ANOTHERBOT_HOME/cli_history`) |
 | Shift+Tab | Toggle auto-approve for tool calls |
 | Ctrl+C | Interrupt the running turn (kills a running `bash` command; a file or web tool already running is left to finish, and the next tool call waits for it); otherwise clear the input, twice to quit |
 | Ctrl+D | Quit (on an empty input) |
 | PageUp / PageDown | Scroll the conversation |
-| `/mouse` | Toggle mouse capture. Off by default, so the terminal keeps the mouse: drag to select text, Ctrl+wheel to zoom. On, the wheel scrolls the conversation (hold Shift to select text) |
 | Ctrl+L | Clear the conversation pane |
 | `//text` | Send a message that starts with `/` |
 
+The TUI leaves the mouse to the terminal, so you can select text and zoom (Ctrl+wheel) as usual. It asks the terminal not to turn the mouse wheel into Up/Down keys (which would step through prompt history), so in terminals that honour that the wheel does nothing in the TUI; use PageUp/PageDown to scroll.
+
 Tool permission prompts replace the input box and take one key: `y`/Enter yes, `n` no, `a` always allow this tool for the session, `!` approve everything, Ctrl+C interrupts the turn. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
 
-Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; switching conversations with `/load`, `/fork`, `/new` or `/delete` redraws the pane with that conversation's history), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/mouse` (wheel scrolling vs. native selection and zoom), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
+Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; switching conversations with `/load`, `/fork`, `/new` or `/delete` redraws the pane with that conversation's history), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
 
 The `bash` tool runs commands without a terminal or stdin, so commands that prompt (sudo, ssh/git passwords) fail instead of waiting; the model is told to use non-interactive flags.
 
