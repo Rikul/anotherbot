@@ -34,7 +34,6 @@ from pathlib import Path
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import HTML, to_formatted_text
 from prompt_toolkit.formatted_text.utils import fragment_list_width
@@ -51,12 +50,9 @@ from prompt_toolkit.layout import (
 from prompt_toolkit.layout.controls import (
     BufferControl,
     FormattedTextControl,
-    UIContent,
-    UIControl,
 )
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.mouse_events import MouseEventType
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import SearchToolbar
 from rich.console import Console
@@ -69,7 +65,12 @@ from ..channels.commands import CommandRegistry, build_command_registry
 from ..core import runtime, tool_calls
 from ..infra.app_logging import log
 from .cli_agent import CliAgent
-from .tui_text import (  # noqa: F401  # re-exported for callers and tests
+from .tui_text import (  # noqa: F401  # pylint: disable=unused-import  # re-exported
+    _HINTS,
+    COMMAND_STYLE,
+    USER_STYLE,
+    _OutputControl,
+    user_block,
     Transcript,
     TuiCompleter,
     _h,
@@ -102,15 +103,6 @@ _PERMISSION_GRACE_SECS = 0.3
 # Messages of a conversation shown when it is opened (/history shows more).
 _HISTORY_ON_OPEN = 200
 _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-# Status bar key hints, shown while they fit.
-_HINTS = (
-    ("/", "cmds"),
-    ("@", "attach"),
-    ("⇧Tab", "approve"),
-    ("Ctrl+⏎", "newline"),
-    ("PgUp", "scroll"),
-)
-
 STYLE = Style.from_dict(
     {
         "prompt": "ansicyan bold",
@@ -129,45 +121,6 @@ STYLE = Style.from_dict(
 
 
 # --- output pane -------------------------------------------------------------
-
-
-class _OutputControl(UIControl):
-    """Shows the transcript, bottom-anchored, scrolled by ``Tui.scroll_up``."""
-
-    def __init__(self, tui: Tui) -> None:
-        self.tui = tui
-        self.bottom = 0  # index of the last visible line
-        self.height = 0
-
-    def create_content(self, width: int, height: int) -> UIContent:
-        lines = self.tui.transcript.lines(width)
-        count = len(lines)
-        max_up = max(0, count - height)
-        self.tui.scroll_up = min(self.tui.scroll_up, max_up)
-        self.bottom = max(0, count - 1 - self.tui.scroll_up)
-        self.height = height
-        return UIContent(
-            get_line=lambda i: lines[i],
-            line_count=count,
-            cursor_position=Point(0, self.bottom),
-            show_cursor=False,
-        )
-
-    def vertical_scroll(self, _window) -> int:
-        """Top line, so that ``bottom`` is the window's last row."""
-        return max(0, self.bottom - self.height + 1)
-
-    def mouse_handler(self, mouse_event):
-        if mouse_event.event_type == MouseEventType.SCROLL_UP:
-            self.tui.scroll(3)
-            return None
-        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
-            self.tui.scroll(-3)
-            return None
-        return NotImplemented
-
-    def is_focusable(self) -> bool:
-        return False
 
 
 class _ConsoleLogHandler(logging.Handler):
@@ -295,6 +248,11 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             self.print(renderable)
         else:
             loop.call_soon_threadsafe(self.print, renderable)
+
+    def invalidate_later(self, delay: float) -> None:
+        """Redraw after ``delay`` seconds (no-op before the app runs)."""
+        if self.app is not None and self.app.is_running and self._loop is not None:
+            self._loop.call_later(delay, self.invalidate)
 
     def invalidate(self) -> None:
         """Ask for a redraw (no-op before the app runs)."""
@@ -717,7 +675,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
     async def run_turn(self, text: str) -> None:
         """Run one agent turn; Ctrl+C cancels it."""
         self.print()
-        self.print(Text("❯ " + clean(text), style="bold"))
+        self.print(user_block(text))
         files = extract_attachments(text)
         metadata = {"files": files} if files else None
         for f in files:
@@ -812,7 +770,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
 
     def _echo_command(self, line: str) -> None:
         self.print()
-        self.print(Text("❯ " + clean(line), style="dim bold"))
+        self.print(user_block(line, COMMAND_STYLE))
 
     def _cmd_clear(self, _args: str) -> None:
         self.transcript.clear()
@@ -872,7 +830,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         for m in msgs:
             self.print()
             if m["role"] == "user":
-                self.print(Text("❯ " + clean(m["content"]), style="bold"))
+                self.print(user_block(m["content"]))
             else:
                 self.print(self._render(m["content"]))
         if ruled:

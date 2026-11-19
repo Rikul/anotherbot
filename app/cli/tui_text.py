@@ -6,14 +6,25 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from prompt_toolkit.completion import Completer, Completion, PathCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.formatted_text.utils import split_lines
+from prompt_toolkit.layout.controls import UIContent, UIControl
+from prompt_toolkit.mouse_events import MouseEventType
 from rich.console import Console
+from rich.padding import Padding
+from rich.style import Style as RichStyle
+from rich.text import Text
+
+if TYPE_CHECKING:
+    from .tui import Tui
 
 # Commands whose (first) argument is a conversation id.
 CONV_ID_COMMANDS = frozenset({"load", "fork", "rename", "export", "delete"})
@@ -206,3 +217,93 @@ class Transcript:
         self.raw.append(rendered)
         # The trailing newline leaves an empty last "line": drop it.
         self._lines.extend(list(split_lines(to_formatted_text(ANSI(rendered))))[:-1])
+
+
+# User messages are shown on a tinted full-width band (explicit foreground too,
+# so it stays readable on light terminals).
+USER_STYLE = RichStyle.parse("bold #e4e4e4 on #303030")
+COMMAND_STYLE = RichStyle.parse("#9e9e9e on #303030")
+# While the terminal is being resized, re-wrapping a long transcript on every
+# size event would stutter; wait until the width has been stable this long.
+_RESIZE_SETTLE_SECS = 0.15
+# Status bar key hints, shown while they fit.
+_HINTS = (
+    ("/", "cmds"),
+    ("@", "attach"),
+    ("⇧Tab", "approve"),
+    ("Ctrl+⏎", "newline"),
+    ("PgUp", "scroll"),
+)
+
+
+def user_block(text: str, style: RichStyle = USER_STYLE) -> Padding:
+    """A user message (or command) on a tinted, full-width band.
+
+    A fresh copy of the style each time: rich caches a style object's ANSI
+    codes for the first colour depth it is rendered at, so a shared one could
+    keep codes from another console.
+    """
+    style = style.copy()
+    return Padding(Text("❯ " + clean(text)), (0, 1), style=style, expand=True)
+
+
+class _OutputControl(UIControl):
+    """Shows the transcript, bottom-anchored, scrolled by ``Tui.scroll_up``."""
+
+    def __init__(self, tui: Tui) -> None:
+        self.tui = tui
+        self.bottom = 0  # index of the last visible line
+        self.height = 0
+        self._rendered_once = False
+        self._pending_width = 0  # width being resized to, if any…
+        self._pending_since = 0.0  # …and since when
+
+    def create_content(self, width: int, height: int) -> UIContent:
+        lines = self._lines_for(width)
+        count = len(lines)
+        # Content shorter than the pane sits at the bottom, just above the
+        # input (blank lines on top), like a chat.
+        pad = max(0, height - count)
+        max_up = max(0, count - height)
+        self.tui.scroll_up = min(self.tui.scroll_up, max_up)
+        self.bottom = pad + count - 1 - self.tui.scroll_up
+        self.height = height
+        return UIContent(
+            get_line=lambda i: lines[i - pad] if i >= pad else [],
+            line_count=pad + count,
+            cursor_position=Point(0, max(0, self.bottom)),
+            show_cursor=False,
+        )
+
+    def _lines_for(self, width: int) -> list[list]:
+        """The transcript's lines; a new width re-wraps them only once it has
+        been stable for _RESIZE_SETTLE_SECS (the last ones are shown meanwhile)."""
+        transcript = self.tui.transcript
+        if not self._rendered_once or width == transcript.console.width:
+            self._rendered_once = True
+            self._pending_width = 0
+            return transcript.lines(width)
+        now = time.monotonic()
+        if width != self._pending_width:
+            self._pending_width, self._pending_since = width, now
+            self.tui.invalidate_later(_RESIZE_SETTLE_SECS + 0.02)
+        if now - self._pending_since >= _RESIZE_SETTLE_SECS:
+            self._pending_width = 0
+            return transcript.lines(width)
+        return transcript.lines(transcript.console.width)  # no re-render yet
+
+    def vertical_scroll(self, _window) -> int:
+        """Top line, so that ``bottom`` is the window's last row."""
+        return max(0, self.bottom - self.height + 1)
+
+    def mouse_handler(self, mouse_event):
+        if mouse_event.event_type == MouseEventType.SCROLL_UP:
+            self.tui.scroll(3)
+            return None
+        if mouse_event.event_type == MouseEventType.SCROLL_DOWN:
+            self.tui.scroll(-3)
+            return None
+        return NotImplemented
+
+    def is_focusable(self) -> bool:
+        return False

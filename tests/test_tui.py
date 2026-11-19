@@ -642,3 +642,53 @@ def test_shift_tab_is_ignored_while_a_permission_prompt_is_pending(tui):
         assert binding.filter()
     finally:
         tui._perm_future = None
+
+
+# --- bottom anchoring, resize debounce, tinted user messages -----------------
+
+
+def test_short_content_sits_at_the_bottom(tui):
+    from app.cli.tui import _OutputControl
+
+    tui.print(Text("only line"))
+    control = _OutputControl(tui)
+    content = control.create_content(width=100, height=10)
+    assert content.line_count == 10  # padded up to the pane height
+    rows = ["".join(f[1] for f in content.get_line(i)) for i in range(10)]
+    assert rows[:9] == [""] * 9
+    assert rows[9].startswith("only line")
+    assert control.vertical_scroll(None) == 0
+
+
+def test_resize_rewraps_only_once_the_width_settles(tui):
+    from app.cli import tui as tui_mod
+    from app.cli.tui import _OutputControl
+
+    for i in range(5):
+        tui.print(Text("word " * 30))
+    control = _OutputControl(tui)
+    control.create_content(width=100, height=40)  # first render: immediate
+    narrow_now = control.create_content(width=40, height=40)
+    assert tui.transcript.console.width == 100  # not re-wrapped yet
+    with patch.object(tui_mod.time, "monotonic", return_value=1e12):
+        settled = control.create_content(width=40, height=40)
+    assert tui.transcript.console.width == 40  # re-wrapped once settled
+    assert settled.line_count >= narrow_now.line_count
+
+
+def test_user_messages_get_a_tinted_full_width_band(tui):
+    from app.cli.tui import USER_STYLE, user_block
+
+    tui.print(user_block("hello"))
+    raw = tui.transcript.raw[-1]
+    assert "hello" in raw
+    assert USER_STYLE.bgcolor.name == "#303030"
+    # Rendered with a background colour that spans the whole line.
+    console = Console(
+        file=io.StringIO(), force_terminal=True, color_system="truecolor", width=30
+    )
+    with console.capture() as cap:
+        console.print(user_block("hi"))
+    line = cap.get().splitlines()[0]
+    assert "48;2;48;48;48" in line  # the #303030 background
+    assert len(Text.from_ansi(line).plain) == 30
