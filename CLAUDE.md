@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Python-based AI agent ("anotherbot") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, single-prompt (`-p`) mode with optional `--quiet` console logging, and a background server architecture with Telegram, Discord, and a web channel (Starlette JSON/WebSocket API + static `app/channels/frontend/` UI).
+This is a Python-based AI agent ("anotherbot") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive terminal UI (`app/cli/tui.py`, prompt_toolkit + rich), single-prompt (`-p`) mode with optional `--quiet` console logging, and a background server architecture with Telegram, Discord, and a web channel (Starlette JSON/WebSocket API + static `app/channels/frontend/` UI).
 
 ## Running & Development
 
 ```bash
-# Run the CLI agent (interactive REPL)
+# Run the CLI agent (interactive terminal UI; plain REPL when not a TTY)
 ./run.sh cli
 
 # Run a single prompt and exit (-p always exits after the response)
@@ -73,6 +73,10 @@ The shared loop lives in `Agent._loop()` (`app/core/agent.py`). Subclasses overr
 Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gather`. After each turn, the full message chain (assistant tool-call message + tool results + final response) is saved to `self.messages` at full length. `MessageHistory` (SQLite) stores only user + final assistant text for cross-session persistence.
 
 **Trajectories.** Agents with `saves_trajectories = True` (`CliAgent`, `BackgroundAgent`; not `HelperAgent`) collect per-call stats (`model`, `duration_s`, `finish_reason`, `usage`) in `_llm_calls` during `_run_loop`, and after each turn `Agent._save_trajectory()` stores the turn in the `trajectories` table (`message_id` PK → the final assistant `messages` row, which `MessageHistory.add_message()` now returns; `conversation_id`; `data` JSON; `created_at`). The JSON holds the system prompt, a history-message count, the turn's own messages (user message, assistant tool calls/reasoning, tool results, final reply; attachment data URLs redacted with `tracer.redact`), the `llm_calls` list and summed `usage_total`. Saving is best-effort (logged, never raised). `ConversationStore.delete()` removes a conversation's trajectories and `fork()` copies them to the new message rows. `BackgroundAgent` then awaits `Channel.on_trajectory_saved(message_id, conversation_id, metadata)` (no-op by default).
+
+### Terminal UI
+
+`run_cli()` (`app/cli/cli.py`) starts `run_tui()` (`app/cli/tui.py`) when there is no `-p` and both stdin and stdout are TTYs; otherwise `-p` runs one turn with plain `print()` output and the non-TTY REPL reads lines with `input()` (tests patch `app.cli.cli.input_loop`). `Tui` owns a `CliAgent(ui=self)`: with a `ui`, `CliAgent` routes its hooks (`thinking`, `tool_start`, `tool_result` — via a `handle_tool_call` override — `response`, async `ask_permission`) to the UI instead of printing/`input()`. Permission prompts are serialised by an `asyncio.Lock` (tool calls run in parallel) and pause the rich spinner; answers: yes / no / always for this tool (`allowed_tools`) / approve all. A turn runs as a task with `loop.add_signal_handler(SIGINT, task.cancel)` (the previous SIGINT handler is restored after); on cancellation `CliAgent.agent_loop` stores `INTERRUPTED_REPLY` as the assistant message so the DB and `self.messages` stay consistent. `@path` tokens naming existing files become `metadata["files"]` attachments (`extract_attachments`). `TuiCompleter` completes slash commands (registry + `LOCAL_COMMANDS`), conversation ids after `CONV_ID_COMMANDS`, and `@paths`. Input history is `$ANOTHERBOT_HOME/cli_history`. In the TUI, console logging is replaced by `_ConsoleLogHandler` (warnings and up, printed through rich) so INFO lines don't bury the conversation; the log file is unchanged. Output is printed between prompts (prompts run under `patch_stdout`), so nothing is full-screen.
 
 ### Tool System
 

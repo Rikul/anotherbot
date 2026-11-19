@@ -2,7 +2,7 @@
 
 A Python-based AI agent that can execute prompts, interact with the filesystem, run shell commands, fetch web content, search the web, and manage scheduled tasks. Built on the OpenAI SDK against OpenRouter (defaulting to DeepSeek).
 
-- **Interactive CLI**: Multi-turn REPL sessions with tool use
+- **Interactive CLI**: Terminal UI with markdown replies, completion, history and tool permission prompts
 - **Background Agent**: Runs as a persistent bot, receiving and sending messages via channels
 - **Web UI**: Browser-based chat interface (plain HTML/CSS/JS in `app/channels/frontend/`, talking to a Starlette + uvicorn JSON/WebSocket API) — dark/light theme, collapsible conversation sidebar, full conversation history
 - **Telegram Integration**: Built-in Telegram bot — receive messages, respond, run tools, deliver results
@@ -112,6 +112,27 @@ Message history and conversations are stored in `$ANOTHERBOT_HOME/app.db` (SQLit
 # Quiet, auto-approved (only the agent's output on the console)
 ./run.sh cli -p "Summarize this repo" -y -q
 ```
+
+### Terminal UI
+
+`./run.sh cli` in a terminal starts an inline TUI (it does not take over the screen; output stays in your scrollback). When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
+
+| Key / input | Action |
+|---|---|
+| Enter | Send (or accept the highlighted completion) |
+| Alt+Enter, Ctrl+J, or `\` at the end of a line | New line |
+| Tab | Complete `/commands`, conversation ids after `/load`, `/fork`, `/rename`, `/export`, `/delete`, and `@paths` |
+| `@path/to/file` | Attach that file to the message (images are sent as images) |
+| Up / Down, Ctrl+R | Input history (kept in `$ANOTHERBOT_HOME/cli_history`) |
+| Shift+Tab | Toggle auto-approve for tool calls |
+| Ctrl+C | Interrupt the running turn; at the prompt, clear the line, twice to quit |
+| Ctrl+D | Quit |
+| Ctrl+L | Clear the screen |
+| `//text` | Send a message that starts with `/` |
+
+Tool permission prompts take one key: `y`/Enter yes, `n`/Esc no, `a` always allow this tool for the session, `!` approve everything. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
+
+Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; also shown after `/load` or `/fork`), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
 
 ### Web UI
 
