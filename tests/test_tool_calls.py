@@ -466,3 +466,54 @@ async def test_a_thread_stuck_forever_is_abandoned_eventually():
     finally:
         release.set()
         await asyncio.sleep(0.05)
+
+
+@pytest.mark.asyncio
+async def test_threaded_tool_raising_stopiteration_returns_an_error():
+    """StopIteration can't be stored on a future on Python < 3.14; the call
+    must still finish (with an error), not hang holding the tool lock."""
+    import asyncio
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+    from app.core.tool import Tool
+
+    class Stops(Tool):
+        @staticmethod
+        def spec():
+            return {"type": "function", "function": {"name": "stops"}}
+
+        @staticmethod
+        def call() -> str:
+            raise StopIteration("done early")
+
+    with patch.dict(tool_calls.tool_registry, {"stops": Stops}):
+        result = await asyncio.wait_for(tool_calls.run_tool("stops", {}), 2)
+        assert result.startswith("Error running tool stops")
+        assert "StopIteration" in result
+        # and the lock was released: the next threaded call runs
+        assert await asyncio.wait_for(tool_calls.run_tool("stops", {}), 2)
+
+
+@pytest.mark.asyncio
+async def test_settle_completes_even_if_the_future_rejects_the_exception():
+    """Simulates Python 3.12, where set_exception(StopIteration()) raises."""
+    import asyncio
+    from unittest.mock import patch
+
+    from app.core import tool_calls
+
+    class PickyFuture(asyncio.futures._PyFuture):  # like 3.12 with StopIteration
+        def set_exception(self, exception):
+            if isinstance(exception, ValueError):
+                raise TypeError("refused")
+            super().set_exception(exception)
+
+    def boom():
+        raise ValueError("x")
+
+    loop = asyncio.get_running_loop()
+    with patch.object(loop, "create_future", lambda: PickyFuture(loop=loop)):
+        future = tool_calls._start_daemon_thread("boom", boom, {})
+    with pytest.raises(RuntimeError, match="refused"):
+        await asyncio.wait_for(future, 2)

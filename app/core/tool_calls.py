@@ -211,13 +211,22 @@ def _start_daemon_thread(name: str, func, tool_args: dict) -> asyncio.Future:
     context = contextvars.copy_context()
 
     def settle(setter, value) -> None:
-        if not future.done():
+        if future.done():
+            return
+        try:
             setter(value)
+        except (TypeError, ValueError, RuntimeError) as e:
+            # Python < 3.14 refuses to store StopIteration on a future (it
+            # raises TypeError); the call must still complete, or it would
+            # hang holding the tool lock.
+            future.set_exception(RuntimeError(f"{value!r}: {e}"))
 
     def runner() -> None:
         try:
             result = context.run(func, **tool_args)
         except BaseException as e:  # pylint: disable=broad-exception-caught  # handed to the awaiting task
+            if isinstance(e, StopIteration):
+                e = RuntimeError(f"tool raised {e!r}")  # can't go on a future
             outcome = (future.set_exception, e)
         else:
             outcome = (future.set_result, result)
