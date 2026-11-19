@@ -48,7 +48,8 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 
 ```bash
 uv sync
-./run.sh cli                 # interactive REPL
+./run.sh                     # interactive terminal UI
+./run.sh -p "your prompt"    # one prompt, plain output, then exit
 ./run.sh background          # Telegram / Discord / web UI server
 ```
 
@@ -91,7 +92,7 @@ Message history and conversations are stored in `$ANOTHERBOT_HOME/app.db` (SQLit
 ## Usage
 
 ```bash
-./run.sh cli -p "your prompt here"
+./run.sh -p "your prompt here"
 
 # Flags
 -p, --prompt          Run this prompt once and exit (omit to start the REPL)
@@ -104,18 +105,18 @@ Message history and conversations are stored in `$ANOTHERBOT_HOME/app.db` (SQLit
 
 ```bash
 # Interactive REPL session
-./run.sh cli
+./run.sh
 
 # Single-shot, auto-approved
-./run.sh cli -p "Create a hello world script" -y
+./run.sh -p "Create a hello world script" -y
 
 # Quiet, auto-approved (only the agent's output on the console)
-./run.sh cli -p "Summarize this repo" -y -q
+./run.sh -p "Summarize this repo" -y -q
 ```
 
 ### Terminal UI
 
-`./run.sh cli` in a terminal starts an inline TUI (it does not take over the screen; output stays in your scrollback). When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
+`./run.sh` in a terminal starts an inline TUI (it does not take over the screen; output stays in your scrollback). When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
 
 | Key / input | Action |
 |---|---|

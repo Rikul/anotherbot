@@ -72,7 +72,7 @@ def _patch_main(argv, agent_mock=None):
         agent_mock.agent_loop = AsyncMock()
 
     patches = [
-        patch("sys.argv", ["prog", "cli"] + argv),
+        patch("sys.argv", ["prog"] + argv),
         patch("app.cli.cli.CliAgent", return_value=agent_mock),
         patch("app.cli.cli.input_loop", return_value=AsyncMock()),
     ]
@@ -110,7 +110,7 @@ async def test_main_prompt_runs_once_and_skips_repl():
     input_loop_mock = MagicMock()
 
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("sys.argv", ["prog", "-p", "hi"]),
         patch("app.cli.cli.CliAgent", return_value=agent_mock),
         patch("app.cli.cli.input_loop", input_loop_mock),
     ):
@@ -125,7 +125,7 @@ async def test_main_quiet_disables_console_logging():
     """Test that --quiet sets up logging without the console handler"""
     setup_mock = MagicMock()
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi", "--quiet"]),
+        patch("sys.argv", ["prog", "-p", "hi", "--quiet"]),
         patch("app.main.setup_logging", setup_mock),
         patch("app.main.run_cli", AsyncMock()),
     ):
@@ -140,7 +140,7 @@ async def test_main_logs_to_console_by_default():
     """Test that without --quiet the console handler is enabled"""
     setup_mock = MagicMock()
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("sys.argv", ["prog", "-p", "hi"]),
         patch("app.main.setup_logging", setup_mock),
         patch("app.main.run_cli", AsyncMock()),
     ):
@@ -172,7 +172,7 @@ async def test_main_quiet_does_not_imply_auto_approve():
     MockAgent.return_value.agent_loop = AsyncMock()
 
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi", "--quiet"]),
+        patch("sys.argv", ["prog", "-p", "hi", "--quiet"]),
         patch("app.cli.cli.CliAgent", MockAgent),
     ):
         await main()
@@ -188,7 +188,7 @@ async def test_main_auto_approve_flag():
     MockAgent.return_value.agent_loop = AsyncMock()
 
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi", "-y"]),
+        patch("sys.argv", ["prog", "-p", "hi", "-y"]),
         patch("app.cli.cli.CliAgent", MockAgent),
     ):
         await main()
@@ -202,7 +202,7 @@ def test_silent_flag_removed():
     from app.main import parse_args
 
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi", "--silent"]),
+        patch("sys.argv", ["prog", "-p", "hi", "--silent"]),
         pytest.raises(SystemExit),
     ):
         parse_args()
@@ -259,7 +259,7 @@ async def test_main_repl_calls_agent_loop_for_each_input():
             yield msg
 
     with (
-        patch("sys.argv", ["prog", "cli"]),
+        patch("sys.argv", ["prog"]),
         patch("app.cli.cli.CliAgent", return_value=agent_mock),
         patch("app.cli.cli.input_loop", fake_input_loop),
     ):
@@ -281,7 +281,7 @@ async def test_main_repl_dispatches_slash_commands(capsys):
             yield msg
 
     with (
-        patch("sys.argv", ["prog", "cli"]),
+        patch("sys.argv", ["prog"]),
         patch("app.cli.cli.CliAgent", return_value=agent_mock),
         patch("app.cli.cli.input_loop", fake_input_loop),
     ):
@@ -298,7 +298,7 @@ async def test_main_forwards_cli_args_to_run_cli():
     """Test that main passes parsed CLI args to run_cli"""
     run_cli_mock = AsyncMock()
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi", "-y", "-q", "-i", "7"]),
+        patch("sys.argv", ["prog", "-p", "hi", "-y", "-q", "-i", "7"]),
         patch("app.main.run_cli", run_cli_mock),
     ):
         await main()
@@ -313,7 +313,7 @@ async def test_main_forwards_cli_args_to_run_cli():
 def test_no_repl_flag_removed():
     """-x/--no-repl was removed; -p alone now exits after the response"""
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi", "--no-repl"]),
+        patch("sys.argv", ["prog", "-p", "hi", "--no-repl"]),
         pytest.raises(SystemExit),
     ):
         from app.main import parse_args
@@ -332,7 +332,7 @@ async def test_main_trace_defaults_to_false():
     agent_mock = MagicMock()
     agent_mock.agent_loop = AsyncMock()
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("sys.argv", ["prog", "-p", "hi"]),
         patch("app.cli.cli.CliAgent", return_value=agent_mock),
         patch("app.core.runtime._store", mock_store),
     ):
@@ -348,7 +348,7 @@ async def test_main_trace_flag_sets_runtime_true(tmp_path):
     with (
         patch(
             "sys.argv",
-            ["prog", "--trace", "--tracedir", str(tmp_path), "cli", "-p", "hi"],
+            ["prog", "--trace", "--tracedir", str(tmp_path), "-p", "hi"],
         ),
         patch("app.cli.cli.CliAgent", return_value=agent_mock),
         patch("app.core.runtime._store", mock_store),
@@ -364,7 +364,7 @@ async def test_main_tracedir_defaults_to_project_home_trace():
     agent_mock = MagicMock()
     agent_mock.agent_loop = AsyncMock()
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("sys.argv", ["prog", "-p", "hi"]),
         patch("app.cli.cli.CliAgent", return_value=agent_mock),
         patch("app.core.runtime._store", mock_store),
     ):
@@ -425,7 +425,7 @@ async def test_main_fails_fast_on_invalid_env(monkeypatch):
     monkeypatch.setenv("MAX_ITERATIONS", "lots")
     run_cli_mock = AsyncMock()
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("sys.argv", ["prog", "-p", "hi"]),
         patch("app.main.run_cli", run_cli_mock),
         pytest.raises(ValueError, match="MAX_ITERATIONS"),
     ):
@@ -438,8 +438,49 @@ async def test_main_max_iterations_defaults_from_env(monkeypatch):
     monkeypatch.setenv("MAX_ITERATIONS", "12")
     run_cli_mock = AsyncMock()
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "hi"]),
+        patch("sys.argv", ["prog", "-p", "hi"]),
         patch("app.main.run_cli", run_cli_mock),
     ):
         await main()
     assert run_cli_mock.call_args.kwargs["max_iterations"] == 12
+
+
+# ---------------------------------------------------------------------------
+# No "cli" subcommand: no command is the CLI agent
+# ---------------------------------------------------------------------------
+
+
+def test_no_command_means_cli():
+    from app.main import parse_args
+
+    with patch("sys.argv", ["prog"]):
+        args = parse_args()
+    assert args.command == "cli"
+    assert args.prompt is None
+
+
+def test_background_command_still_parses():
+    from app.main import parse_args
+
+    with patch("sys.argv", ["prog", "-q", "background"]):
+        args = parse_args()
+    assert args.command == "background"
+    assert args.quiet is True
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["-p", "hi", "background"], ["-y", "background"], ["-i", "0", "background"]],
+)
+def test_cli_only_flags_rejected_with_background(argv):
+    from app.main import parse_args
+
+    with patch("sys.argv", ["prog"] + argv), pytest.raises(SystemExit):
+        parse_args()
+
+
+def test_cli_subcommand_removed():
+    from app.main import parse_args
+
+    with patch("sys.argv", ["prog", "cli"]), pytest.raises(SystemExit):
+        parse_args()

@@ -9,17 +9,18 @@ This is a Python-based AI agent ("anotherbot") that uses an OpenAI-compatible AP
 ## Running & Development
 
 ```bash
-# Run the CLI agent (interactive terminal UI; plain REPL when not a TTY)
-./run.sh cli
+# Run the CLI agent (interactive terminal UI; plain REPL when not a TTY).
+# There is no "cli" subcommand: no command means the CLI agent.
+./run.sh
 
 # Run a single prompt and exit (-p always exits after the response)
-./run.sh cli -p "your prompt here"
+./run.sh -p "your prompt here"
 
 # Run with auto-approve (no permission prompts)
-./run.sh cli -p "your prompt" -y
+./run.sh -p "your prompt" -y
 
 # Quiet mode: no log messages on the console (still written to the log file)
-./run.sh cli -p "your prompt" -y -q
+./run.sh -p "your prompt" -y -q
 
 # Run tests
 uv run pytest
