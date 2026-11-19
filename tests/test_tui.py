@@ -349,3 +349,41 @@ async def test_cli_agent_ui_hooks():
     ui.thinking.assert_called_once_with("hmm")
     await agent._on_response("final")
     ui.response.assert_called_once_with("final")
+
+
+# --- terminal escape sequences from model/tool text ---------------------------
+
+OSC52 = "\x1b]52;c;aGk=\x07"
+
+
+def test_clean_strips_control_characters():
+    from app.cli.tui import clean
+
+    assert clean(f"a{OSC52}b\tc\nd\x9be") == "a]52;c;aGk=b\tc\nde"
+
+
+def test_untrusted_text_never_reaches_terminal_with_escapes():
+    console = Console(record=True, width=200, force_terminal=True)
+    with (
+        patch("app.core.agent.Client"),
+        patch("app.cli.cli_agent.ConversationStore") as store_cls,
+        patch("app.cli.cli_agent.MessageHistory"),
+    ):
+        store_cls.return_value.get_last.return_value = {"id": 1, "name": "x"}
+        store_cls.return_value.load_messages.return_value = []
+        t = Tui(console=console, history_file=None)
+
+    t.thinking(f"think {OSC52}")
+    t.tool_start("bash", {"command": f"cat {OSC52}"})
+    t.tool_result("bash", f"out {OSC52}")
+    t.response(f"reply {OSC52}")
+    t.render_markdown = False
+    t.response(f"raw {OSC52}")
+    t._print_permission_request("bash", {"a": f"x{OSC52}", "b": f"1\n2{OSC52}"})
+    t.agent.messages = [{"role": "user", "content": f"q {OSC52}"}]
+    t.show_history(1)
+
+    out = console.export_text(styles=True)
+    # rich's own styling uses CSI (ESC [); no OSC (ESC ]) or BEL may get through
+    assert "\x1b]" not in out
+    assert "\x07" not in out

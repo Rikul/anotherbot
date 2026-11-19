@@ -67,6 +67,11 @@ LOCAL_COMMANDS = {
 _EXIT_CONFIRM_SECS = 2.0
 _RESULT_PREVIEW_CHARS = 160
 
+# C0 controls except tab/newline, DEL, and C1 controls. ESC in particular
+# must never reach the terminal from model or tool text: an OSC 52 sequence
+# could set the clipboard, others could rewrite the screen or title.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
 # "@path" attachment tokens: start of text or after whitespace.
 _ATTACH_RE = re.compile(r"(?:(?<=\s)|^)@(\S+)")
 
@@ -87,10 +92,15 @@ STYLE = Style.from_dict(
 # --- helpers -----------------------------------------------------------------
 
 
+def clean(text: str) -> str:
+    """``text`` without terminal control characters (tabs and newlines kept)."""
+    return _CONTROL_RE.sub("", text)
+
+
 def one_line(value, limit: int) -> str:
     """``value`` as a single whitespace-collapsed line of at most ``limit`` chars."""
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-    text = " ".join(text.split())
+    text = " ".join(clean(text).split())
     return text if len(text) <= limit else text[: max(1, limit - 1)] + "…"
 
 
@@ -211,7 +221,10 @@ class _ConsoleLogHandler(logging.Handler):
         try:
             style = "red" if record.levelno >= logging.ERROR else "yellow"
             self.console.print(
-                Text(f"{record.levelname.lower()}: {record.getMessage()}", style=style)
+                Text(
+                    f"{record.levelname.lower()}: {clean(record.getMessage())}",
+                    style=style,
+                )
             )
         except Exception:  # pylint: disable=broad-exception-caught  # logging must never raise
             self.handleError(record)
@@ -381,14 +394,14 @@ class Tui:  # pylint: disable=too-many-instance-attributes
 
     def thinking(self, text: str) -> None:
         """Assistant text written alongside tool calls."""
-        self.console.print(Text(text, style="dim italic"))
+        self.console.print(Text(clean(text), style="dim italic"))
 
     def tool_start(self, name: str, args: dict) -> None:
         """One line per tool call; also shown next to the spinner."""
         width = max(20, self.console.width - len(name) - 6)
         summary = summarize_args(args, width)
         line = Text("⏺ ", style="cyan")
-        line.append(name, style="bold cyan")
+        line.append(clean(name), style="bold cyan")
         if summary:
             line.append(f"  {summary}", style="dim")
         self.console.print(line)
@@ -425,7 +438,9 @@ class Tui:  # pylint: disable=too-many-instance-attributes
                 self._resume_spinner()
         if answer == "always":
             self.allowed_tools.add(name)
-            self.console.print(Text(f"  ✓ {name} allowed for this session", "green"))
+            self.console.print(
+                Text(f"  ✓ {clean(name)} allowed for this session", "green")
+            )
         elif answer == "all":
             self.agent.auto_approve = True
             self.console.print(
@@ -438,7 +453,9 @@ class Tui:  # pylint: disable=too-many-instance-attributes
     def _print_permission_request(self, name: str, args: dict) -> None:
         self.console.print()
         self.console.print(
-            Text.assemble(("Allow ", "yellow"), (name, "bold yellow"), ("?", "yellow"))
+            Text.assemble(
+                ("Allow ", "yellow"), (clean(name), "bold yellow"), ("?", "yellow")
+            )
         )
         for key, value in (args or {}).items():
             text = (
@@ -449,10 +466,12 @@ class Tui:  # pylint: disable=too-many-instance-attributes
             if len(text) > 1500:
                 text = text[:1500] + f"… ({len(text) - 1500} more chars)"
             if "\n" in text:
-                self.console.print(Text(f"  {key}:", style="dim"))
-                self.console.print(Text("    " + text.replace("\n", "\n    ")))
+                self.console.print(Text(f"  {clean(key)}:", style="dim"))
+                self.console.print(Text("    " + clean(text).replace("\n", "\n    ")))
             else:
-                self.console.print(Text.assemble((f"  {key}: ", "dim"), text))
+                self.console.print(
+                    Text.assemble((f"  {clean(key)}: ", "dim"), clean(text))
+                )
 
     async def _read_permission_key(self) -> str:
         kb = KeyBindings()
@@ -545,7 +564,9 @@ class Tui:  # pylint: disable=too-many-instance-attributes
         elif task.exception() is not None:
             err = task.exception()
             log.debug("Turn failed", exc_info=err)
-            self.console.print(Text(f"✗ {type(err).__name__}: {err}", style="red"))
+            self.console.print(
+                Text(f"✗ {type(err).__name__}: {clean(str(err))}", style="red")
+            )
         self._print_turn_stats()
 
     def _print_turn_stats(self) -> None:
@@ -581,11 +602,13 @@ class Tui:  # pylint: disable=too-many-instance-attributes
         before = self.agent.conversation_id
         result = await self.registry.execute(name, args)
         if result is None:
-            self.console.print(Text(f"Unknown command: /{name}  (try /help)", "red"))
+            self.console.print(
+                Text(f"Unknown command: /{clean(name)}  (try /help)", "red")
+            )
             return True
         if name == "help":
             result += "\n" + "\n".join(f"/{n} — {d}" for n, d in LOCAL_COMMANDS.items())
-        self.console.print(Text(result))
+        self.console.print(Text(clean(result)))
         if self.agent.conversation_id != before:
             self.show_history(4)
         return True
@@ -640,13 +663,14 @@ class Tui:  # pylint: disable=too-many-instance-attributes
         self.console.rule(style="dim")
         for m in msgs:
             if m["role"] == "user":
-                self.console.print(Text("❯ " + m["content"], style="bold"))
+                self.console.print(Text("❯ " + clean(m["content"]), style="bold"))
             else:
                 self.console.print(self._render(m["content"]))
             self.console.print()
         self.console.rule(style="dim")
 
     def _render(self, text: str):
+        text = clean(text)
         return Markdown(text) if self.render_markdown else Text(text)
 
     # --- main loop -------------------------------------------------------------
@@ -665,11 +689,9 @@ class Tui:  # pylint: disable=too-many-instance-attributes
             )
         )
         resumed = f" · {n} messages" if n else ""
+        name = clean(conv.get("name", ""))
         self.console.print(
-            Text(
-                f"Conversation #{self.agent.conversation_id} {conv.get('name', '')}{resumed}",
-                "dim",
-            )
+            Text(f"Conversation #{self.agent.conversation_id} {name}{resumed}", "dim")
         )
         self.console.print(
             Text(
