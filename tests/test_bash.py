@@ -92,3 +92,23 @@ async def test_kill_uses_taskkill_on_windows():
         await bash_mod._kill(proc)
     assert exec_.await_args.args == ("taskkill", "/F", "/T", "/PID", "1234")
     proc.kill.assert_called_once()  # fallback for the shell itself
+
+
+@pytest.mark.asyncio
+async def test_kill_lets_cancellation_through():
+    """A Ctrl+C during the post-kill wait must not be swallowed."""
+    from unittest.mock import MagicMock, patch
+
+    from app.tools import bash as bash_mod
+
+    async def never():
+        await asyncio.sleep(10)
+
+    proc = MagicMock(pid=999999, returncode=0)
+    proc.wait = never
+    with patch.object(bash_mod.os, "killpg"):
+        task = asyncio.ensure_future(bash_mod._kill(proc))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task

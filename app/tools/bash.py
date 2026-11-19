@@ -110,5 +110,5 @@ async def _kill(proc: asyncio.subprocess.Process) -> None:
             pass
     try:
         await asyncio.wait_for(proc.wait(), 5)
-    except (TimeoutError, asyncio.CancelledError):
-        pass
+    except TimeoutError:
+        pass  # cancellation must propagate: the caller re-raises it anyway

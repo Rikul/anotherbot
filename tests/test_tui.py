@@ -614,3 +614,17 @@ async def test_real_ctrl_c_key_interrupts_at_a_permission_prompt(tui):
         pipe.send_text("\x04")
         await asyncio.wait_for(runner, 3)
     assert "Interrupted" in _out(tui)
+
+
+def test_shift_tab_is_ignored_while_a_permission_prompt_is_pending(tui):
+    from prompt_toolkit.keys import Keys
+
+    kb = tui._key_bindings()
+    (binding,) = [b for b in kb.bindings if b.keys == (Keys.BackTab,)]
+    tui._perm_future = MagicMock(done=lambda: False)  # a pending prompt
+    try:
+        assert not binding.filter()  # pending prompt: Shift+Tab does nothing
+        tui._perm_future = None
+        assert binding.filter()
+    finally:
+        tui._perm_future = None

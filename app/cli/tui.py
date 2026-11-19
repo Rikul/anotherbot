@@ -500,7 +500,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         def _ctrl_d(event):
             self.quit(event.app)
 
-        @kb.add("s-tab")
+        @kb.add("s-tab", filter=~perm)  # a pending prompt still needs its answer
         def _toggle_approve(_event):
             self.toggle_auto_approve()
 
