@@ -2,7 +2,10 @@
 
 They run git directly (no shell) with options that keep it from changing
 anything or running repository-configured programs: no optional index locks,
-no fsmonitor hook, no external diff or textconv drivers, no pager or prompts.
+no fsmonitor hook, no external diff or textconv drivers, no clean/process
+filters (they run when the work tree is compared with the index), no
+signature checks (gpg), no recursion into submodules (whose own config could
+run programs), no pager or prompts.
 """
 
 import os
@@ -22,37 +25,72 @@ _GIT_ENV = {
 }
 
 
-def run_git(path: str, args: list[str]) -> str:
-    """Run ``git -C path <args>`` and return stdout (stderr appended); errors as text."""
-    cwd = os.path.expanduser(path or ".")
-    if not os.path.isdir(cwd):
-        return f"Error: directory {cwd} does not exist"
-    cmd = [
-        "git",
-        "-C",
-        cwd,
-        "--no-pager",
-        "-c",
-        "core.fsmonitor=false",  # a configured fsmonitor runs a program
-        "-c",
-        "color.ui=false",
-        *args,
-    ]
+_SAFE_CONFIG = [
+    "core.fsmonitor=false",  # a configured fsmonitor runs a program
+    "log.showSignature=false",  # would run gpg.program
+    "color.ui=false",
+]
+
+
+class _GitError(Exception):
+    """A git invocation failed before it produced a result (text for the model)."""
+
+
+def _exec(cwd: str, args: list[str]) -> subprocess.CompletedProcess:
     try:
-        proc = subprocess.run(
-            cmd,
+        return subprocess.run(
+            ["git", "-C", cwd, "--no-pager", *args],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=GIT_TIMEOUT_SECS,
             env={**os.environ, **_GIT_ENV},
             check=False,
         )
-    except FileNotFoundError:
-        return "Error: git is not installed"
-    except subprocess.TimeoutExpired:
-        return f"Error: git timed out after {GIT_TIMEOUT_SECS} seconds"
+    except FileNotFoundError as e:
+        raise _GitError("Error: git is not installed") from e
+    except subprocess.TimeoutExpired as e:
+        raise _GitError(f"Error: git timed out after {GIT_TIMEOUT_SECS} seconds") from e
     except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
-        return f"Error running git: {e}"
+        raise _GitError(f"Error running git: {e}") from e
+
+
+def _filter_overrides(cwd: str) -> list[str]:
+    """``-c`` options that blank every configured filter driver.
+
+    A ``filter.<name>.clean`` or ``.process`` command runs whenever git
+    compares a work-tree file with the index (diff, and status for files
+    whose stat data changed), so it must be off for these tools to be
+    read-only. Reading the config itself runs nothing.
+    """
+    proc = _exec(cwd, ["config", "-z", "--get-regexp", r"^filter\."])
+    if proc.returncode not in (0, 1):  # 1: no filter configured
+        err = proc.stderr.decode(errors="replace").strip()
+        raise _GitError(f"Error: could not read git config: {err}")
+    names = set()
+    for item in proc.stdout.decode(errors="replace").split("\0"):
+        key = item.split("\n", 1)[0]
+        if key.startswith("filter."):
+            names.add(key[len("filter.") :].rpartition(".")[0])
+    overrides = []
+    for name in sorted(names):
+        if "=" in name:  # "-c" splits at the first "=": can't override it
+            raise _GitError(f"Error: refusing to run git: odd filter name {name!r}")
+        for var, value in (("clean", ""), ("process", ""), ("required", "false")):
+            overrides += ["-c", f"filter.{name}.{var}={value}"]
+    return overrides
+
+
+def run_git(path: str, args: list[str]) -> str:
+    """Run ``git -C path <args>`` and return stdout (stderr appended); errors as text."""
+    cwd = os.path.expanduser(path or ".")
+    if not os.path.isdir(cwd):
+        return f"Error: directory {cwd} does not exist"
+    try:
+        options = [opt for c in _SAFE_CONFIG for opt in ("-c", c)]
+        options += _filter_overrides(cwd)
+        proc = _exec(cwd, [*options, *args])
+    except _GitError as e:
+        return str(e)
     out = proc.stdout.decode(errors="replace")
     err = proc.stderr.decode(errors="replace").strip()
     if proc.returncode != 0:
@@ -102,7 +140,9 @@ class GitStatusTool(Tool):
     def call(path: str = ".") -> str:
         """Short status; "(clean)" is added when nothing changed."""
         log.info("git_status, path: %s", path)
-        out = run_git(path, ["status", "--short", "--branch"])
+        out = run_git(
+            path, ["status", "--short", "--branch", "--ignore-submodules=all"]
+        )
         if not out.startswith("Error") and len(out.strip().splitlines()) <= 1:
             out = out.rstrip() + "\n(clean: no changes)"
         return out
@@ -160,7 +200,7 @@ class GitDiffTool(Tool):
         )
         if error := _check_ref(ref):
             return error
-        args = ["diff", "--no-ext-diff", "--no-textconv"]
+        args = ["diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all"]
         if staged:
             args.append("--cached")
         if stat:

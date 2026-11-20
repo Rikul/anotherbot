@@ -85,3 +85,18 @@ def test_registered_read_only_and_in_helper():
     for name in ("git_status", "git_diff", "git_log"):
         assert is_read_only(name)
         assert name in helper
+
+
+def test_configured_filters_never_run(repo):
+    """A clean/process filter runs when git compares the work tree with the
+    index; the read-only tools must not run repository-configured programs."""
+    marker = repo / "filter-ran"
+    (repo / ".gitattributes").write_text("*.txt filter=evil\n")
+    _git(repo, "config", "filter.evil.clean", f"touch {marker}; cat")
+    _git(repo, "config", "filter.evil.process", f"touch {marker}")
+    _git(repo, "config", "filter.evil.required", "true")
+    (repo / "a.txt").write_text("changed\n")
+    assert "+changed" in git_diff(str(repo))
+    assert " M a.txt" in git_status(str(repo))
+    assert "second commit" in git_log(str(repo), patch=True)
+    assert not marker.exists()
