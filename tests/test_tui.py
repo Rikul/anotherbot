@@ -237,7 +237,7 @@ def test_hooks_print(tui):
     tui.response("**done**")
     out = _out(tui)
     assert "planning" in out
-    assert "⏺ bash  ls" in out
+    assert "🛠️ bash  ls" in out
     assert "⎿ a  (+1 lines)" in out
     assert "nope" in out
     assert "done" in out and "**" not in out  # rendered as markdown
