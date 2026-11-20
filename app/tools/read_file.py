@@ -1,7 +1,14 @@
 """``read_file`` tool: read a file, optionally a byte range."""
 
+import os
+import stat
+
 from ..core.tool import Tool
 from ..infra.app_logging import log
+
+# At most this much is read per call (the result is cut to
+# MAX_TOOL_RESULT_LENGTH characters anyway); use offset/size for the rest.
+MAX_READ_BYTES = 1024 * 1024
 
 
 class ReadFileTool(Tool):
@@ -55,11 +62,23 @@ class ReadFileTool(Tool):
             return "Error: size must be non-negative"
 
         try:
+            # Regular files only: opening a FIFO blocks until a writer comes,
+            # and a device such as /dev/zero never ends.
+            if not stat.S_ISREG(os.stat(file_path).st_mode):
+                return f"Error: {file_path} is not a regular file"
+            limit = MAX_READ_BYTES if size is None else min(size, MAX_READ_BYTES)
             with open(file_path, "rb") as f:
                 if offset:
                     f.seek(offset)
-                data = f.read(size) if size is not None else f.read()
-            return data.decode("utf-8", errors="replace")
+                data = f.read(limit + 1)
+            more = len(data) > limit and (size is None or size > limit)
+            text = data[:limit].decode("utf-8", errors="replace")
+            if more:
+                text += (
+                    f"\n… stopped after {limit} bytes; read further with offset "
+                    f"{offset + limit}"
+                )
+            return text
         except FileNotFoundError:
             return f"Error: file {file_path} does not exist"
         except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model

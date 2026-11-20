@@ -429,7 +429,9 @@ def _search(files, matcher, regex, files_only: bool, limit: int):
     for abs_path, rel in files:
         if matcher and not matcher.matches(rel):
             continue
-        hits = _grep_file(abs_path, regex)
+        hits = _grep_file(
+            abs_path, regex, 1 if files_only else limit + 1 - len(results)
+        )
         if not hits:
             continue
         if files_only:
@@ -441,8 +443,9 @@ def _search(files, matcher, regex, files_only: bool, limit: int):
     return results, False
 
 
-def _grep_file(path: str, regex: re.Pattern) -> list[tuple[int, str]]:
-    """Matching (line number, line) pairs; [] for unreadable or binary files.
+def _grep_file(path: str, regex: re.Pattern, max_hits: int) -> list[tuple[int, str]]:
+    """Up to ``max_hits`` matching (line number, line) pairs; [] for
+    unreadable or binary files.
 
     Only regular files are read: a FIFO would block on open and a device
     such as /dev/zero would never stop (their size reads as 0).
@@ -470,4 +473,6 @@ def _grep_file(path: str, regex: re.Pattern) -> list[tuple[int, str]]:
             if len(line) > MAX_GREP_LINE:
                 line = line[:MAX_GREP_LINE] + "…"
             hits.append((n, line))
+            if len(hits) >= max_hits:
+                break
     return hits

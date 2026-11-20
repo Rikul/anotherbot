@@ -166,3 +166,17 @@ def test_grep_single_file_reports_its_path_and_matches_glob_on_name(tree):
     assert grep("hello", str(f), glob="pkg/*.py").startswith("No matches")
     assert grep("hello", str(f), glob="main.py") == f"{f}:2: print('hello')"
     assert grep("hello", str(f), glob="*.md").startswith("No matches")
+
+
+def test_grep_stops_collecting_at_the_limit(tmp_path, monkeypatch):
+    f = tmp_path / "many.txt"
+    f.write_text("x\n" * 1000)
+    seen = []
+    real = fs_search._grep_file
+    monkeypatch.setattr(
+        fs_search,
+        "_grep_file",
+        lambda p, r, m: seen.append(len(real(p, r, m))) or real(p, r, m),
+    )
+    grep("x", str(f), max_results=3)
+    assert seen == [4]  # limit + 1, to know there are more

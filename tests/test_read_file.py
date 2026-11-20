@@ -68,3 +68,28 @@ def test_read_file_utf8_split(tmp_path):
     f = tmp_path / "utf8.txt"
     f.write_bytes(b"abc\xf0\x9f\x9a\x80def")
     assert read_file(str(f), offset=3, size=2) == "\ufffd"
+
+
+def test_read_file_refuses_special_files(tmp_path):
+    import os
+
+    if hasattr(os, "mkfifo"):
+        fifo = tmp_path / "pipe"
+        os.mkfifo(fifo)  # opening it with no writer would block forever
+        assert read_file(str(fifo)) == f"Error: {fifo} is not a regular file"
+    assert read_file(str(tmp_path)) == f"Error: {tmp_path} is not a regular file"
+
+
+def test_read_file_reads_at_most_the_cap(tmp_path, monkeypatch):
+    from app.tools import read_file as module
+
+    monkeypatch.setattr(module, "MAX_READ_BYTES", 5)
+    f = tmp_path / "big.txt"
+    f.write_text("0123456789")
+    assert (
+        read_file(str(f))
+        == "01234\n… stopped after 5 bytes; read further with offset 5"
+    )
+    assert read_file(str(f), offset=5).startswith("56789")
+    assert read_file(str(f), size=3) == "012"
+    assert read_file(str(f), offset=5, size=5) == "56789"

@@ -112,6 +112,8 @@ def _filter_overrides(cwd: str) -> list[str]:
     read-only. Reading the config itself runs nothing.
     """
     proc = _exec(cwd, ["config", "-z", "--get-regexp", r"^filter\."])
+    if proc.truncated:  # a filter past the cap would stay enabled
+        raise _GitError("Error: refusing to run git: filter config too large to check")
     if proc.returncode not in (0, 1):  # 1: no filter configured
         err = proc.stderr.decode(errors="replace").strip()
         raise _GitError(f"Error: could not read git config: {err}")
