@@ -300,6 +300,10 @@ class GitLogTool(Tool):
                             "type": "boolean",
                             "description": "Include each commit's full message and diff",
                         },
+                        "stat": {
+                            "type": "boolean",
+                            "description": "Include each commit's per-file change summary (--stat)",
+                        },
                     },
                 },
             },
@@ -312,6 +316,7 @@ class GitLogTool(Tool):
         ref: str | None = None,
         file: str | None = None,
         patch: bool = False,
+        stat: bool = False,
     ) -> str:
         """The log text, or "(no commits)"."""
         log.info("git_log, path: %s, ref: %s, file: %s", path, ref, file)
@@ -326,6 +331,8 @@ class GitLogTool(Tool):
             args += ["--patch", "--date=iso"]
         else:
             args += ["--date=short", "--format=%h %ad %an  %s%d"]
+        if stat:
+            args.append("--stat")
         if ref:
             args.append(ref)
         args.append("--")
