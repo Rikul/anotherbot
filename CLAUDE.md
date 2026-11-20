@@ -4,22 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-This is a Python-based AI agent ("anotherbot") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive CLI REPL, single-prompt (`-p`) mode with optional `--quiet` console logging, and a background server architecture with Telegram, Discord, and a web channel (Starlette JSON/WebSocket API + static `app/channels/frontend/` UI).
+This is a Python-based AI agent ("anotherbot") that uses an OpenAI-compatible API (defaulting to OpenRouter/DeepSeek) via the `openai` Python SDK. It supports an interactive terminal UI (`app/cli/tui.py`, prompt_toolkit + rich), single-prompt (`-p`) mode with optional `--quiet` console logging, and a background server architecture with Telegram, Discord, and a web channel (Starlette JSON/WebSocket API + static `app/channels/frontend/` UI).
 
 ## Running & Development
 
 ```bash
-# Run the CLI agent (interactive REPL)
-./run.sh cli
+# Run the CLI agent (interactive terminal UI; plain REPL when not a TTY).
+# There is no "cli" subcommand: no command means the CLI agent.
+./run.sh
 
 # Run a single prompt and exit (-p always exits after the response)
-./run.sh cli -p "your prompt here"
+./run.sh -p "your prompt here"
 
 # Run with auto-approve (no permission prompts)
-./run.sh cli -p "your prompt" -y
+./run.sh -p "your prompt" -y
 
 # Quiet mode: no log messages on the console (still written to the log file)
-./run.sh cli -p "your prompt" -y -q
+./run.sh -p "your prompt" -y -q
 
 # Run tests
 uv run pytest
@@ -63,10 +64,10 @@ The shared loop lives in `Agent._loop()` (`app/core/agent.py`). Subclasses overr
 
 | Hook | CliAgent | BackgroundAgent | HelperAgent |
 |---|---|---|---|
-| `_on_thinking` | print | send via mq | — |
-| `_check_permission` | ask stdin | — (always allow) | — |
-| `_on_tool_start` | — | send status via mq | — |
-| `_on_response` | print | send via mq | — |
+| `_on_thinking` | `ui.thinking` (print without a UI) | send via mq | — |
+| `_check_permission` | `ui.ask_permission` (ask stdin without a UI; skipped with `-y`) | — (always allow) | — |
+| `_on_tool_start` | `ui.tool_start` | send status via mq | — |
+| `_on_response` | `ui.response` (print without a UI) | send via mq | — |
 | `_on_no_choices` | raise | exponential backoff | raise |
 | `_should_stop` | — | `channel.has_stopped` | — |
 
@@ -74,9 +75,17 @@ Tool calls within a single LLM turn are dispatched in parallel via `asyncio.gath
 
 **Trajectories.** Agents with `saves_trajectories = True` (`CliAgent`, `BackgroundAgent`; not `HelperAgent`) collect per-call stats (`model`, `duration_s`, `finish_reason`, `usage`) in `_llm_calls` during `_run_loop`, and after each turn `Agent._save_trajectory()` stores the turn in the `trajectories` table (`message_id` PK → the final assistant `messages` row, which `MessageHistory.add_message()` now returns; `conversation_id`; `data` JSON; `created_at`). The JSON holds the system prompt, a history-message count, the turn's own messages (user message, assistant tool calls/reasoning, tool results, final reply; attachment data URLs redacted with `tracer.redact`), the `llm_calls` list and summed `usage_total`. Saving is best-effort (logged, never raised). `ConversationStore.delete()` removes a conversation's trajectories and `fork()` copies them to the new message rows. `BackgroundAgent` then awaits `Channel.on_trajectory_saved(message_id, conversation_id, metadata)` (no-op by default).
 
+### Command Line
+
+`parse_args()` (`app/main.py`) puts every option on the top-level parser; the only subcommand is `background`. With no command, `args.command` is set to `"cli"` and `main()` calls `run_cli()`. `-p`, `-y` and `-i` with `background` are a parser error; `-q`, `--trace` and `--tracedir` apply to both. `max_iterations` falls back to `MAX_ITERATIONS` when `-i` isn't given. `Dockerfile` and `restart.sh` run `run.sh background`.
+
+### Terminal UI
+
+`run_cli()` (`app/cli/cli.py`) starts `run_tui()` (`app/cli/tui.py`) when there is no `-p` and both stdin and stdout are TTYs; otherwise `-p` runs one turn with plain `print()` output and the non-TTY REPL reads lines with `input()` (tests patch `app.cli.cli.input_loop`). The TUI is a full-screen prompt_toolkit `Application` (`Tui.build_app()`): an output `Window` driven by `_OutputControl`, a busy line (spinner, activity, elapsed, queued count) while a turn runs, a rule, the permission bar *or* the input `Buffer` window (pinned to the bottom, 1–12 lines, `SearchToolbar` for Ctrl+R), a rule and the status bar, plus a `CompletionsMenu` float. Output is rich renderables kept in a `Transcript` (`app/cli/tui_text.py`, with the text helpers and `TuiCompleter`): each block is rendered by a rich `Console` (StringIO, truecolor) at the pane width into ANSI, parsed to prompt_toolkit fragments and split into lines; a width change re-renders all blocks; only the last `max_blocks` (2000) are kept. `_OutputControl` is bottom-anchored: `Tui.scroll_up` (PageUp/PageDown; Up/Down stay prompt history) is the offset from the end. There is no mouse capture (it would block the terminal's own text selection and Ctrl+wheel zoom), and `run()` writes `ALT_SCROLL_OFF` (DEC 1007 reset) before the app starts and `ALT_SCROLL_ON` on exit, so terminals that turn the wheel into Up/Down keys in the alternate screen don't step through prompt history, and it puts the cursor on the last visible line and returns the matching `get_vertical_scroll`. `Tui.print()` appends and invalidates; `print_threadsafe()` is for log records from tool threads. `submit()` puts input on `_inbox`; `_worker()` runs messages and commands one at a time via `handle_input()`, so input typed during a turn is queued. On startup and whenever a command switches conversations, the pane is cleared and `show_conversation()` shows the header and up to `_HISTORY_ON_OPEN` messages. `Tui` owns a `CliAgent(ui=self)`: with a `ui`, `CliAgent` routes its hooks (`thinking`, `tool_start`, `tool_result` — via a `handle_tool_call` override — `response`, async `ask_permission`) to the UI instead of printing/`input()`. Permission prompts are serialised by an `asyncio.Lock` (tool calls run in parallel); `_read_permission_key()` awaits a future that the permission-mode key bindings resolve through `answer_permission()` (the input buffer is read-only meanwhile, and answer keys within `_PERMISSION_GRACE_SECS` of the prompt appearing are ignored so typing can't answer it); answers (`y`/`n`/`a`/`!`, Ctrl+C; never Enter, which also sends messages, nor Escape): yes / no / always for this tool (`allowed_tools`) / approve all / interrupt. Ctrl+C is a key binding (`on_ctrl_c`, raw mode, no SIGINT): it answers a pending prompt with interrupt, else cancels the running turn task, else clears the input, else arms/quits. On cancellation `CliAgent.agent_loop` stores `INTERRUPTED_REPLY` as the assistant message so the DB and `self.messages` stay consistent. Sync tools run in a thread (see Tool System), so the screen and Ctrl+C stay live; `bash` is async and Ctrl+C kills a running command. All model/tool text goes through `clean()` (strips C0/C1 control characters, so no escape sequence from tool output reaches the terminal). `@path` tokens naming existing files become `metadata["files"]` attachments (`extract_attachments`). Input history is `$ANOTHERBOT_HOME/cli_history`. Console logging is replaced by `_ConsoleLogHandler` (warnings and up, shown in the pane); the log file is unchanged.
+
 ### Tool System
 
-Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` taking the parameters declared in `spec()` (sync or async). Because `call` signatures differ per tool, `call` is declared as an attribute rather than an abstract method and checked in `Tool.__init_subclass__`. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` is asynchronous and dispatches by name, awaiting the tool's `call` if it is a coroutine function, and restores `os.getcwd()` after execution. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars, defined in `app/core/tool.py` so `mcp_manager` can use it without importing `tool_calls`).
+Each tool is a class extending `Tool` (`app/core/tool.py`), an ABC requiring a static `spec()` (OpenAI function-call schema) and a static `call()` taking the parameters declared in `spec()` (sync or async). Because `call` signatures differ per tool, `call` is declared as an attribute rather than an abstract method and checked in `Tool.__init_subclass__`. Tools are registered in `app/core/tool_calls.py` in `tool_registry` — a dict mapping tool name → `Tool` class. `run_tool()` is asynchronous and dispatches by name: it awaits the tool's `call` if it is a coroutine function and otherwise runs it in a worker thread (`_run_in_thread` → `_start_daemon_thread`: like `asyncio.to_thread`, context copied, but a daemon thread so quitting never waits for a hung cancelled tool; a slow tool doesn't block other channels or the TUI). Threaded tools run one at a time (an `asyncio.Lock`, created per event loop), as they did when they blocked the loop, so parallel calls from one turn (two `write_file`s to one path) can't overlap. Async tools with `exclusive = True` (`bash`, which blocked before it became async) take the same lock (`_run_exclusive`); other async tools (MCP, `helper_agent`) run concurrently, as before. A thread can't be stopped, so when the caller is cancelled `_run_in_thread` re-raises at once (Ctrl+C stays immediate) and records the still-running thread in `_unfinished`; every later tool call (`run_tool` and MCP calls in `run_tool_async`) first awaits `_wait_for_unfinished()`, so a cancelled tool's side effects never overlap a later tool's. That wait is capped at `UNFINISHED_WAIT_SECS` (60 s) counted from when the call was cancelled (`_unfinished_since`), not restarted per call: once the oldest unfinished thread is past it, every call returns an error to the model at once instead of running, so a hung thread can't stall later tool calls in any channel. A thread still running `UNFINISHED_ABANDON_SECS` (300 s) after its cancel is abandoned (`_abandon_stale`, logged as an error): it stops blocking, so a thread stuck forever can't disable tools until a restart. While any is tracked, the TUI status bar shows "⚠ <tool> still running". The TUI names such tools after "Interrupted" (`unfinished_tools()`). Tools with `runs_in_thread = False` (the todo tools, which share an unlocked in-memory list) run on the loop instead. `bash` is async (`asyncio.create_subprocess_shell` in a new session on POSIX / new process group on Windows, stdin `/dev/null`) and kills the whole group (`killpg` / `taskkill /T /F`) on timeout or cancellation. A new session has no controlling terminal, so commands that prompt (sudo, ssh/git passwords) fail fast instead of hanging; the tool description tells the model to use non-interactive flags. (`process_group=0` would keep the terminal but put the shell in a background group, where a terminal read stops it with SIGTTIN until the timeout.) `run_tool` restores `os.getcwd()` after execution. Results are truncated to `MAX_TOOL_RESULT_LENGTH` (16 000 chars, defined in `app/core/tool.py` so `mcp_manager` can use it without importing `tool_calls`).
 
 Current built-in tools: `read_file`, `write_file`, `bash`, `web_fetch`, `get_skills_dir`, `todo_add/list/update/clear`, `calculator`, `hackernews`, `websearch_text/images/videos/news/books`, `list/add/update/remove_scheduled_task`, `get_scheduled_task_output`, `get_city_state`, `get_datetime`, `helper_agent`, `save_memory`, `search_memory`, `delete_memory`.
 

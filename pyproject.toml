@@ -15,6 +15,8 @@ dependencies = [
     "starlette>=1.2.1",
     "itsdangerous>=2.2.0",
     "python-multipart>=0.0.30",
+    "prompt-toolkit>=3.0.50",
+    "rich>=14.0",
 ]
 
 [dependency-groups]

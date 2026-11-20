@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sys
 from collections.abc import AsyncIterator
 
 from ..channels.commands import build_command_registry
@@ -43,16 +44,28 @@ async def run_cli(max_iterations: int, auto_approve: bool, prompt: str | None):
         return
 
     log.info("Starting agent...")
-    agent = CliAgent(
-        auto_approve=auto_approve, max_iterations=runtime.get("max_iterations", 250)
-    )
+    max_iterations = runtime.get("max_iterations", 250)
 
-    # If prompt is provided, run the agent loop with the initial prompt
-    # and skip the interactive REPL if a prompt is provided
-    if prompt:
+    if prompt is None and sys.stdin.isatty() and sys.stdout.isatty():
+        # Lazy: prompt_toolkit/rich are only needed for the interactive TUI.
+        from .tui import run_tui  # pylint: disable=import-outside-toplevel
+
+        await run_tui(max_iterations=max_iterations, auto_approve=auto_approve)
+        return
+
+    # -p: run just that prompt, with plain output, and exit (any -p value,
+    # even an empty one, never falls through to the REPL below)
+    if prompt is not None:
+        if not prompt.strip():
+            print("Empty prompt: nothing to send.", file=sys.stderr)
+            return
+        agent = CliAgent(auto_approve=auto_approve, max_iterations=max_iterations)
         await agent.agent_loop(prompt)
         return
 
+    agent = CliAgent(auto_approve=auto_approve, max_iterations=max_iterations)
+
+    # Not a terminal (piped input, tests): a plain line-by-line REPL.
     print(
         "Starting interactive session. Type your prompts below. Press Ctrl+C to exit."
     )

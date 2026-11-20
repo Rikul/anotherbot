@@ -33,29 +33,24 @@ def parse_args():
         help="Trace output directory (default: %(default)s)",
     )
 
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("background", help="Run in background")
-
-    cli_parser = subparsers.add_parser("cli", help="Run interactive CLI")
-
-    cli_parser.add_argument(
+    parser.add_argument(
         "-p",
         "--prompt",
         metavar="PROMPT",
         dest="prompt",
         type=str,
         required=False,
-        help="The initial prompt for the agent",
+        help="Run this prompt once, print the reply and exit (omit for the interactive UI)",
         default=None,
     )
-    cli_parser.add_argument(
+    parser.add_argument(
         "-y",
         "--auto-approve",
         dest="auto_approve",
         action="store_true",
         help="Allow the agent to call tools without asking for permission",
     )
-    cli_parser.add_argument(
+    parser.add_argument(
         "-i",
         "--max-iterations",
         metavar="N",
@@ -63,7 +58,7 @@ def parse_args():
         type=int,
         help="The maximum number of iterations the agent will run before stopping (default: 250)",
     )
-    cli_parser.add_argument(
+    parser.add_argument(
         "-q",
         "--quiet",
         dest="quiet",
@@ -71,9 +66,23 @@ def parse_args():
         help="Don't print log messages to the console (they still go to the log file)",
     )
 
+    # No command runs the CLI agent (TUI, or one prompt with -p); the only
+    # command is "background".
+    subparsers = parser.add_subparsers(dest="command", metavar="{background}")
+    subparsers.add_parser(
+        "background", help="Run the Telegram / Discord / web UI server"
+    )
+
     args = parser.parse_args()
 
-    if not hasattr(args, "max_iterations") or args.max_iterations is None:
+    if args.command is None:
+        args.command = "cli"
+    elif (
+        args.prompt is not None or args.auto_approve or args.max_iterations is not None
+    ):
+        parser.error("-p, -y and -i only apply to the CLI agent, not 'background'")
+
+    if args.max_iterations is None:
         args.max_iterations = config.get("max_iterations")
 
     return args
@@ -94,7 +103,7 @@ async def main():
 
     config.load()  # env vars only; raises on invalid values so bad config fails fast
     args = parse_args()
-    setup_logging(level=logging.INFO, console=not getattr(args, "quiet", False))
+    setup_logging(level=logging.INFO, console=not args.quiet)
 
     runtime.set("model", config.get("model", "deepseek/deepseek-v4.1-flash"))
     runtime.set("max_iterations", args.max_iterations)

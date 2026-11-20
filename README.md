@@ -2,7 +2,7 @@
 
 A Python-based AI agent that can execute prompts, interact with the filesystem, run shell commands, fetch web content, search the web, and manage scheduled tasks. Built on the OpenAI SDK against OpenRouter (defaulting to DeepSeek).
 
-- **Interactive CLI**: Multi-turn REPL sessions with tool use
+- **Interactive CLI**: Terminal UI with markdown replies, completion, history and tool permission prompts
 - **Background Agent**: Runs as a persistent bot, receiving and sending messages via channels
 - **Web UI**: Browser-based chat interface (plain HTML/CSS/JS in `app/channels/frontend/`, talking to a Starlette + uvicorn JSON/WebSocket API) — dark/light theme, collapsible conversation sidebar, full conversation history
 - **Telegram Integration**: Built-in Telegram bot — receive messages, respond, run tools, deliver results
@@ -48,7 +48,8 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 
 ```bash
 uv sync
-./run.sh cli                 # interactive REPL
+./run.sh                     # interactive terminal UI
+./run.sh -p "your prompt"    # one prompt, plain output, then exit
 ./run.sh background          # Telegram / Discord / web UI server
 ```
 
@@ -91,27 +92,62 @@ Message history and conversations are stored in `$ANOTHERBOT_HOME/app.db` (SQLit
 ## Usage
 
 ```bash
-./run.sh cli -p "your prompt here"
+./run.sh [options]                # CLI agent: interactive terminal UI, or one prompt with -p
+./run.sh [options] background     # Telegram / Discord / web UI server
 
-# Flags
--p, --prompt          Run this prompt once and exit (omit to start the REPL)
+# Options
+-p, --prompt          Run this prompt once, print the reply as plain text and exit
+                      (omit to start the terminal UI)
 -y, --auto-approve    Skip tool permission prompts
 -q, --quiet           Don't print log messages to the console (still written to the log file)
 -i, --max-iterations  Max agentic loop iterations (default: MAX_ITERATIONS or 250)
+--trace               Trace LLM calls to JSONL files (also /trace on|off)
+--tracedir DIR        Trace output directory (default: $ANOTHERBOT_HOME/trace)
 ```
+
+There is no `cli` subcommand: running without a command starts the CLI agent. `-p`, `-y` and `-i` apply to the CLI agent only and are rejected with `background`; `-q`, `--trace` and `--tracedir` work with both. Options go before `background` (e.g. `./run.sh -q background`).
 
 ### Examples
 
 ```bash
-# Interactive REPL session
-./run.sh cli
+# Interactive terminal UI
+./run.sh
+
+# Terminal UI with tools auto-approved (toggle later with Shift+Tab or /yolo)
+./run.sh -y
 
 # Single-shot, auto-approved
-./run.sh cli -p "Create a hello world script" -y
+./run.sh -p "Create a hello world script" -y
 
 # Quiet, auto-approved (only the agent's output on the console)
-./run.sh cli -p "Summarize this repo" -y -q
+./run.sh -p "Summarize this repo" -y -q
 ```
+
+### Terminal UI
+
+`./run.sh` in a terminal opens a full-screen TUI: it takes over the whole terminal window (the terminal's alternate screen), not the OS window. The conversation so far fills the screen (scrollable), the input box sits at the bottom between two rules, and a status bar sits under it. While a turn runs, a spinner line shows the elapsed time and the running tool, and you can already type your next message: Enter queues it for after the turn. On exit the terminal's previous contents come back. When input or output is not a terminal it falls back to a plain line-by-line REPL, and `-p` always prints plain text.
+
+| Key / input | Action |
+|---|---|
+| Enter | Send (or accept the highlighted completion); queued while a turn runs |
+| Ctrl+Enter (sent as Ctrl+J by most terminals), Ctrl+J, or `\` at the end of a line | New line. Ctrl+J and a trailing `\` work in every terminal. Alt+Enter also works where the terminal passes it through, but not in Windows Terminal, which uses Alt+Enter to toggle its own fullscreen mode |
+| Tab | Complete `/commands`, conversation ids after `/load`, `/fork`, `/rename`, `/export`, `/delete`, and `@paths` |
+| `@path/to/file` | Attach that file to the message (images are sent as images) |
+| Up / Down, Ctrl+R | Prompt history (kept in `$ANOTHERBOT_HOME/cli_history`) |
+| Shift+Tab | Toggle auto-approve for tool calls |
+| Ctrl+C | Interrupt the running turn (kills a running `bash` command; a file or web tool already running is left to finish, and the next tool call waits for it); otherwise clear the input, twice to quit |
+| Ctrl+D | Quit (on an empty input) |
+| PageUp / PageDown | Scroll the conversation |
+| Ctrl+L | Clear the conversation pane |
+| `//text` | Send a message that starts with `/` |
+
+The TUI leaves the mouse to the terminal, so you can select text and zoom (Ctrl+wheel) as usual. It asks the terminal not to turn the mouse wheel into Up/Down keys (which would step through prompt history), so in terminals that honour that the wheel does nothing in the TUI; use PageUp/PageDown to scroll.
+
+Tool permission prompts replace the input box and take one key: `y` yes, `n` no (Enter and Escape don't answer, so a message being sent can't approve a tool), `a` always allow this tool for the session, `!` approve everything, Ctrl+C interrupts the turn. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
+
+Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; switching conversations with `/load`, `/fork`, `/new` or `/delete` redraws the pane with that conversation's history), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
+
+The `bash` tool runs commands without a terminal or stdin, so commands that prompt (sudo, ssh/git passwords) fail instead of waiting; the model is told to use non-interactive flags.
 
 ### Web UI
 

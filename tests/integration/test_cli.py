@@ -48,7 +48,7 @@ async def test_cli_with_simple_prompt(capsys, monkeypatch):
     monkeypatch.setenv("LLM_API_KEY", "sk-test")
 
     with (
-        patch("sys.argv", ["prog", "cli", "-p", "say hello", "--quiet"]),
+        patch("sys.argv", ["prog", "-p", "say hello", "--quiet"]),
         patch("app.core.agent.Client") as MockClient,
         patch("app.cli.cli_agent.get_default_sys_prompt", return_value=""),
         patch("app.cli.cli_agent.MessageHistory") as MockHistory,
