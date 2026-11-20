@@ -157,3 +157,12 @@ def test_walk_budget_applies_to_empty_directories(tmp_path, monkeypatch):
     walk = fs_search._Walk(str(tmp_path))
     assert list(walk) == []
     assert walk.timed_out
+
+
+def test_grep_single_file_reports_its_path_and_matches_glob_on_name(tree):
+    f = tree / "src" / "main.py"
+    assert grep("hello", str(f), glob="*.py") == f"{f}:2: print('hello')"
+    assert grep("hello", str(f), glob="src/*.py") == f"{f}:2: print('hello')"
+    assert grep("hello", str(f), glob="pkg/*.py").startswith("No matches")
+    assert grep("hello", str(f), glob="main.py") == f"{f}:2: print('hello')"
+    assert grep("hello", str(f), glob="*.md").startswith("No matches")

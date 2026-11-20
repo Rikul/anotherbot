@@ -93,6 +93,15 @@ class _PathMatcher:  # pylint: disable=too-few-public-methods  # one predicate
         self.basename_only = "/" not in pattern
         self.regex = glob_to_regex(pattern)
 
+    def matches_tail(self, path: str) -> bool:
+        """For a single file: True if the glob matches the end of ``path``
+        ("src/*.py" matches "/repo/src/main.py")."""
+        path = path.replace("\\", "/")
+        if self.basename_only:
+            return self.matches(path)
+        starts = [0] + [i + 1 for i, c in enumerate(path) if c == "/"]
+        return any(self.regex.match(path[i:]) for i in starts)
+
     def matches(self, rel_path: str) -> bool:
         """True if ``rel_path`` (``/``-separated, relative to the root) matches."""
         target = rel_path.rsplit("/", 1)[-1] if self.basename_only else rel_path
@@ -391,6 +400,10 @@ class GrepTool(Tool):
         matcher = _compile_glob(glob) if glob else None
         if isinstance(matcher, str):
             return matcher
+        if matcher and os.path.isfile(root):
+            if not matcher.matches_tail(root):
+                files = []
+            matcher = None
 
         results, truncated = _search(files, matcher, regex, files_only, limit)
         if not results:
