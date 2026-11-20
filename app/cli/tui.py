@@ -490,7 +490,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             self.scroll(-max(1, self._page_size()))
 
         answers = {
-            "y": "yes", "Y": "yes", "enter": "yes",
+            "y": "yes", "Y": "yes",  # not Enter: it's also "send", so a
+            # message typed during the turn could approve a tool unseen
             "n": "no", "N": "no",
             "a": "always", "A": "always",
             "!": "all",
@@ -602,10 +603,11 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
         self.print(self._render(self.last_reply))
 
     async def ask_permission(self, name: str, args: dict) -> bool:
-        """Single-key prompt: y/Enter yes, n no, a always this tool, ! everything.
+        """Single-key prompt: y yes, n no, a always this tool, ! everything.
 
-        Ctrl+C interrupts the whole turn. Escape answers nothing: Alt+Enter
-        starts with it, so it must not deny the call (other keys, Shift+Tab
+        Ctrl+C interrupts the whole turn. Enter and Escape answer nothing:
+        Enter also sends messages (one typed during the turn must not approve
+        a tool), and Alt+Enter starts with Escape (other keys, Shift+Tab
         included, are ignored too while the prompt is shown).
         """
         if name in self.allowed_tools or self.agent.auto_approve:
