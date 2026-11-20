@@ -1067,7 +1067,7 @@ def test_commands_api_includes_skills_not_shadowed_by_commands(monkeypatch, tmp_
     from app.channels.commands import BotCommand, CommandRegistry
     from app.infra import skills
 
-    for name in ("browser", "new"):
+    for name in ("browser", "new", "whoami"):
         (tmp_path / name).mkdir()
         (tmp_path / name / "SKILL.md").write_text(
             f"---\nname: {name}\ndescription: The {name} skill.\n---\nBody\n"
@@ -1086,6 +1086,10 @@ def test_commands_api_includes_skills_not_shadowed_by_commands(monkeypatch, tmp_
     } in cmds
     assert [c["description"] for c in cmds if c["name"] == "new"] == [
         "Start a new conversation."
+    ]
+    # answered by the channel itself: listed once, and not as a skill
+    assert [c for c in cmds if c["name"] == "whoami"] == [
+        {"name": "whoami", "description": "Show this tab's connection ID."}
     ]
 
 

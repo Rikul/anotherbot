@@ -76,6 +76,8 @@ FRONTEND_DIR = Path(__file__).resolve().parent / "frontend"
 # revalidate every time so a changed frontend file is picked up on reload.
 # StaticFiles sends ETag/Last-Modified, so unchanged files cost only a 304.
 _NO_CACHE = {"Cache-Control": "no-cache"}
+# Slash commands this channel answers itself, before the agent sees them.
+_CHANNEL_COMMANDS = frozenset({"whoami", "stop"})
 
 
 # Uploads the browser may render inline (thumbnails, lightbox). Anything else,
@@ -327,6 +329,7 @@ class WebChannel(Channel):
             cmds += [
                 {"name": n, "description": d, "skill": True}
                 for n, d in skill_completions(self.commands)
+                if n not in _CHANNEL_COMMANDS  # answered here, never a skill turn
             ]
         cmds.append({"name": "whoami", "description": "Show this tab's connection ID."})
         return JSONResponse({"commands": sorted(cmds, key=lambda c: c["name"])})

@@ -316,3 +316,18 @@ async def test_background_agent_skill_turn_is_not_a_command_reply(dirs):
         except asyncio.CancelledError:
             pass
     assert loop.await_args.args[1]["is_command"] is False
+
+
+def test_skill_file_listing_prunes_hidden_dirs_and_stops_at_cap(dirs, monkeypatch):
+    builtin, _ = dirs
+    path = write_skill(builtin, "big", fm("big", "Big."))
+    for sub in (".venv", "__pycache__"):
+        (path / sub).mkdir()
+        (path / sub / "x.py").write_text("")
+    (path / "refs").mkdir()
+    for i in range(5):
+        (path / "refs" / f"r{i}.md").write_text("")
+    monkeypatch.setattr(skills, "MAX_LISTED_FILES", 2)
+    out = UseSkillTool.call(name="big")
+    assert "- refs/r0.md\n- refs/r1.md\n- …" in out
+    assert ".venv" not in out and "__pycache__" not in out and "r3.md" not in out

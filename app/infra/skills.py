@@ -22,6 +22,7 @@ elsewhere; they are read at call time.
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -169,20 +170,25 @@ def get_skill(name: str) -> Skill | None:
 
 
 def _skill_files(skill: Skill) -> list[str]:
-    """Relative paths of the skill's other files (scripts, references)."""
+    """Relative paths of the skill's other files (scripts, references).
+
+    Walks lazily, skipping hidden and ``__pycache__`` directories, and stops
+    after ``MAX_LISTED_FILES + 1`` files, so a skill folder holding a big
+    tree (e.g. ``node_modules``) isn't walked in full on every call.
+    """
     files: list[str] = []
-    for p in sorted(skill.path.rglob("*")):
-        rel = p.relative_to(skill.path)
-        if (
-            p.is_file()
-            and rel.as_posix() != SKILL_FILE
-            and not any(
-                part.startswith(".") or part == "__pycache__" for part in rel.parts
-            )
-        ):
-            files.append(rel.as_posix())
+    for root, dirnames, filenames in os.walk(skill.path):
+        dirnames[:] = sorted(
+            d for d in dirnames if not d.startswith(".") and d != "__pycache__"
+        )
+        rel_root = Path(root).relative_to(skill.path)
+        for name in sorted(filenames):
+            rel = (rel_root / name).as_posix()
+            if name.startswith(".") or rel == SKILL_FILE:
+                continue
+            files.append(rel)
             if len(files) > MAX_LISTED_FILES:
-                break
+                return files
     return files
 
 

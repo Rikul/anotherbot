@@ -27,7 +27,7 @@ uv run --with playwright python <skill_dir>/scripts/snapshot.py https://example.
 uv run --with playwright python <skill_dir>/scripts/snapshot.py https://example.com --screenshot <workspace>/shots/example.png --full-page
 uv run --with playwright python <skill_dir>/scripts/snapshot.py https://example.com --pdf <workspace>/example.pdf
 ```
-Options: `--wait-for CSS`, `--timeout SECS`, `--max-chars N`, `--json`. Give bash a `timeout` of 60-120 for browser commands.
+Options: `--wait-for CSS`, `--timeout SECS`, `--max-chars N`, `--json`. The script keeps Chromium's sandbox on, except as root (Chromium won't start sandboxed there) or with `CHROMIUM_NO_SANDBOX=1` for containers that can't run it. Don't disable the sandbox otherwise: it is what contains a malicious page. Give bash a `timeout` of 60-120 for browser commands.
 
 ## Custom scripts
 Write the script to a file in the workspace (e.g. `<workspace>/browser/task.py`) with write_file, then run it with `uv run --with playwright python <file>`. Template:
@@ -35,7 +35,8 @@ Write the script to a file in the workspace (e.g. `<workspace>/browser/task.py`)
 from playwright.sync_api import sync_playwright
 
 with sync_playwright() as pw:
-    browser = pw.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+    # add "--no-sandbox" only if launching fails as root / in a locked-down container
+    browser = pw.chromium.launch(args=["--disable-dev-shm-usage"])
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     page.set_default_timeout(30_000)
     try:

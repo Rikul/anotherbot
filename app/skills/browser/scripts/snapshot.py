@@ -8,6 +8,7 @@ Prints the final URL, title, visible text (truncated to --max-chars) and the
 page's links. --screenshot / --pdf also save those files. Exit code 1 on a
 navigation error, with the error on stderr. Set CHROMIUM_PATH to use an
 existing Chrome/Chromium (e.g. /usr/bin/chromium) instead of Playwright's.
+The sandbox is disabled only as root or with CHROMIUM_NO_SANDBOX=1.
 """
 
 import argparse
@@ -18,7 +19,20 @@ import sys
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import sync_playwright
 
-LAUNCH_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
+
+def launch_args() -> list[str]:
+    """Chromium flags. The renderer sandbox stays on unless it can't work.
+
+    Chromium refuses to start sandboxed as root (typical in Docker), and some
+    containers lack the namespaces it needs: there, CHROMIUM_NO_SANDBOX=1.
+    Without the sandbox a malicious page that exploits the renderer runs code
+    as this user, so only turn it off when you have to.
+    """
+    args = ["--disable-dev-shm-usage"]
+    is_root = hasattr(os, "geteuid") and os.geteuid() == 0
+    if is_root or os.environ.get("CHROMIUM_NO_SANDBOX"):
+        args.append("--no-sandbox")
+    return args
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,7 +57,7 @@ def main() -> int:
     with sync_playwright() as pw:
         # CHROMIUM_PATH: use an existing Chrome/Chromium instead of Playwright's own
         browser = pw.chromium.launch(
-            args=LAUNCH_ARGS, executable_path=os.environ.get("CHROMIUM_PATH") or None
+            args=launch_args(), executable_path=os.environ.get("CHROMIUM_PATH") or None
         )
         try:
             page = browser.new_page(viewport={"width": 1280, "height": 900})
