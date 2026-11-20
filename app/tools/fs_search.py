@@ -11,7 +11,7 @@ import stat
 import time
 from datetime import datetime
 
-from ..core.tool import Tool
+from ..core.tool import MAX_TOOL_RESULT_LENGTH, Tool
 from ..infra.app_logging import log
 
 # Directories glob and grep never descend into: VCS data, virtualenvs,
@@ -38,6 +38,10 @@ MAX_GLOB_RESULTS = 500
 DEFAULT_GREP_RESULTS = 200
 MAX_GREP_RESULTS = 1000
 MAX_GREP_LINE = 300  # characters of a matching line shown
+# Results are cut to MAX_TOOL_RESULT_LENGTH characters after the tool returns,
+# which would drop the closing "… more" note first. Stay under it instead,
+# leaving room for that note.
+OUTPUT_BUDGET = MAX_TOOL_RESULT_LENGTH - 400
 MAX_GREP_FILE_BYTES = 5 * 1024 * 1024  # bigger files are skipped
 # glob and grep stop walking after this long and say so: threaded tools run
 # one at a time, so a walk of "/" must not hold up every later tool call.
@@ -144,6 +148,38 @@ def _timed_out_note(walk) -> list[str]:
     return []
 
 
+def _join_within_budget(lines: list[str], notes: list[str], what: str) -> str:
+    """Join ``lines`` plus the ``notes`` that follow them, dropping lines from
+    the end so the text fits OUTPUT_BUDGET with every note kept."""
+    budget = OUTPUT_BUDGET - sum(len(n) + 1 for n in notes)
+    used = 0
+    for i, line in enumerate(lines):
+        used += len(line) + 1
+        if used > budget:
+            cut = [
+                f"… {len(lines) - i} more {what} not shown (output limit); narrow the search"
+            ]
+            return "\n".join(lines[:i] + cut + notes)
+    return "\n".join(lines + notes)
+
+
+def _clip_line(line: str, regex: re.Pattern) -> str:
+    """A matching line, at most MAX_GREP_LINE characters around the match."""
+    if len(line) <= MAX_GREP_LINE:
+        return line
+    m = regex.search(line)
+    col = m.start() if m else 0
+    start = max(0, min(col - MAX_GREP_LINE // 3, len(line) - MAX_GREP_LINE))
+    end = start + MAX_GREP_LINE
+    clipped = line[start:end]
+    return (
+        ("…" if start else "")
+        + clipped
+        + ("…" if end < len(line) else "")
+        + f" [match at col {col + 1} of {len(line)}]"
+    )
+
+
 def _compile_glob(pattern: str):
     """A _PathMatcher, or an error text for an invalid pattern."""
     try:
@@ -218,12 +254,14 @@ class ListDirTool(Tool):
         dirs.sort(key=lambda e: e.name)
         files.sort(key=lambda e: e.name)
 
-        lines = [f"{os.path.abspath(path)}: {len(dirs)} dirs, {len(files)} files"]
-        for entry in (dirs + files)[:MAX_LIST_ENTRIES]:
-            lines.append(_describe_entry(entry))
+        header = f"{os.path.abspath(path)}: {len(dirs)} dirs, {len(files)} files"
+        lines = [header] + [
+            _describe_entry(e) for e in (dirs + files)[:MAX_LIST_ENTRIES]
+        ]
+        notes = []
         if len(entries) > MAX_LIST_ENTRIES:
-            lines.append(f"… {len(entries) - MAX_LIST_ENTRIES} more entries not shown")
-        return "\n".join(lines)
+            notes.append(f"… {len(entries) - MAX_LIST_ENTRIES} more entries not shown")
+        return _join_within_budget(lines, notes, "entries")
 
 
 def _describe_entry(entry: os.DirEntry) -> str:
@@ -295,14 +333,12 @@ class GlobTool(Tool):
             return "\n".join(
                 [f"No files matching {pattern!r} under {root}", *_timed_out_note(walk)]
             )
+        notes = _timed_out_note(walk)
         if len(found) > MAX_GLOB_RESULTS:
-            return "\n".join(
-                found[:MAX_GLOB_RESULTS]
-                + [
-                    f"… stopped after {MAX_GLOB_RESULTS} files; narrow the pattern or path"
-                ]
+            notes.append(
+                f"… stopped after {MAX_GLOB_RESULTS} files; narrow the pattern or path"
             )
-        return "\n".join(found + _timed_out_note(walk))
+        return _join_within_budget(found[:MAX_GLOB_RESULTS], notes, "files")
 
 
 class GrepTool(Tool):
@@ -410,13 +446,13 @@ class GrepTool(Tool):
             return "\n".join(
                 [f"No matches for {pattern!r} under {root}", *_timed_out_note(files)]
             )
-        out = results[:limit] + _timed_out_note(files)
+        notes = _timed_out_note(files)
         if truncated:
-            out.append(
+            notes.append(
                 f"… stopped at {limit} results (there may be more); "
                 "narrow the pattern, path or glob"
             )
-        return "\n".join(out)
+        return _join_within_budget(results[:limit], notes, "results")
 
 
 def _search(files, matcher, regex, files_only: bool, limit: int):
@@ -470,9 +506,7 @@ def _grep_file(path: str, regex: re.Pattern, max_hits: int) -> list[tuple[int, s
     for n, line in enumerate(lines, 1):
         line = line.removesuffix("\r")
         if regex.search(line):
-            if len(line) > MAX_GREP_LINE:
-                line = line[:MAX_GREP_LINE] + "…"
-            hits.append((n, line))
+            hits.append((n, _clip_line(line, regex)))
             if len(hits) >= max_hits:
                 break
     return hits
