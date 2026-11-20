@@ -131,3 +131,12 @@ def test_walk_stops_at_the_time_budget(tree, monkeypatch):
     monkeypatch.setattr(fs_search, "WALK_TIME_BUDGET_SECS", -1.0)
     assert "stopped after" in glob("*.py", str(tree))
     assert "stopped after" in grep("hello", str(tree))
+
+
+def test_grep_line_numbers_count_only_newlines(tmp_path):
+    f = tmp_path / "ff.py"
+    sep = chr(0x2028)  # a line separator that splitlines() would split on
+    f.write_text(f"a\x0cb\r\nc{sep}d\nneedle\n", encoding="utf-8", newline="")
+    assert grep("needle", str(f)) == f"{f}:3: needle"
+    assert grep("^c", str(f)) == f"{f}:2: c{sep}d"
+    assert grep("b$", str(f)) == f"{f}:1: a\x0cb"  # the \r is stripped

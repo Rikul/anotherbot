@@ -438,7 +438,14 @@ def _grep_file(path: str, regex: re.Pattern) -> list[tuple[int, str]]:
     if b"\0" in data[:_BINARY_SNIFF]:
         return []
     hits = []
-    for n, line in enumerate(data.decode("utf-8", errors="replace").splitlines(), 1):
+    text = data.decode("utf-8", errors="replace")
+    # Split on "\n" only: splitlines() also breaks at form feeds, \x1c-\x1e,
+    # \u2028 …, which would make the line numbers disagree with editors.
+    lines = text.split("\n")
+    if text.endswith("\n"):
+        lines.pop()  # no line after the final newline
+    for n, line in enumerate(lines, 1):
+        line = line.removesuffix("\r")
         if regex.search(line):
             if len(line) > MAX_GREP_LINE:
                 line = line[:MAX_GREP_LINE] + "…"
