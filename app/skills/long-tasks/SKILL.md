@@ -40,9 +40,11 @@ Done when: <concrete finish condition>
 ## 3. Slow commands
 bash calls time out (300 s at most). For anything longer, run it in the background and poll:
 ```bash
-cd <workspace>/<project> && nohup <command> > job.log 2>&1 & echo $! > job.pid
+cd <workspace>/<project> || exit 1
+nohup <command> > job.log 2>&1 &
+echo $! > job.pid
 ```
-Then check with short calls: `tail -n 20 job.log`, `kill -0 $(cat job.pid) && echo running || echo finished`. Poll with sensible gaps (e.g. `sleep 30` inside a bash call with a 60 s timeout), not in a tight loop. Record the PID and log path in PROGRESS.md.
+(Separate lines: in `cd X && nohup cmd & echo $!` the `&` backgrounds the `cd` too, so job.pid lands in the old directory.) Each bash call starts a fresh shell in your working directory, so check with absolute paths: `tail -n 20 <workspace>/<project>/job.log`, `kill -0 $(cat <workspace>/<project>/job.pid) && echo running || echo finished`. Poll with sensible gaps (e.g. `sleep 30` inside a bash call with a 60 s timeout), not in a tight loop. Record the PID and log path in PROGRESS.md.
 
 ## 4. Delegate and schedule
 - Side research or independent sub-tasks: `helper_agent` with a self-contained prompt (it has no conversation history), asking for a concise result. Use it to keep this conversation's context small.
