@@ -14,7 +14,7 @@ from typing import Any, Callable, Awaitable, Protocol, TYPE_CHECKING
 from .. import config
 from ..core import mcp_manager as mcp
 from ..core import runtime
-from ..infra import tracer
+from ..infra import skills, tracer
 from .channel import ChannelType
 
 if TYPE_CHECKING:
@@ -89,6 +89,21 @@ def help_cmd(registry: CommandRegistry) -> CommandHandler:
         return "\n".join(lines)
 
     return _help
+
+
+async def skills_cmd(_args: str = "") -> str:
+    """``/skills``: list the skills, which run as ``/<name> [request]``."""
+    return skills.format_skill_list()
+
+
+def skill_completions(registry: CommandRegistry) -> list[tuple[str, str]]:
+    """(name, description) of each skill not shadowed by a registered command."""
+    taken = {c.name for c in registry.list()}
+    return [
+        (s.name, f"skill: {s.description}")
+        for s in skills.discover_skills().values()
+        if s.name not in taken
+    ]
 
 
 async def model_cmd(args: str = "") -> str:
@@ -404,6 +419,9 @@ def build_command_registry(
         ),
         BotCommand(
             "mcp", "Show MCP server status. Usage: /mcp [tools [<server>]]", mcp_cmd()
+        ),
+        BotCommand(
+            "skills", "List skills; run one with /<skill> [request].", skills_cmd
         ),
     ):
         registry.register(cmd)

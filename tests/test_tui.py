@@ -191,6 +191,25 @@ async def test_run_command_local_and_shared(tui):
 
 
 @pytest.mark.asyncio
+async def test_run_command_runs_a_skill_as_a_turn(tui, tmp_path, monkeypatch):
+    from app.infra import skills
+
+    (tmp_path / "browser").mkdir()
+    (tmp_path / "browser" / "SKILL.md").write_text(
+        "---\nname: browser\ndescription: Browse.\n---\nBody\n"
+    )
+    monkeypatch.setattr(skills, "BUILTIN_SKILLS_DIR", tmp_path)
+    tui.agent.agent_loop = AsyncMock(return_value="ok")
+    assert await tui.run_command("/browser open example.com") is True
+    tui.agent.agent_loop.assert_awaited_once_with(
+        'Use the "browser" skill for this request:\n\nopen example.com', None
+    )
+    out = _out(tui)
+    assert "/browser open example.com" in out  # what the user typed is shown
+    assert "Unknown command" not in out
+
+
+@pytest.mark.asyncio
 async def test_run_turn_passes_attachments_and_counts_tokens(tui, tmp_path):
     (tmp_path / "pic.png").write_bytes(b"x")
     tui.agent._llm_calls = [

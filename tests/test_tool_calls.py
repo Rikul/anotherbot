@@ -15,7 +15,7 @@ def test_tool_registry_contains_expected_tools():
     assert "write_file" in tool_registry
     assert "bash" in tool_registry
     assert "web_fetch" in tool_registry
-    assert "get_skills_dir" in tool_registry
+    assert "use_skill" in tool_registry
     assert "helper_agent" in tool_registry
 
 

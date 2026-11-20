@@ -61,7 +61,7 @@ from .. import config
 from ..core import runtime
 from ..infra.conversations import ConversationStore
 from .channel import Channel, ChannelType
-from .commands import CommandRegistry, rename_conversation
+from .commands import CommandRegistry, rename_conversation, skill_completions
 from .message import IncomingMessage, OutgoingMessage
 from .message_queue import MessageQueue
 from .web_auth import WebAuthMiddleware, is_loopback_host
@@ -314,14 +314,20 @@ class WebChannel(Channel):
         return JSONResponse({"model": model, "auth": bool(self.password)})
 
     def _commands_api(self, _req: Request):
-        """Slash commands for autocomplete: the agent's, plus ``/whoami``.
+        """Slash commands for autocomplete: the agent's, its skills and ``/whoami``.
 
         ``/whoami`` is answered by this channel, so it isn't in the registry.
+        Skills are marked ``"skill": true``: the UI treats them as agent turns.
         """
         cmds = [
             {"name": c.name, "description": c.description}
             for c in (self.commands.list() if self.commands else [])
         ]
+        if self.commands:
+            cmds += [
+                {"name": n, "description": d, "skill": True}
+                for n, d in skill_completions(self.commands)
+            ]
         cmds.append({"name": "whoami", "description": "Show this tab's connection ID."})
         return JSONResponse({"commands": sorted(cmds, key=lambda c: c["name"])})
 

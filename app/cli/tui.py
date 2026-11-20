@@ -65,7 +65,9 @@ from rich.text import Text
 
 from .. import config
 from ..channels.commands import CommandRegistry, build_command_registry
+from ..channels.commands import skill_completions
 from ..core import runtime, tool_calls
+from ..infra import skills
 from ..infra.app_logging import log
 from .cli_agent import CliAgent
 from .tui_text import (  # noqa: F401  # pylint: disable=unused-import  # re-exported
@@ -275,6 +277,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
     def _command_list(self) -> list[tuple[str, str]]:
         cmds = {c.name: c.description for c in self.registry.list()}
         cmds.update(LOCAL_COMMANDS)
+        for name, description in skill_completions(self.registry):
+            cmds.setdefault(name, description)
         return sorted(cmds.items())
 
     def _conversation_list(self) -> list[dict]:
@@ -691,8 +695,8 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
 
     # --- turns -----------------------------------------------------------------
 
-    async def run_turn(self, text: str) -> None:
-        """Run one agent turn; Ctrl+C cancels it."""
+    async def run_turn(self, text: str, prompt: str | None = None) -> None:
+        """Run one agent turn; Ctrl+C cancels it. ``prompt`` replaces ``text`` for the agent."""
         self.print()
         self.print(user_block(text))
         files = extract_attachments(text)
@@ -702,7 +706,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
 
         self._turn_started = time.monotonic()
         self._activity = "thinking"
-        task = asyncio.ensure_future(self.agent.agent_loop(text, metadata))
+        task = asyncio.ensure_future(self.agent.agent_loop(prompt or text, metadata))
         self._turn_task = task
         self._interrupting = False
         self.invalidate()
@@ -772,6 +776,11 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             local(args)
             return True
 
+        if not any(c.name == name for c in self.registry.list()):
+            skill_prompt = skills.skill_invocation(line)
+            if skill_prompt is not None:  # /<skill> [request]: an agent turn
+                await self.run_turn(line, prompt=skill_prompt)
+                return True
         self._echo_command(line)
         before = self.agent.conversation_id
         result = await self.registry.execute(name, args)

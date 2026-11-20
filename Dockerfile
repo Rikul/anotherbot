@@ -9,7 +9,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt update && apt install -y --no-install-rec
     tzdata \
     && rm -rf /var/lib/apt/lists/*
 
-# Node.js / Chromium (puppeteer skill, npx-based MCP servers) are not baked in;
+# Chromium (browser skill) and Node.js (npx-based MCP servers) are not baked in;
 # install them in the running container when needed.
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/

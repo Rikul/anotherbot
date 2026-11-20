@@ -1,7 +1,7 @@
 import pytest
 
 import app.config as config
-from app.infra import memory_store, restart
+from app.infra import memory_store, restart, skills
 
 # Every env var app.config.load() reads. Cleared before each test so values from
 # the developer's shell or a .env file (load_dotenv runs when app.main is
@@ -38,3 +38,9 @@ def isolated_memory_db(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(
         memory_store, "DB_PATH", tmp_path_factory.mktemp("memory") / "memory.db"
     )
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_skills(monkeypatch, tmp_path_factory):
+    """Point user skills at an empty temp dir, so ~/.anotherbot/skills can't leak in."""
+    monkeypatch.setattr(skills, "USER_SKILLS_DIR", tmp_path_factory.mktemp("skills"))

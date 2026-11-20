@@ -8,7 +8,7 @@ from datetime import datetime
 from .tool_calls import get_all_tool_specs
 from ..infra.app_logging import log
 from ..channels.channel import Channel
-from ..channels.message import OutgoingMessage
+from ..channels.message import IncomingMessage, OutgoingMessage
 from ..channels.message_queue import MessageQueue
 from .agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
 from ..infra.message_history import MessageHistory
@@ -16,7 +16,7 @@ from ..infra.conversations import ConversationStore
 from . import runtime
 from ..channels.commands import BotCommand, build_command_registry
 from ..tools.todo import init_task_todos
-from ..infra import restart
+from ..infra import restart, skills
 
 _MAX_EMPTY_RETRIES = 5
 
@@ -161,16 +161,11 @@ class BackgroundAgent(Agent):
             msg = await self.mq.incoming.get()
             reply_metadata = msg.metadata
             try:
-                if msg.content.startswith("/"):
-                    parts = msg.content[1:].split(maxsplit=1)
-                    cmd_name = parts[0].lower()
-                    args = parts[1] if len(parts) > 1 else ""
-                    result = await self.registry.execute(cmd_name, args)
-                    reply = (
-                        result
-                        if result is not None
-                        else f"Unknown command: /{cmd_name}"
-                    )
+                content = msg.content
+                reply = None
+                if content.startswith("/"):
+                    reply, content = await self._run_slash(msg)
+                if reply is not None:
                     await self.mq.outgoing_msg(
                         OutgoingMessage(
                             content=reply, channel=self.channel, metadata=msg.metadata
@@ -198,7 +193,7 @@ class BackgroundAgent(Agent):
                     await self.channel.on_agent_turn(True)
                     try:
                         with restart.turn():  # a restart waits for this turn
-                            await self.agent_loop(msg.content, reply_metadata)
+                            await self.agent_loop(content, reply_metadata)
                     finally:
                         await self.channel.on_agent_turn(False)
             except Exception as e:  # pylint: disable=broad-exception-caught  # report it, keep serving
@@ -208,6 +203,28 @@ class BackgroundAgent(Agent):
                         content=str(e), channel=self.channel, metadata=reply_metadata
                     )
                 )
+
+    async def _run_slash(self, msg: IncomingMessage) -> tuple[str | None, str]:
+        """Run a ``/command``, or turn ``/<skill> [request]`` into a prompt.
+
+        Returns ``(reply, content)``: the command's reply (``Unknown command``
+        if there is neither a command nor a skill by that name), or ``None``
+        and the prompt to run as an agent turn.
+        """
+        parts = msg.content[1:].split(maxsplit=1)
+        cmd_name = parts[0].lower() if parts else ""
+        result = await self.registry.execute(
+            cmd_name, parts[1] if len(parts) > 1 else ""
+        )
+        if result is not None:
+            return result, msg.content
+        skill_prompt = skills.skill_invocation(msg.content)
+        if skill_prompt is None:
+            return f"Unknown command: /{cmd_name}", msg.content
+        # A turn, not a command: its replies are chat messages (web UI).
+        if msg.metadata and msg.metadata.get("is_command"):
+            msg.metadata = {**msg.metadata, "is_command": False}
+        return None, skill_prompt
 
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         self._trim_messages()
