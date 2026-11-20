@@ -143,7 +143,7 @@ There is no `cli` subcommand: running without a command starts the CLI agent. `-
 
 The TUI leaves the mouse to the terminal, so you can select text and zoom (Ctrl+wheel) as usual. It asks the terminal not to turn the mouse wheel into Up/Down keys (which would step through prompt history), so in terminals that honour that the wheel does nothing in the TUI; use PageUp/PageDown to scroll.
 
-Tool permission prompts replace the input box and take one key: `y`/Enter yes, `n` no, `a` always allow this tool for the session, `!` approve everything, Ctrl+C interrupts the turn. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
+Tool permission prompts replace the input box and take one key: `y` yes, `n` no (Enter and Escape don't answer, so a message being sent can't approve a tool), `a` always allow this tool for the session, `!` approve everything, Ctrl+C interrupts the turn. The status bar shows the model, the conversation, the approval mode and the session's token count; each turn ends with its duration, steps and tokens.
 
 Besides the shared slash commands (`/help` lists them), the TUI has `/history [n]` (recent messages; switching conversations with `/load`, `/fork`, `/new` or `/delete` redraws the pane with that conversation's history), `/copy` (last reply to the clipboard via OSC 52, works over SSH in most terminals), `/raw` (toggle markdown rendering), `/yolo` (toggle auto-approve), `/clear` and `/exit`.
 

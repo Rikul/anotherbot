@@ -740,3 +740,59 @@ def test_conversation_list_is_cached_briefly(tui):
     with patch.object(tui_mod.time, "monotonic", return_value=1e12):
         tui._conversation_list()
     assert tui.agent.store.list.call_count == 2  # refreshed after the window
+
+
+def test_enter_does_not_answer_a_permission_prompt(tui):
+    """Enter also sends messages: it must never approve a tool."""
+    from prompt_toolkit.keys import Keys
+
+    kb = tui._key_bindings()
+    perm_enter = [
+        b
+        for b in kb.bindings
+        if b.keys in ((Keys.ControlM,), (Keys.Enter,)) and b.eager()
+    ]
+    assert perm_enter == []
+
+
+@pytest.mark.asyncio
+async def test_real_enter_key_at_a_prompt_does_not_approve(tui):
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    answers = []
+
+    async def turn(*_):
+        answers.append(await tui.ask_permission("bash", {"command": "rm x"}))
+
+    tui.agent.agent_loop = turn
+    with create_pipe_input() as pipe:
+        runner = asyncio.ensure_future(tui.run(input=pipe, output=DummyOutput()))
+        await asyncio.sleep(0.2)
+        pipe.send_text("go\r")
+        for _ in range(50):
+            if tui.permission_pending:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(tui_mod._PERMISSION_GRACE_SECS + 0.1)
+        pipe.send_text("\r")  # Enter after the grace period
+        await asyncio.sleep(0.2)
+        assert tui.permission_pending and answers == []  # still waiting
+        pipe.send_text("n")
+        await asyncio.sleep(0.2)
+        assert answers == [False]
+        pipe.send_text("\x04")
+        await asyncio.wait_for(runner, 3)
+
+
+def test_transcript_keeps_only_the_most_recent_blocks():
+    from app.cli.tui import Transcript
+
+    tr = Transcript(Console(file=io.StringIO(), width=40), max_blocks=50)
+    for i in range(120):
+        tr.add(Text(f"line {i}"))
+    assert len(tr.blocks) <= 50
+    text = tr.text()
+    assert "line 119" in text and "line 0\n" not in text
+    assert len(tr.lines(40)) == len(tr.blocks)  # lines stay in step
+    assert len(tr.lines(60)) == len(tr.blocks)  # and after a re-wrap

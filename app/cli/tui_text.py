@@ -175,25 +175,37 @@ class Transcript:
 
     Each block is rendered with ``console`` at the pane's width into ANSI
     text, parsed into prompt_toolkit fragments and split into lines. A width
-    change re-renders every block, so output re-wraps on resize.
+    change re-renders every block, so output re-wraps on resize. Only the
+    last ``max_blocks`` blocks are kept, so a long session neither grows
+    without bound nor makes a resize re-render all of it (/history still
+    shows older messages).
     """
 
-    def __init__(self, console: Console) -> None:
+    def __init__(self, console: Console, max_blocks: int = 2000) -> None:
         self.console = console
+        self.max_blocks = max_blocks
         self.blocks: list = []
         self.raw: list[str] = []  # each block's ANSI text, as rendered
         self._lines: list[list] = []
+        self._line_counts: list[int] = []  # lines per block, to drop old ones
 
     def add(self, renderable) -> None:
         """Append ``renderable`` (rendered at the current width)."""
         self.blocks.append(renderable)
         self._render_block(renderable)
+        excess = len(self.blocks) - self.max_blocks
+        if excess > 0:
+            # Drop in chunks, so this isn't paid on every add.
+            drop = max(excess, self.max_blocks // 10)
+            del self._lines[: sum(self._line_counts[:drop])]
+            del self.blocks[:drop], self.raw[:drop], self._line_counts[:drop]
 
     def clear(self) -> None:
         """Remove everything."""
         self.blocks.clear()
         self.raw.clear()
         self._lines.clear()
+        self._line_counts.clear()
 
     def lines(self, width: int) -> list[list]:
         """The content as lines of fragments, wrapped at ``width``."""
@@ -201,6 +213,7 @@ class Transcript:
             self.console.width = width
             self.raw.clear()
             self._lines.clear()
+            self._line_counts.clear()
             for block in self.blocks:
                 self._render_block(block)
         return self._lines
@@ -215,7 +228,9 @@ class Transcript:
         rendered = capture.get()
         self.raw.append(rendered)
         # The trailing newline leaves an empty last "line": drop it.
-        self._lines.extend(list(split_lines(to_formatted_text(ANSI(rendered))))[:-1])
+        lines = list(split_lines(to_formatted_text(ANSI(rendered))))[:-1]
+        self._lines.extend(lines)
+        self._line_counts.append(len(lines))
 
 
 # User messages are shown on a tinted full-width band (explicit foreground too,
