@@ -9,7 +9,7 @@ from typing import Protocol
 from ..channels.channel import ChannelType
 from ..core import runtime
 from ..core.agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
-from ..core.tool_calls import get_all_tool_specs
+from ..core.tool_calls import get_all_tool_specs, is_read_only
 from ..infra.conversations import ConversationStore
 from ..infra.message_history import MessageHistory
 from ..infra.term_display import ANSI
@@ -102,7 +102,7 @@ class CliAgent(Agent):
                 print(content.strip())
 
     async def _check_permission(self, tool_name: str, tool_args: dict) -> bool:
-        if self.auto_approve:
+        if self.auto_approve or is_read_only(tool_name):
             return True
         if self.ui:
             return await self.ui.ask_permission(tool_name, tool_args)

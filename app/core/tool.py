@@ -35,6 +35,10 @@ class Tool(ABC):  # pylint: disable=too-few-public-methods  # interface: spec() 
     # one at a time, together with the threaded sync tools.
     exclusive: bool = False
 
+    # Tools that only read local state (files, directories, git) and run no
+    # program from it. The CLI runs them without a permission prompt.
+    read_only: bool = False
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
         if not callable(getattr(cls, "call", None)):

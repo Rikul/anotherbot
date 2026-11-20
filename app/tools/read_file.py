@@ -7,6 +7,8 @@ from ..infra.app_logging import log
 class ReadFileTool(Tool):
     """Read a file as UTF-8 (bad bytes replaced), optionally from ``offset`` for ``size`` bytes."""
 
+    read_only = True
+
     @staticmethod
     def spec():
         return {
