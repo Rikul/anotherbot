@@ -8,6 +8,7 @@ no permission prompt in the CLI.
 import os
 import re
 import stat
+import time
 from datetime import datetime
 
 from ..core.tool import Tool
@@ -38,6 +39,9 @@ DEFAULT_GREP_RESULTS = 200
 MAX_GREP_RESULTS = 1000
 MAX_GREP_LINE = 300  # characters of a matching line shown
 MAX_GREP_FILE_BYTES = 5 * 1024 * 1024  # bigger files are skipped
+# glob and grep stop walking after this long and say so: threaded tools run
+# one at a time, so a walk of "/" must not hold up every later tool call.
+WALK_TIME_BUDGET_SECS = 20.0
 _BINARY_SNIFF = 8192
 
 
@@ -95,15 +99,45 @@ class _PathMatcher:  # pylint: disable=too-few-public-methods  # one predicate
         return self.regex.match(target) is not None
 
 
-def _walk_files(root: str):
-    """Yield (absolute path, ``/``-separated path relative to ``root``) for
-    every file under ``root``, in sorted order, skipping ``SKIP_DIRS``."""
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
-        rel_dir = os.path.relpath(dirpath, root).replace(os.sep, "/")
-        for name in sorted(filenames):
-            rel = name if rel_dir == "." else f"{rel_dir}/{name}"
-            yield os.path.join(dirpath, name), rel
+class _Walk:  # pylint: disable=too-few-public-methods  # an iterable with a flag
+    """Iterate (absolute path, ``/``-separated path relative to ``root``) for
+    every file under ``root``, in sorted order, skipping ``SKIP_DIRS``.
+
+    Stops after ``WALK_TIME_BUDGET_SECS`` and sets ``timed_out``.
+    """
+
+    def __init__(self, root: str):
+        self.root = root
+        self.timed_out = False
+
+    def __iter__(self):
+        deadline = time.monotonic() + WALK_TIME_BUDGET_SECS
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+            rel_dir = os.path.relpath(dirpath, self.root).replace(os.sep, "/")
+            for name in sorted(filenames):
+                if time.monotonic() > deadline:
+                    self.timed_out = True
+                    return
+                rel = name if rel_dir == "." else f"{rel_dir}/{name}"
+                yield os.path.join(dirpath, name), rel
+
+
+def _timed_out_note(walk) -> list[str]:
+    if getattr(walk, "timed_out", False):
+        return [
+            f"… stopped after {WALK_TIME_BUDGET_SECS:.0f}s, so results are "
+            "incomplete; narrow the path"
+        ]
+    return []
+
+
+def _compile_glob(pattern: str):
+    """A _PathMatcher, or an error text for an invalid pattern."""
+    try:
+        return _PathMatcher(pattern)
+    except re.error as e:
+        return f"Error: invalid glob pattern {pattern!r}: {e}"
 
 
 def _format_size(size: int) -> str:
@@ -235,15 +269,20 @@ class GlobTool(Tool):
         root = os.path.expanduser(path or ".")
         if not os.path.isdir(root):
             return f"Error: directory {root} does not exist"
-        matcher = _PathMatcher(pattern)
+        matcher = _compile_glob(pattern)
+        if isinstance(matcher, str):
+            return matcher
         found = []
-        for _, rel in _walk_files(root):
+        walk = _Walk(root)
+        for _, rel in walk:
             if matcher.matches(rel):
                 found.append(rel)
                 if len(found) > MAX_GLOB_RESULTS:
                     break
         if not found:
-            return f"No files matching {pattern!r} under {root}"
+            return "\n".join(
+                [f"No files matching {pattern!r} under {root}", *_timed_out_note(walk)]
+            )
         if len(found) > MAX_GLOB_RESULTS:
             return "\n".join(
                 found[:MAX_GLOB_RESULTS]
@@ -251,7 +290,7 @@ class GlobTool(Tool):
                     f"… stopped after {MAX_GLOB_RESULTS} files; narrow the pattern or path"
                 ]
             )
-        return "\n".join(found)
+        return "\n".join(found + _timed_out_note(walk))
 
 
 class GrepTool(Tool):
@@ -343,15 +382,19 @@ class GrepTool(Tool):
         if os.path.isfile(root):
             files = [(root, root)]
         elif os.path.isdir(root):
-            files = _walk_files(root)
+            files = _Walk(root)
         else:
             return f"Error: {root} does not exist"
-        matcher = _PathMatcher(glob) if glob else None
+        matcher = _compile_glob(glob) if glob else None
+        if isinstance(matcher, str):
+            return matcher
 
         results, truncated = _search(files, matcher, regex, files_only, limit)
         if not results:
-            return f"No matches for {pattern!r} under {root}"
-        out = results[:limit]
+            return "\n".join(
+                [f"No matches for {pattern!r} under {root}", *_timed_out_note(files)]
+            )
+        out = results[:limit] + _timed_out_note(files)
         if truncated:
             out.append(
                 f"… stopped at {limit} results (there may be more); "
@@ -379,9 +422,14 @@ def _search(files, matcher, regex, files_only: bool, limit: int):
 
 
 def _grep_file(path: str, regex: re.Pattern) -> list[tuple[int, str]]:
-    """Matching (line number, line) pairs; [] for unreadable or binary files."""
+    """Matching (line number, line) pairs; [] for unreadable or binary files.
+
+    Only regular files are read: a FIFO would block on open and a device
+    such as /dev/zero would never stop (their size reads as 0).
+    """
     try:
-        if os.path.getsize(path) > MAX_GREP_FILE_BYTES:
+        st = os.stat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_GREP_FILE_BYTES:
             return []
         with open(path, "rb") as f:
             data = f.read()

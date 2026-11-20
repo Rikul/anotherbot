@@ -1,6 +1,9 @@
+import os
+
 import pytest
 
 from app.core.tool_calls import helper_tool_specs, is_read_only, run_tool
+from app.tools import fs_search
 from app.tools.fs_search import GlobTool, GrepTool, ListDirTool, glob_to_regex
 
 list_dir = ListDirTool.call
@@ -110,3 +113,21 @@ async def test_registered_read_only_and_in_helper(tree):
     assert {"list_dir", "glob", "grep"} <= helper
     out = await run_tool("glob", {"pattern": "*.md", "path": str(tree)})
     assert out == "README.md"
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_grep_skips_fifos(tree):
+    os.mkfifo(tree / "pipe")  # opening it with no writer would block forever
+    assert grep("hello", str(tree)) == "src/main.py:2: print('hello')"
+
+
+def test_invalid_glob_is_an_error_text(tree):
+    assert glob("[z-a].txt", str(tree)).startswith("Error: invalid glob pattern")
+    out = grep("x", str(tree), glob="[z-a].txt")
+    assert out.startswith("Error: invalid glob pattern")
+
+
+def test_walk_stops_at_the_time_budget(tree, monkeypatch):
+    monkeypatch.setattr(fs_search, "WALK_TIME_BUDGET_SECS", -1.0)
+    assert "stopped after" in glob("*.py", str(tree))
+    assert "stopped after" in grep("hello", str(tree))
