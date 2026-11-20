@@ -75,7 +75,13 @@ def _exec(cwd: str, args: list[str]) -> _Result:
                 env={**os.environ, **_GIT_ENV},
                 start_new_session=os.name != "nt",
             ) as proc:
-                timer = threading.Timer(GIT_TIMEOUT_SECS, _kill, (proc,))
+                fired = threading.Event()  # set before the kill, so no race
+
+                def on_timeout(proc=proc):
+                    fired.set()
+                    _kill(proc)
+
+                timer = threading.Timer(GIT_TIMEOUT_SECS, on_timeout)
                 timer.start()
                 try:
                     out = proc.stdout.read(MAX_GIT_OUTPUT_BYTES + 1)
@@ -84,8 +90,8 @@ def _exec(cwd: str, args: list[str]) -> _Result:
                         _kill(proc)
                     proc.wait()
                 finally:
-                    timed_out = not timer.is_alive() and not truncated
                     timer.cancel()
+                timed_out = fired.is_set() and not truncated
             err_file.seek(0)
             err = err_file.read(64 * 1024)
     except FileNotFoundError as e:
