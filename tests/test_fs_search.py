@@ -180,3 +180,33 @@ def test_grep_stops_collecting_at_the_limit(tmp_path, monkeypatch):
     )
     grep("x", str(f), max_results=3)
     assert seen == [4]  # limit + 1, to know there are more
+
+
+def test_grep_long_line_shows_the_match(tmp_path):
+    f = tmp_path / "long.txt"
+    f.write_text("x" * 2500 + "NEEDLE" + "y" * 2500 + "\n")
+    out = grep("NEEDLE", str(f))
+    assert "NEEDLE" in out
+    assert out.endswith("[match at col 2501 of 5006]")
+    assert len(out) < len(str(f)) + fs_search.MAX_GREP_LINE + 60
+    near_start = tmp_path / "start.txt"
+    near_start.write_text("NEEDLE" + "z" * 1000 + "\n")
+    out = grep("NEEDLE", str(near_start))
+    assert ":1: NEEDLE" in out and "[match at col 1 of 1006]" in out
+
+
+def test_grep_output_fits_the_tool_result_cap_with_its_notes(tmp_path):
+    f = tmp_path / "wide.txt"
+    f.write_text(("a" * 280 + "\n") * 300)
+    out = grep("a", str(f))  # default 200 results x ~300 chars
+    assert len(out) <= fs_search.MAX_TOOL_RESULT_LENGTH
+    assert "more results not shown (output limit)" in out
+    assert out.endswith("narrow the pattern, path or glob")  # the stop note survives
+
+
+def test_glob_and_list_dir_fit_the_tool_result_cap(tmp_path):
+    for i in range(400):
+        (tmp_path / f"{'n' * 60}_{i:04}.txt").write_text("")
+    for out in (glob("*.txt", str(tmp_path)), list_dir(str(tmp_path))):
+        assert len(out) <= fs_search.MAX_TOOL_RESULT_LENGTH
+        assert "not shown (output limit)" in out

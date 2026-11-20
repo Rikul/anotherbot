@@ -123,3 +123,10 @@ def test_truncated_filter_config_refuses_to_run(repo, monkeypatch):
         _git(repo, "config", f"filter.f{i}.clean", "cat")
     monkeypatch.setattr(git_tools, "MAX_GIT_OUTPUT_BYTES", 30)
     assert git_status(str(repo)).startswith("Error: refusing to run git")
+
+
+def test_log_stat(repo):
+    out = git_log(str(repo), max_count=1, stat=True)
+    assert "second commit" in out and "a.txt | 1 +" in out and "+two" not in out
+    out = git_log(str(repo), max_count=1, patch=True, stat=True)
+    assert "a.txt | 1 +" in out and "+two" in out
