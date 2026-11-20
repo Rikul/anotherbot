@@ -113,6 +113,9 @@ class _Walk:  # pylint: disable=too-few-public-methods  # an iterable with a fla
     def __iter__(self):
         deadline = time.monotonic() + WALK_TIME_BUDGET_SECS
         for dirpath, dirnames, filenames in os.walk(self.root):
+            if time.monotonic() > deadline:  # also for trees of empty dirs
+                self.timed_out = True
+                return
             dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
             rel_dir = os.path.relpath(dirpath, self.root).replace(os.sep, "/")
             for name in sorted(filenames):
@@ -404,7 +407,11 @@ class GrepTool(Tool):
 
 
 def _search(files, matcher, regex, files_only: bool, limit: int):
-    """(result lines, whether the search stopped at ``limit``)."""
+    """(result lines, whether more than ``limit`` were found).
+
+    Stops at the first result past ``limit``, so exactly ``limit`` results
+    are not reported as cut short.
+    """
     results: list[str] = []
     for abs_path, rel in files:
         if matcher and not matcher.matches(rel):
@@ -416,7 +423,7 @@ def _search(files, matcher, regex, files_only: bool, limit: int):
             results.append(rel)
         else:
             results.extend(f"{rel}:{n}: {line}" for n, line in hits)
-        if len(results) >= limit:
+        if len(results) > limit:
             return results, True
     return results, False
 

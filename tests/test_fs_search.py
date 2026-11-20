@@ -140,3 +140,20 @@ def test_grep_line_numbers_count_only_newlines(tmp_path):
     assert grep("needle", str(f)) == f"{f}:3: needle"
     assert grep("^c", str(f)) == f"{f}:2: c{sep}d"
     assert grep("b$", str(f)) == f"{f}:1: a\x0cb"  # the \r is stripped
+
+
+def test_grep_exactly_limit_results_is_not_truncated(tree):
+    out = grep("print", str(tree), max_results=1)
+    assert out == "src/main.py:2: print('hello')"
+    two = tree / "two.txt"
+    two.write_text("print\nprint\n")
+    assert "stopped at 1" in grep("print", str(tree), max_results=1)
+
+
+def test_walk_budget_applies_to_empty_directories(tmp_path, monkeypatch):
+    for i in range(3):
+        (tmp_path / f"d{i}").mkdir()
+    monkeypatch.setattr(fs_search, "WALK_TIME_BUDGET_SECS", -1.0)
+    walk = fs_search._Walk(str(tmp_path))
+    assert list(walk) == []
+    assert walk.timed_out
