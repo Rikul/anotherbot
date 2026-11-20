@@ -506,3 +506,15 @@ async def test_agent_loop_does_not_persist_history_when_attachment_invalid(tmp_p
     with pytest.raises(FileNotFoundError):
         await agent.agent_loop("hi", metadata={"files": [str(non_file)]})
     agent.history.add_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_read_only_tools_skip_the_permission_prompt():
+    agent, _ = make_agent(auto_approve=False)
+    with patch("app.cli.cli_agent.ask_permission", return_value=False) as ask:
+        for name in ("read_file", "list_dir", "grep", "glob", "git_diff"):
+            assert await agent._check_permission(name, {}) is True
+        ask.assert_not_called()
+        assert await agent._check_permission("bash", {"command": "ls"}) is False
+        assert await agent._check_permission("write_file", {}) is False
+        assert ask.call_count == 2

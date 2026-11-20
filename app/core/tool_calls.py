@@ -13,6 +13,8 @@ from ..infra.helpers import trunc_str_with_ellipsis
 from ..tools.read_file import ReadFileTool
 from ..tools.write_file import WriteFileTool
 from ..tools.bash import BashTool
+from ..tools.fs_search import GlobTool, GrepTool, ListDirTool
+from ..tools.git_tools import GitDiffTool, GitLogTool, GitStatusTool
 from ..tools.web_fetch import WebFetchTool
 from ..tools.get_skills_dir import GetSkillsDirTool
 from ..tools.todo import TodoAddTool, TodoListTool, TodoClearTool, TodoUpdateTool
@@ -44,6 +46,12 @@ tool_registry = {
     "read_file": ReadFileTool,
     "write_file": WriteFileTool,
     "bash": BashTool,
+    "list_dir": ListDirTool,
+    "glob": GlobTool,
+    "grep": GrepTool,
+    "git_status": GitStatusTool,
+    "git_diff": GitDiffTool,
+    "git_log": GitLogTool,
     "web_fetch": WebFetchTool,
     "get_skills_dir": GetSkillsDirTool,
     "todo_add": TodoAddTool,
@@ -75,6 +83,12 @@ _HELPER_AGENT_TOOLS = {
     "read_file",
     "write_file",
     "bash",
+    "list_dir",
+    "glob",
+    "grep",
+    "git_status",
+    "git_diff",
+    "git_log",
     "web_fetch",
     "get_skills_dir",
     "calculator",
@@ -95,6 +109,12 @@ _HELPER_AGENT_TOOLS = {
 helper_tool_specs = [
     tool.spec() for k, tool in tool_registry.items() if k in _HELPER_AGENT_TOOLS
 ]
+
+
+def is_read_only(tool_name: str) -> bool:
+    """True for a built-in tool marked ``read_only`` (never for MCP tools)."""
+    tool = tool_registry.get(tool_name)
+    return bool(tool and tool.read_only)
 
 
 def get_all_tool_specs() -> list[dict]:
