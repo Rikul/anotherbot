@@ -9,13 +9,21 @@ run programs), no pager or prompts.
 """
 
 import os
+import signal
 import subprocess
+import tempfile
+import threading
+from dataclasses import dataclass
 
 from ..core.tool import Tool
 from ..infra.app_logging import log
 
 GIT_TIMEOUT_SECS = 30
 MAX_LOG_COUNT = 200
+# Output past this is not read (git is stopped): the model only gets
+# MAX_TOOL_RESULT_LENGTH characters anyway, and a 200-commit patch log could
+# otherwise put hundreds of MB in memory.
+MAX_GIT_OUTPUT_BYTES = 1024 * 1024
 
 _GIT_ENV = {
     "GIT_PAGER": "cat",
@@ -36,22 +44,57 @@ class _GitError(Exception):
     """A git invocation failed before it produced a result (text for the model)."""
 
 
-def _exec(cwd: str, args: list[str]) -> subprocess.CompletedProcess:
+@dataclass
+class _Result:
+    returncode: int
+    stdout: bytes
+    stderr: bytes
+    truncated: bool  # stdout reached MAX_GIT_OUTPUT_BYTES and git was stopped
+
+
+def _kill(proc: subprocess.Popen) -> None:
+    """Kill git and anything it started (they could hold the pipe open)."""
     try:
-        return subprocess.run(
-            ["git", "-C", cwd, "--no-pager", *args],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=GIT_TIMEOUT_SECS,
-            env={**os.environ, **_GIT_ENV},
-            check=False,
-        )
+        if os.name == "nt":
+            proc.kill()
+        else:
+            os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def _exec(cwd: str, args: list[str]) -> _Result:
+    """Run git, reading at most MAX_GIT_OUTPUT_BYTES of stdout."""
+    try:
+        with tempfile.TemporaryFile() as err_file:
+            with subprocess.Popen(
+                ["git", "-C", cwd, "--no-pager", *args],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=err_file,  # a file, so a chatty stderr can't block git
+                env={**os.environ, **_GIT_ENV},
+                start_new_session=os.name != "nt",
+            ) as proc:
+                timer = threading.Timer(GIT_TIMEOUT_SECS, _kill, (proc,))
+                timer.start()
+                try:
+                    out = proc.stdout.read(MAX_GIT_OUTPUT_BYTES + 1)
+                    truncated = len(out) > MAX_GIT_OUTPUT_BYTES
+                    if truncated:
+                        _kill(proc)
+                    proc.wait()
+                finally:
+                    timed_out = not timer.is_alive() and not truncated
+                    timer.cancel()
+            err_file.seek(0)
+            err = err_file.read(64 * 1024)
     except FileNotFoundError as e:
         raise _GitError("Error: git is not installed") from e
-    except subprocess.TimeoutExpired as e:
-        raise _GitError(f"Error: git timed out after {GIT_TIMEOUT_SECS} seconds") from e
     except Exception as e:  # pylint: disable=broad-exception-caught  # error goes back to the model
         raise _GitError(f"Error running git: {e}") from e
+    if timed_out and proc.returncode != 0:
+        raise _GitError(f"Error: git timed out after {GIT_TIMEOUT_SECS} seconds")
+    return _Result(proc.returncode, out[:MAX_GIT_OUTPUT_BYTES], err, truncated)
 
 
 def _filter_overrides(cwd: str) -> list[str]:
@@ -93,6 +136,8 @@ def run_git(path: str, args: list[str]) -> str:
         return str(e)
     out = proc.stdout.decode(errors="replace")
     err = proc.stderr.decode(errors="replace").strip()
+    if proc.truncated:
+        return out + f"\n… output cut at {MAX_GIT_OUTPUT_BYTES} bytes"
     if proc.returncode != 0:
         return f"Error (git exit {proc.returncode}): {err or out}".rstrip()
     if err:

@@ -3,6 +3,7 @@ import subprocess
 import pytest
 
 from app.core.tool_calls import helper_tool_specs, is_read_only
+from app.tools import git_tools
 from app.tools.git_tools import GitDiffTool, GitLogTool, GitStatusTool
 
 git_status = GitStatusTool.call
@@ -100,3 +101,17 @@ def test_configured_filters_never_run(repo):
     assert " M a.txt" in git_status(str(repo))
     assert "second commit" in git_log(str(repo), patch=True)
     assert not marker.exists()
+
+
+def test_output_is_capped(repo, monkeypatch):
+    monkeypatch.setattr(git_tools, "MAX_GIT_OUTPUT_BYTES", 50)
+    out = git_log(str(repo), patch=True)
+    assert out.endswith("… output cut at 50 bytes")
+    assert len(out) < 120
+
+
+def test_timeout_is_an_error(repo, monkeypatch):
+    monkeypatch.setattr(git_tools, "GIT_TIMEOUT_SECS", 0.001)
+    monkeypatch.setattr(git_tools, "_filter_overrides", lambda cwd: [])
+    out = git_tools.run_git(str(repo), ["-c", "alias.slow=!sleep 5", "slow"])
+    assert out == "Error: git timed out after 0.001 seconds"
