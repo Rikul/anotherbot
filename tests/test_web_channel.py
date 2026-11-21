@@ -276,6 +276,17 @@ def test_static_js_has_iife():
     assert "(function()" in content
 
 
+def test_static_js_reloads_commands_on_every_connect():
+    """A tab that reconnects after a restart must pick up new commands and skills."""
+    content = (FRONTEND_DIR / "app.js").read_text()
+    onopen = content[content.index("ws.onopen") :]
+    onopen = onopen[: onopen.index("};")]
+    assert "loadCommands();" in onopen
+    assert "if (!commands.length) loadCommands()" not in content
+    # typing "/" refreshes a list older than the TTL (skills added on disk)
+    assert "refreshCommandsIfStale()" in content
+
+
 def test_static_js_regex_uses_single_backslash():
     content = (FRONTEND_DIR / "app.js").read_text()
     # The formatMessage regex must use single-backslash escapes (\w, \s, \S),

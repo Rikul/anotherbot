@@ -524,7 +524,7 @@
             setStatus('connected');
             refreshSendState();
             loadStatus();
-            if (!commands.length) loadCommands();
+            loadCommands();   // the bot may have restarted onto new commands or skills
             // The server first replays the agent's state (and a running turn's
             // progress); hold those frames until the history is on screen so
             // they land below it.
@@ -1120,12 +1120,25 @@
     let suggestIndex = 0;
     let suggestDismissed = null;  // input value the list was closed on
 
+    // Reloaded on every (re)connect, and when the user starts typing a
+    // command, so skills added on disk show up without reloading the page.
+    const COMMANDS_TTL_MS = 30000;
+    let commandsLoadedAt = 0;
+
     async function loadCommands() {
         try {
             const res = await fetch('/api/commands');
             if (!checkAuth(res) || !res.ok) return;
             ({ commands } = await res.json());
+            commandsLoadedAt = Date.now();
         } catch (e) { /* retried on reconnect */ }
+    }
+
+    async function refreshCommandsIfStale() {
+        if (Date.now() - commandsLoadedAt < COMMANDS_TTL_MS) return;
+        commandsLoadedAt = Date.now();   // one request at a time
+        await loadCommands();
+        if (inputEl.value.startsWith('/')) updateSuggestions();
     }
 
     // "/<skill> [request]" runs an agent turn, unlike the other commands.
@@ -1166,6 +1179,7 @@
 
     function updateSuggestions() {
         const value = inputEl.value;
+        if (value === '/') refreshCommandsIfStale();
         suggestions = value === suggestDismissed ? [] : computeSuggestions(value);
         // An exact match goes first; a list that only repeats the input is
         // noise (but "/rename 1" still offers "/rename 1 ", ready for the name).
