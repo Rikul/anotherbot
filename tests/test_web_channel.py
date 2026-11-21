@@ -1037,10 +1037,12 @@ def test_frontend_renders_attachment_markers():
 # --- /api/commands ---
 
 
-def test_commands_api_lists_registry_plus_whoami_sorted():
+def test_commands_api_lists_registry_plus_whoami_sorted(monkeypatch, tmp_path):
     from starlette.testclient import TestClient
     from app.channels.commands import BotCommand, CommandRegistry
+    from app.infra import skills
 
+    monkeypatch.setattr(skills, "BUILTIN_SKILLS_DIR", tmp_path)  # no skills
     ch, _ = make_web_channel()
     ch.start()
     registry = CommandRegistry()
@@ -1058,6 +1060,37 @@ def test_commands_api_lists_registry_plus_whoami_sorted():
             {"name": "whoami", "description": "Show this tab's connection ID."},
         ]
     }
+
+
+def test_commands_api_includes_skills_not_shadowed_by_commands(monkeypatch, tmp_path):
+    from starlette.testclient import TestClient
+    from app.channels.commands import BotCommand, CommandRegistry
+    from app.infra import skills
+
+    for name in ("browser", "new", "whoami"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: The {name} skill.\n---\nBody\n"
+        )
+    monkeypatch.setattr(skills, "BUILTIN_SKILLS_DIR", tmp_path)
+    ch, _ = make_web_channel()
+    ch.start()
+    registry = CommandRegistry()
+    registry.register(BotCommand("new", "Start a new conversation.", AsyncMock()))
+    ch.commands = registry
+    cmds = TestClient(ch._asgi_app).get("/api/commands").json()["commands"]
+    assert {
+        "name": "browser",
+        "description": "skill: The browser skill.",
+        "skill": True,
+    } in cmds
+    assert [c["description"] for c in cmds if c["name"] == "new"] == [
+        "Start a new conversation."
+    ]
+    # answered by the channel itself: listed once, and not as a skill
+    assert [c for c in cmds if c["name"] == "whoami"] == [
+        {"name": "whoami", "description": "Show this tab's connection ID."}
+    ]
 
 
 def test_commands_api_without_agent_lists_only_whoami():

@@ -10,7 +10,7 @@ A Python-based AI agent that can execute prompts, interact with the filesystem, 
 - **Scheduled Tasks**: SQLite-backed task scheduler — run prompts on a recurring or one-shot schedule and deliver results to a channel
 - **MCP Servers**: Connect any [Model Context Protocol](https://modelcontextprotocol.io) server via `mcp_servers.json` — tools are auto-discovered and available alongside built-ins
 - **Tool Calling**: File I/O, shell commands, web fetch, web search (text/images/video/news/books), calculator, Hacker News, todo list
-- **Skills System**: Extendable skills in `app/skills/` (e.g., `puppeteer` for headless browsing)
+- **Skills**: Step-by-step guides the agent loads on demand — `browser` (Playwright), `code-review`, `planning`, `long-tasks` — plus your own in `~/.anotherbot/skills/`; run one with `/<skill> [request]`
 - **Persistent History**: Per-channel SQLite message history at `~/.anotherbot/app.db` (shared with scheduled tasks)
 
 
@@ -415,6 +415,25 @@ At least one channel must be usable or the server will exit: the web UI (`WEBSOC
 
 The `/data` volume persists the SQLite database, logs and workspace across restarts. Instead of `-e` flags you can put a `.env` file in the volume (`/data/.env`) or use `docker run --env-file .env`; variables passed with `-e` take precedence. `.env` files are excluded from the image by `.dockerignore`.
 
+## Skills
+
+A skill is a folder with a `SKILL.md`: a short frontmatter block, then instructions the agent follows, plus optional scripts or reference files next to it.
+
+```markdown
+---
+name: release-notes
+description: Write release notes from the git log since the last tag, in our house style.
+---
+# Release notes
+1. Find the last tag with git_log …
+```
+
+- Built-in skills live in `app/skills/`: `browser` (headless Chromium via Playwright; `scripts/snapshot.py` for quick page text/screenshots/PDFs), `code-review`, `planning` and `long-tasks`.
+- Add your own under `$ANOTHERBOT_HOME/skills/<name>/SKILL.md` (default `~/.anotherbot/skills/`). A user skill with the same name replaces the built-in one. No restart needed.
+- `name` is lowercase letters, digits and `-`; `description` is one line (max 300 characters) saying what the skill does and when to use it — it is all the model sees until it loads the skill.
+- Only names and descriptions go into the system prompt; the agent calls `use_skill(name)` to load the full text when a request matches.
+- `/skills` lists them; `/<name> [request]` runs one directly on any channel (registered commands such as `/new` take precedence over a skill with the same name).
+
 ## Roadmap
 
 - **Email Support**: IMAP/SMTP integration for reading and sending emails, attachment handling, and mailbox management
@@ -424,7 +443,7 @@ The `/data` volume persists the SQLite database, logs and workspace across resta
 - **Codex OAuth**: OpenAI Codex API authentication
 - **GitHub OAuth**: Access to repositories, issues, and GitHub Actions
 - **Gemini OAuth**: Google Gemini API authentication with Google Cloud credentials
-- **Useful Skills**: Advanced skills for web scraping (headless browsers), data analysis (Pandas, NumPy), document processing (PDF, DOCX), and media manipulation
+- **More Skills**: Email (IMAP/SMTP), benchmarking, data analysis (Pandas, NumPy), document processing (PDF, DOCX), and media manipulation
 - **Web Dashboard**: Admin interface for monitoring agents, configuring channels, and viewing analytics
 
 ## Testing

@@ -1087,7 +1087,7 @@
             if (id === activeConvId) pendingActiveDelete = id;
         } else if (text === '/stop') {
             if (agentBusy) { stopping = true; renderBusy(); }
-        } else if (!text.startsWith('/')) {
+        } else if (!text.startsWith('/') || isSkillCommand(text)) {
             pendingTurn = true;
             renderBusy();
         }
@@ -1114,7 +1114,7 @@
     // Escape closes until the input changes.
     const suggestEl = document.getElementById('cmd-suggest');
     const ID_COMMANDS = new Set(['load', 'fork', 'rename', 'export', 'delete']);
-    let commands = [];            // [{name, description}]
+    let commands = [];            // [{name, description, skill?}]
     let convList = [];            // last list from /api/conversations
     let suggestions = [];         // [{value, label, hint, detail}] on screen
     let suggestIndex = 0;
@@ -1126,6 +1126,12 @@
             if (!checkAuth(res) || !res.ok) return;
             ({ commands } = await res.json());
         } catch (e) { /* retried on reconnect */ }
+    }
+
+    // "/<skill> [request]" runs an agent turn, unlike the other commands.
+    function isSkillCommand(text) {
+        const name = text.slice(1).split(/\s/, 1)[0].toLowerCase();
+        return commands.some(c => c.skill && c.name === name);
     }
 
     // "Load a conversation. Usage: /load <id>" → description + argument hint

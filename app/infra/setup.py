@@ -9,7 +9,7 @@ from .app_logging import log
 
 
 def ensure_home_dir() -> None:
-    """Create ``PROJECT_HOME`` (mode 0700) and its ``workspace`` subdirectory if missing."""
+    """Create ``PROJECT_HOME`` (mode 0700) and its ``workspace``/``skills`` dirs if missing."""
     # Create app home directory in user's home if it doesn't exist
     home_dir = PROJECT_HOME
 
@@ -18,8 +18,8 @@ def ensure_home_dir() -> None:
         os.chmod(home_dir, 0o700)
         log.info("Created home directory: %s", home_dir)
 
-    # Create workspace, skills, logs directories
-    for subdir in ["workspace"]:
+    # Create the workspace and user skills directories
+    for subdir in ["workspace", "skills"]:
         subdir_path = home_dir / subdir
         if not subdir_path.exists():
             subdir_path.mkdir(parents=True, exist_ok=True)

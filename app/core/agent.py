@@ -17,6 +17,7 @@ from .. import config
 from .client import Client
 from ..infra.app_logging import log
 from ..infra.memory_store import MAX_CORE_MEMORIES, MemoryStore, format_memory
+from ..infra.skills import skills_prompt_section
 from ..infra.tracer import Tracer, redact
 from . import runtime
 
@@ -92,6 +93,7 @@ def get_default_sys_prompt(context: dict | None = None) -> str:
 - Current Channel: {channel}{conv_line}
 """
 
+    sys_prompt += skills_prompt_section()
     sys_prompt += _memories_section(ctx.get("memory_query", ""))
 
     log.info("Loaded system prompt: %s characters", len(sys_prompt))

@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 
 from ..channels.commands import build_command_registry
 from ..core import runtime
+from ..infra import skills
 from ..infra.app_logging import log
 from .cli_agent import CliAgent
 
@@ -79,7 +80,17 @@ async def run_cli(max_iterations: int, auto_approve: bool, prompt: str | None):
                 cmd_name = parts[0].lower()
                 cmd_args = parts[1] if len(parts) > 1 else ""
                 result = await cli_registry.execute(cmd_name, cmd_args)
-                print(result if result is not None else f"Unknown command: /{cmd_name}")
+                skill_prompt = (
+                    skills.skill_invocation(user_input) if result is None else None
+                )
+                if skill_prompt is not None:
+                    await agent.agent_loop(skill_prompt)
+                else:
+                    print(
+                        result
+                        if result is not None
+                        else f"Unknown command: /{cmd_name}"
+                    )
             else:
                 await agent.agent_loop(user_input)
     except KeyboardInterrupt:

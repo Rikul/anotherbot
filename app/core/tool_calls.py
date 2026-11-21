@@ -16,7 +16,7 @@ from ..tools.bash import BashTool
 from ..tools.fs_search import GlobTool, GrepTool, ListDirTool
 from ..tools.git_tools import GitDiffTool, GitLogTool, GitStatusTool
 from ..tools.web_fetch import WebFetchTool
-from ..tools.get_skills_dir import GetSkillsDirTool
+from ..tools.skill import UseSkillTool
 from ..tools.todo import TodoAddTool, TodoListTool, TodoClearTool, TodoUpdateTool
 from ..tools.calculator import CalculatorTool
 from ..tools.hackernews import HackerNewsTool
@@ -53,7 +53,7 @@ tool_registry = {
     "git_diff": GitDiffTool,
     "git_log": GitLogTool,
     "web_fetch": WebFetchTool,
-    "get_skills_dir": GetSkillsDirTool,
+    "use_skill": UseSkillTool,
     "todo_add": TodoAddTool,
     "todo_list": TodoListTool,
     "todo_update": TodoUpdateTool,
@@ -90,7 +90,7 @@ _HELPER_AGENT_TOOLS = {
     "git_diff",
     "git_log",
     "web_fetch",
-    "get_skills_dir",
+    "use_skill",
     "calculator",
     "hackernews",
     "websearch_text",
