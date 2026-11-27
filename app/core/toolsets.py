@@ -5,7 +5,8 @@ A toolset is a list of members, each one of:
 * a built-in tool name (``"read_file"``),
 * another toolset, prefixed with ``@`` (``"@read_only"``),
 * every tool of one MCP server, prefixed with ``mcp:`` (``"mcp:nmap"``),
-  resolved when the specs are built, since MCP servers connect at startup.
+  resolved when the specs are built, since MCP servers connect at startup,
+* ``"*"`` (every built-in tool) or ``"mcp:*"`` (every MCP server's tools).
 
 Agents are given toolsets instead of hand-written tool lists, so a new agent
 role is a new entry here composed from existing groups, e.g. a security
@@ -16,6 +17,8 @@ against ``tool_registry`` and checks every name when it is imported.
 """
 
 TOOLSETS: dict[str, tuple[str, ...]] = {
+    # Every built-in and MCP tool: the default for the CLI and the bot.
+    "all": ("*", "mcp:*"),
     # Read local files, directories and git, run nothing: no permission prompt
     # in the CLI. Must match the tools marked ``read_only`` (checked in tests).
     "read_only": (
@@ -62,3 +65,21 @@ TOOLSETS: dict[str, tuple[str, ...]] = {
         "@memory_read",
     ),
 }
+
+# Tool modes the CLI and bot agents switch between with /yolo, /readonly
+# (any toolsets can be chosen with /toolset). The first is the default.
+AGENT_MODES: dict[str, tuple[str, ...]] = {
+    "yolo": ("all",),
+    # Look, don't touch: read files and git, plan with todos, read memories
+    # and scheduled tasks. No writes, shell, web or MCP tools.
+    "readonly": ("read_only", "utility", "todo", "memory_read", "schedule_read"),
+}
+DEFAULT_MODE = "yolo"
+
+
+def mode_name(toolsets: tuple[str, ...]) -> str:
+    """The mode whose toolsets these are, or the toolsets joined by '+'."""
+    for name, sets in AGENT_MODES.items():
+        if tuple(toolsets) == sets:
+            return name
+    return "+".join(toolsets)

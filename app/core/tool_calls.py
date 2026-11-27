@@ -88,7 +88,8 @@ def resolve_toolset(*names: str) -> tuple[frozenset[str], tuple[str, ...]]:
     """Expand toolsets into (built-in tool names, MCP server names).
 
     Each name is a toolset from ``TOOLSETS``. Raises ``ValueError`` for an
-    unknown toolset or tool, or a toolset that includes itself.
+    unknown toolset or tool, or a toolset that includes itself. The MCP
+    server ``"*"`` stands for every connected server.
     """
     tools: set[str] = set()
     servers: list[str] = []
@@ -101,6 +102,8 @@ def resolve_toolset(*names: str) -> tuple[frozenset[str], tuple[str, ...]]:
         for member in TOOLSETS[name]:
             if member.startswith("@"):
                 expand(member[1:], (*path, name))
+            elif member == "*":
+                tools.update(tool_registry)
             elif member.startswith(MCP_PREFIX):
                 server = member[len(MCP_PREFIX) :]
                 if server not in servers:
@@ -120,6 +123,8 @@ def toolset_specs(*names: str) -> list[dict]:
     the tools of any MCP servers they name (those connected right now)."""
     tools, servers = resolve_toolset(*names)
     specs = [tool.spec() for k, tool in tool_registry.items() if k in tools]
+    if "*" in servers:
+        return specs + mcp.mcp_manager.get_tool_specs()
     for server in servers:
         specs.extend(mcp.mcp_manager.get_tools_for_server(server))
     return specs

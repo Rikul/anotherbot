@@ -11,7 +11,8 @@ class HelperAgent(Agent):
 
     It gets only the tools of its ``toolsets`` (``toolsets.TOOLSETS``); the
     default, ``helper``, has no scheduled-task mutation, delegation or MCP
-    tools, to prevent recursion.
+    tools, to prevent recursion. ``Agent.handle_tool_call`` refuses any
+    other tool the model names.
     """
 
     trace_label = "helper"
@@ -23,11 +24,9 @@ class HelperAgent(Agent):
         toolsets: tuple[str, ...] = ("helper",),
     ) -> None:
         super().__init__(max_iterations)
-        # Lazy: tool_calls -> scheduled_tasks -> helper_agent (circular import).
-        from .tool_calls import toolset_specs  # pylint: disable=import-outside-toplevel
-
-        self.tool_specs = toolset_specs(*toolsets)
-        self._allowed_tools = {s["function"]["name"] for s in self.tool_specs}
+        self.set_toolsets(toolsets)
+        # Restricted from the start, not only once a turn has begun.
+        self._allowed_tools = {s["function"]["name"] for s in self.tool_specs()}
         if system_prompt:
             self.messages.insert(0, {"role": "system", "content": system_prompt})
 
@@ -36,19 +35,10 @@ class HelperAgent(Agent):
         log.info("Running HelperAgent with prompt: %s", prompt)
         return await self.agent_loop(prompt)
 
-    async def handle_tool_call(self, tool_call) -> str:
-        # The model only sees self.tool_specs, but refuse anything else it
-        # names anyway (e.g. save_memory, add_scheduled_task).
-        name = tool_call.function.name
-        if name not in self._allowed_tools:
-            log.warning("HelperAgent refused off-list tool call: %s", name)
-            return f"Tool {name} is not available to the helper agent."
-        return await super().handle_tool_call(tool_call)
-
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
         self.messages.append(self._build_user_message(message, metadata))
         self.tracer.start_turn(self.messages)
         try:
-            return await self._loop(self.messages, self.tool_specs)
+            return await self._loop(self.messages, self.tool_specs())
         finally:
             self.tracer.close()

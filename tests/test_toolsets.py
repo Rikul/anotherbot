@@ -88,7 +88,7 @@ def test_toolset_specs_keep_registry_order():
 
 def test_helper_agent_default_toolset():
     with patch("app.core.agent.Client"):
-        assert _names(HelperAgent().tool_specs) == _HELPER_AGENT_TOOLS
+        assert _names(HelperAgent().tool_specs()) == _HELPER_AGENT_TOOLS
 
 
 @pytest.mark.asyncio
@@ -128,3 +128,107 @@ async def test_helper_agent_tool_rejects_unknown_toolset():
         result = await HelperAgentTool.call(prompt="p", toolset="schedule")
     cls.assert_not_called()
     assert result.startswith("Error: unknown toolset")
+
+
+# ---------------------------------------------------------------------------
+# Agent tool modes (/yolo, /readonly, /toolset)
+# ---------------------------------------------------------------------------
+
+from app.channels.commands import build_command_registry  # noqa: E402
+from app.core.agent import Agent  # noqa: E402
+from app.core.toolsets import AGENT_MODES, DEFAULT_MODE, mode_name  # noqa: E402
+
+
+class _ModeAgent(Agent):
+    """Just enough of a conversation agent for the command registry."""
+
+    channel_str = "cli"
+    conversation_id = 1
+    store = MagicMock()
+
+    def switch_conversation(self, conv):  # pragma: no cover - unused
+        pass
+
+    async def agent_loop(self, message, metadata=None):  # pragma: no cover
+        return ""
+
+
+@pytest.fixture
+def mode_agent():
+    with patch("app.core.agent.Client"):
+        yield _ModeAgent()
+
+
+def test_agents_default_to_every_tool(mode_agent):
+    assert DEFAULT_MODE == "yolo"
+    assert mode_agent.toolsets == AGENT_MODES["yolo"]
+    mcp_spec = {"type": "function", "function": {"name": "srv__x"}}
+    mgr = MagicMock()
+    mgr.get_tool_specs.return_value = [mcp_spec]
+    with patch("app.core.mcp_manager.mcp_manager", mgr):
+        names = _names(mode_agent.tool_specs())
+    assert names == set(tool_registry) | {"srv__x"}
+
+
+def test_readonly_mode_has_no_writes_shell_web_or_mcp(mode_agent):
+    mode_agent.set_toolsets(AGENT_MODES["readonly"])
+    tools, servers = resolve_toolset(*mode_agent.toolsets)
+    assert servers == ()
+    assert resolve_toolset("read_only")[0] <= tools
+    for name in ("write_file", "bash", "web_fetch", "save_memory", "helper_agent"):
+        assert name not in tools
+    assert mode_name(mode_agent.toolsets) == "readonly"
+
+
+def test_set_toolsets_rejects_unknown(mode_agent):
+    with pytest.raises(ValueError):
+        mode_agent.set_toolsets(("nope",))
+    assert mode_agent.toolsets == AGENT_MODES["yolo"]
+
+
+@pytest.mark.asyncio
+async def test_agent_refuses_tool_outside_the_turns_specs(mode_agent):
+    mode_agent._allowed_tools = {"read_file"}
+    call = SimpleNamespace(
+        id="1", function=SimpleNamespace(name="bash", arguments='{"command": "ls"}')
+    )
+    with patch.object(tool_calls, "run_tool_async", AsyncMock()) as run:
+        result = await mode_agent.handle_tool_call(call)
+    run.assert_not_called()
+    assert "not available" in result
+
+
+@pytest.mark.asyncio
+async def test_loop_gives_model_only_the_current_tools(mode_agent):
+    mode_agent.set_toolsets(AGENT_MODES["readonly"])
+    from tests.test_agent import make_mock_client
+
+    mode_agent.client = make_mock_client(content="done")
+    await mode_agent._loop([{"role": "user", "content": "hi"}], mode_agent.tool_specs())
+    sent = mode_agent.client.chat.completions.create.call_args.kwargs["tools"]
+    assert "bash" not in _names(sent) and "read_file" in _names(sent)
+    assert mode_agent._allowed_tools == _names(sent)
+
+
+@pytest.mark.asyncio
+async def test_mode_commands_switch_toolsets(mode_agent):
+    registry = build_command_registry(mode_agent)
+    reply = await registry.execute("readonly")
+    assert mode_agent.toolsets == AGENT_MODES["readonly"]
+    assert reply.startswith("Tools: readonly")
+    assert "Tools:        readonly" in await registry.execute("status")
+    await registry.execute("yolo")
+    assert mode_agent.toolsets == AGENT_MODES["yolo"]
+
+
+@pytest.mark.asyncio
+async def test_toolset_command(mode_agent):
+    registry = build_command_registry(mode_agent)
+    listing = await registry.execute("toolset")
+    assert "Current: yolo" in listing and "read_only —" in listing
+    assert (await registry.execute("toolset", "read_only, web")).startswith(
+        "Tools: read_only+web"
+    )
+    assert mode_agent.toolsets == ("read_only", "web")
+    assert "Unknown toolset" in await registry.execute("toolset", "bogus")
+    assert mode_agent.toolsets == ("read_only", "web")
