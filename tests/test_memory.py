@@ -238,71 +238,38 @@ def test_fts_query_drops_stopwords():
     assert _fts_query("what is it") == '"what" OR "is" OR "it"'
 
 
-def test_relevant_matches_message_keywords(store):
+def test_search_matches_message_keywords(store):
     store.save("User is vegetarian", "personal")
     tea = store.save("User drinks green tea every morning", "preference")
     store.save("User works at a bank", "work")
-    assert [m["id"] for m in store.relevant("Can you suggest a tea for me?")] == [
+    assert [m["id"] for m in store.search("Can you suggest a tea for me?")] == [
         tea["id"]
     ]
 
 
-def test_relevant_ignores_messages_without_keywords(store):
-    store.save("User is vegetarian")
-    assert store.relevant("hi, how are you?") == []
-    assert store.relevant("") == []
-
-
-def test_every_memory_says_user_but_that_is_not_relevance(store):
+def test_every_memory_says_user_but_that_is_not_a_match(store):
     store.save("User has a dog")
-    assert store.relevant("my user account") == []
+    assert store.search("my user account") == []
 
 
-def test_sys_prompt_puts_relevant_memories_first(monkeypatch):
+def test_sys_prompt_shows_core_and_recent_only(monkeypatch):
     monkeypatch.setattr(agent_module, "MAX_PROMPT_MEMORIES", 3)
     store = MemoryStore()
-    old = store.save("User is allergic to peanuts", "personal")
-    for i in range(5):
+    store.save("User is allergic to peanuts")  # older than the recent three
+    for i in range(3):
         store.save(f"recent fact {i}")
-    prompt = get_default_sys_prompt(
-        {"memory_query": "any snack ideas without peanuts?"}
-    )
-    section = prompt.split("## Saved Memories")[1]
-    assert "Related to the user's message:" in section
-    assert section.index("allergic to peanuts") < section.index(
-        "Other recent memories:"
-    )
-    assert section.count("allergic to peanuts") == 1  # not repeated under recent
-    assert "recent fact 4" in section and "recent fact 3" in section
-    assert "recent fact 0" not in section
-    assert f"[{old['id']}]" in section
-
-
-def test_sys_prompt_without_match_shows_recent_only():
-    MemoryStore().save("User is allergic to peanuts")
-    section = get_default_sys_prompt({"memory_query": "hello"}).split(
-        "## Saved Memories"
-    )[1]
+    section = get_default_sys_prompt().split("## Saved Memories")[1]
     assert "Related to the user's message" not in section
     assert "Recent memories:" in section
-
-
-def test_memory_query_includes_previous_user_message():
-    from app.core.helper_agent import HelperAgent
-
-    with patch("app.core.agent.Client"):
-        agent = HelperAgent()
-    assert agent._memory_query("and tomorrow?") == "and tomorrow?"
-    agent.messages += [
-        {"role": "user", "content": [{"type": "text", "text": "weather in Denver"}]},
-        {"role": "assistant", "content": "Sunny."},
-    ]
-    assert agent._memory_query("and tomorrow?") == "and tomorrow?\nweather in Denver"
+    assert "recent fact 2" in section and "recent fact 0" in section
+    # Not pulled in by topic any more; search_memory finds it.
+    assert "allergic to peanuts" not in section
+    assert "1 more memories not shown" in section
 
 
 def test_search_matches_word_forms(store):
     m = store.save("User is allergic to peanuts")
-    assert store.relevant("is this peanut free?")[0]["id"] == m["id"]
+    assert store.search("is this peanut free?")[0]["id"] == m["id"]
     hike = store.save("User hikes on weekends")
     assert store.search("hiking")[0]["id"] == hike["id"]
 
@@ -387,24 +354,20 @@ def test_sys_prompt_keeps_core_memory_when_buried():
     name = store.save("User's name is Rikul", "personal", core=True)
     for i in range(40):
         store.save(f"newer fact number {i}")
-    section = get_default_sys_prompt({"memory_query": "what's the weather?"}).split(
-        "## Saved Memories"
-    )[1]
+    section = get_default_sys_prompt().split("## Saved Memories")[1]
     assert section.index("About the user") < section.index("Other recent memories:")
     assert f"[{name['id']}] ★ (personal) User's name is Rikul" in section
     assert section.count("User's name is Rikul") == 1
     assert "newer fact number 39" in section
 
 
-def test_core_memory_not_repeated_as_relevant():
+def test_core_memory_not_repeated_as_recent():
     store = MemoryStore()
     store.save("User is allergic to peanuts", core=True)
     store.save("User likes peanut-free granola")
-    section = get_default_sys_prompt({"memory_query": "peanuts snack"}).split(
-        "## Saved Memories"
-    )[1]
+    section = get_default_sys_prompt().split("## Saved Memories")[1]
     assert section.count("allergic to peanuts") == 1
-    assert "Related to the user's message:\n- [2]" in section
+    assert "Other recent memories:\n- [2]" in section
 
 
 def test_core_budget_leaves_room_for_others(monkeypatch):
@@ -488,12 +451,12 @@ def test_category_is_normalised_and_capped(store):
     assert len(m["category"]) == 50
 
 
-def test_memory_phrasing_verbs_are_not_relevance(store):
+def test_memory_phrasing_verbs_do_not_match(store):
     store.save("User prefers metric units")
     store.save("User likes green tea")
     dark = store.save("User wants dark mode in every editor")
-    assert [m["id"] for m in store.relevant("I prefer dark mode")] == [dark["id"]]
-    assert store.relevant("what do you think I'd like?") == []
+    assert [m["id"] for m in store.search("I prefer dark mode")] == [dark["id"]]
+    assert store.search("what do you think I'd like?") == []
 
 
 @pytest.mark.parametrize("limit", [None, "abc", 0, -5, 500])
@@ -707,22 +670,10 @@ async def test_guard_resets_each_turn(bg_agent):
     assert bg_agent._untrusted_output_seen is False
 
 
-def test_relevance_ignores_category_words(store):
-    store.save("User is a nurse on night shifts", "work")
-    store.save("User's manager is Dana", "work")
-    project = store.save("User's work laptop is a ThinkPad")
-    assert [m["id"] for m in store.relevant("my work laptop is slow")] == [
-        project["id"]
-    ]
-    # search_memory still matches categories
-    assert len(store.search("work")) == 3
-
-
 @pytest.mark.parametrize("query", [42, ["tea"], None, {"q": "tea"}])
 def test_search_tolerates_non_string_query(store, query):
     store.save("User likes tea")
     assert isinstance(store.search(query), list)
-    assert isinstance(store.relevant(query), list)
     assert isinstance(SearchMemoryTool.call(query), str)
 
 

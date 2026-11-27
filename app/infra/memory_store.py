@@ -360,14 +360,10 @@ class MemoryStore:
         memory["status"] = status
         return memory
 
-    def search(
-        self, query: str, limit: int = 10, content_only: bool = False
-    ) -> list[dict]:
+    def search(self, query: str, limit: int = 10) -> list[dict]:
         """Memories matching ``query``, best match first.
 
         An empty query (or one with no words) returns the most recent ones.
-        ``content_only`` ignores categories, so a word like "work" doesn't
-        match every memory filed under it.
         """
         query = "" if query is None else str(query)  # models may send other types
         try:
@@ -377,8 +373,6 @@ class MemoryStore:
         fts = _fts_query(query)
         if not fts:
             return self.recent(limit)
-        if content_only:
-            fts = f"content : ({fts})"
 
         conn = self._connect()
         try:
@@ -399,18 +393,6 @@ class MemoryStore:
         finally:
             conn.close()
         return [_row_to_dict(r) for r in rows]
-
-    def relevant(self, text: str, limit: int = 10) -> list[dict]:
-        """Memories related to ``text`` (e.g. the user's message), best first.
-
-        Unlike ``search()``, returns nothing when ``text`` has no keywords
-        instead of falling back to the most recent memories.
-        """
-        text = "" if text is None else str(text)
-        words = re.findall(r"\w+", text.lower())
-        if not any(len(w) > 1 and w not in _STOPWORDS for w in words):
-            return []
-        return self.search(text, limit, content_only=True)
 
     def core(self, limit: int = 20) -> list[dict]:
         """Core memories (always in the prompt), most recently updated first."""
