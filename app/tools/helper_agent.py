@@ -1,7 +1,22 @@
 """``helper_agent`` tool: delegate a sub-task to a fresh helper agent."""
 
 from ..core.tool import Tool
+from ..core.toolsets import TOOLSETS
 from ..infra.app_logging import log
+
+# Toolsets the model may give a helper: those whose members are all built-in
+# tools inside "helper" (checked in tests), so it can narrow a helper's tools
+# but never widen them (no scheduled-task changes, delegation or MCP).
+HELPER_TOOLSET_CHOICES = (
+    "helper",
+    "read_only",
+    "files",
+    "web",
+    "utility",
+    "memory_read",
+    "schedule_read",
+)
+assert all(name in TOOLSETS for name in HELPER_TOOLSET_CHOICES)
 
 
 class HelperAgentTool(Tool):
@@ -31,6 +46,16 @@ class HelperAgentTool(Tool):
                                 "constraints for the helper agent."
                             ),
                         },
+                        "toolset": {
+                            "type": "string",
+                            "enum": list(HELPER_TOOLSET_CHOICES),
+                            "description": (
+                                "Tools the helper may use (default helper: files, shell, "
+                                "web, utilities). Pick a narrower one when the task "
+                                "needs less, e.g. read_only to inspect code without "
+                                "changing or running anything, or web for research."
+                            ),
+                        },
                     },
                     "required": ["prompt"],
                 },
@@ -38,11 +63,19 @@ class HelperAgentTool(Tool):
         }
 
     @staticmethod
-    async def call(prompt: str, system_prompt: str = None) -> str:
+    async def call(prompt: str, system_prompt: str = None, toolset: str = None) -> str:
         """Run ``prompt`` in a new ``HelperAgent`` and return its final answer."""
         log.info("helper_agent tool called with prompt: %s", prompt)
         # Lazy: core.helper_agent -> core.agent -> tool_calls -> this module.
         from ..core.helper_agent import HelperAgent  # pylint: disable=import-outside-toplevel
 
-        agent = HelperAgent(system_prompt=system_prompt)
+        if toolset is None:
+            agent = HelperAgent(system_prompt=system_prompt)
+        elif toolset in HELPER_TOOLSET_CHOICES:
+            agent = HelperAgent(system_prompt=system_prompt, toolsets=(toolset,))
+        else:
+            return (
+                f"Error: unknown toolset {toolset!r}; "
+                f"choose one of {', '.join(HELPER_TOOLSET_CHOICES)}."
+            )
         return await agent.run(prompt)
