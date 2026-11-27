@@ -131,7 +131,7 @@ async def test_helper_agent_tool_rejects_unknown_toolset():
 
 
 # ---------------------------------------------------------------------------
-# Agent tool modes (/yolo, /readonly, /toolset)
+# Agent tool modes (/default, /yolo, /readonly, /toolset)
 # ---------------------------------------------------------------------------
 
 from app.channels.commands import build_command_registry  # noqa: E402
@@ -160,8 +160,10 @@ def mode_agent():
 
 
 def test_agents_default_to_every_tool(mode_agent):
-    assert DEFAULT_MODE == "yolo"
-    assert mode_agent.toolsets == AGENT_MODES["yolo"]
+    assert DEFAULT_MODE == "default"
+    assert mode_agent.toolsets == AGENT_MODES["default"] == ("all",)
+    assert not mode_agent.auto_approve
+    assert mode_agent.mode_name() == "default"
     mcp_spec = {"type": "function", "function": {"name": "srv__x"}}
     mgr = MagicMock()
     mgr.get_tool_specs.return_value = [mcp_spec]
@@ -183,7 +185,7 @@ def test_readonly_mode_has_no_writes_shell_web_or_mcp(mode_agent):
 def test_set_toolsets_rejects_unknown(mode_agent):
     with pytest.raises(ValueError):
         mode_agent.set_toolsets(("nope",))
-    assert mode_agent.toolsets == AGENT_MODES["yolo"]
+    assert mode_agent.toolsets == AGENT_MODES["default"]
 
 
 @pytest.mark.asyncio
@@ -217,15 +219,39 @@ async def test_mode_commands_switch_toolsets(mode_agent):
     assert mode_agent.toolsets == AGENT_MODES["readonly"]
     assert reply.startswith("Tools: readonly")
     assert "Tools:        readonly" in await registry.execute("status")
+    assert not mode_agent.auto_approve
+
+
+@pytest.mark.asyncio
+async def test_yolo_turns_prompts_off_and_other_modes_back_on(mode_agent):
+    registry = build_command_registry(mode_agent)
+    reply = await registry.execute("yolo")
+    assert mode_agent.toolsets == ("all",) and mode_agent.auto_approve
+    assert "no permission prompts" in reply
+    assert mode_agent.mode_name() == "yolo"
+    assert "Tools:        yolo" in await registry.execute("status")
+    await registry.execute("readonly")
+    assert not mode_agent.auto_approve
     await registry.execute("yolo")
-    assert mode_agent.toolsets == AGENT_MODES["yolo"]
+    await registry.execute("default")
+    assert mode_agent.toolsets == ("all",) and not mode_agent.auto_approve
+    assert mode_agent.mode_name() == "default"
+
+
+def test_cli_dash_y_reads_as_yolo():
+    with patch("app.core.agent.Client"):
+        agent = _ModeAgent()
+    agent.auto_approve = True  # what CliAgent(auto_approve=True) sets
+    assert agent.mode_name() == "yolo"
+    agent.set_toolsets(AGENT_MODES["readonly"])
+    assert agent.mode_name() == "readonly"  # the TUI shows auto-approve itself
 
 
 @pytest.mark.asyncio
 async def test_toolset_command(mode_agent):
     registry = build_command_registry(mode_agent)
     listing = await registry.execute("toolset")
-    assert "Current: yolo" in listing and "read_only —" in listing
+    assert "Current: default" in listing and "read_only —" in listing
     assert (await registry.execute("toolset", "read_only, web")).startswith(
         "Tools: read_only+web"
     )

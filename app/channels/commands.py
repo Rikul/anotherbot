@@ -14,7 +14,7 @@ from typing import Any, Callable, Awaitable, Protocol, TYPE_CHECKING
 from .. import config
 from ..core import mcp_manager as mcp
 from ..core import runtime
-from ..core.toolsets import AGENT_MODES, TOOLSETS, mode_name
+from ..core.toolsets import AGENT_MODES, AUTO_APPROVE_MODES, TOOLSETS
 from ..infra import skills, tracer
 from .channel import ChannelType
 
@@ -29,9 +29,16 @@ class ConversationAgent(Protocol):  # pylint: disable=too-few-public-methods
     channel_str: str
     conversation_id: int
     toolsets: tuple[str, ...]
+    auto_approve: bool
 
     def set_toolsets(self, toolsets: tuple[str, ...]) -> None:
         """Give the model these toolsets from the next turn on."""
+
+    def set_mode(self, mode: str) -> None:
+        """Switch to a tool mode (toolsets and permission prompts)."""
+
+    def mode_name(self) -> str:
+        """The agent's mode name, or its toolsets joined by '+'."""
 
     def tool_specs(self) -> list[dict]:
         """Specs of the tools in the agent's current toolsets."""
@@ -164,9 +171,7 @@ def make_status_cmd(channel_str: str = "", agent=None) -> CommandHandler:
             else ("on" if tracing else "off")
         )
         tools_line = (
-            f"  Tools:        {mode_name(agent.toolsets)}\n"
-            if agent is not None
-            else ""
+            f"  Tools:        {agent.mode_name()}\n" if agent is not None else ""
         )
         return (
             f"Bot status:\n"
@@ -189,14 +194,17 @@ status_cmd = make_status_cmd()
 
 def _tools_reply(agent: ConversationAgent) -> str:
     count = len(agent.tool_specs())
-    return f"Tools: {mode_name(agent.toolsets)} ({count} tools), from the next message."
+    prompts = ", no permission prompts" if agent.auto_approve else ""
+    return (
+        f"Tools: {agent.mode_name()} ({count} tools{prompts}), from the next message."
+    )
 
 
 def tool_mode_cmd(agent: ConversationAgent, mode: str) -> CommandHandler:
-    """Build ``/yolo`` or ``/readonly``: switch the agent to that tool mode."""
+    """Build ``/default``, ``/yolo`` or ``/readonly``: switch to that mode."""
 
     async def _mode(_args: str = "") -> str:
-        agent.set_toolsets(AGENT_MODES[mode])
+        agent.set_mode(mode)
         return _tools_reply(agent)
 
     return _mode
@@ -208,8 +216,12 @@ def toolset_cmd(agent: ConversationAgent) -> CommandHandler:
     async def _toolset(args: str = "") -> str:
         names = tuple(n for n in args.replace(",", " ").split() if n)
         if not names:
-            lines = [f"Current: {mode_name(agent.toolsets)}", "Modes:"]
-            lines += [f"  /{m} — {' + '.join(sets)}" for m, sets in AGENT_MODES.items()]
+            lines = [f"Current: {agent.mode_name()}", "Modes:"]
+            lines += [
+                f"  /{m} — {' + '.join(sets)}"
+                + (", no permission prompts" if m in AUTO_APPROVE_MODES else "")
+                for m, sets in AGENT_MODES.items()
+            ]
             lines.append("Toolsets (/toolset <name> [name …]):")
             lines += [
                 f"  {n} — {', '.join(members)}" for n, members in TOOLSETS.items()
@@ -443,13 +455,18 @@ def build_command_registry(
             "status", "Show bot status.", make_status_cmd(status_channel, agent)
         ),
         BotCommand(
+            "default",
+            "Every tool, asking before running one (the default).",
+            tool_mode_cmd(agent, "default"),
+        ),
+        BotCommand(
             "yolo",
-            "Give the model every tool (the default).",
+            "Every tool, no permission prompts (like -y).",
             tool_mode_cmd(agent, "yolo"),
         ),
         BotCommand(
             "readonly",
-            "Read-only tools: files, git, todos; no writes, shell, web or MCP.",
+            "Read-only tools: files, git, todos; no writes, shell, web or MCP; asks again.",
             tool_mode_cmd(agent, "readonly"),
         ),
         BotCommand(

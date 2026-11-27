@@ -412,6 +412,7 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             f"#{conv_id} {_h(one_line(conv_name, 40))}",
             approve,
         ]
+        # Prompts are shown by `approve`; this names the tools when not all.
         tools = mode_name(self.agent.toolsets)
         if tools != DEFAULT_MODE:
             parts.append(f"<toolbar.ok>tools: {_h(tools)}</toolbar.ok>")

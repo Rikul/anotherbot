@@ -66,20 +66,31 @@ TOOLSETS: dict[str, tuple[str, ...]] = {
     ),
 }
 
-# Tool modes the CLI and bot agents switch between with /yolo, /readonly
-# (any toolsets can be chosen with /toolset). The first is the default.
+# Tool modes the CLI and bot agents switch between with /default, /yolo and
+# /readonly (any toolsets can be chosen with /toolset).
 AGENT_MODES: dict[str, tuple[str, ...]] = {
+    # Every tool; the CLI asks before running one (unless started with -y).
+    "default": ("all",),
+    # Every tool and no permission prompts, like -y (bots never ask anyway).
     "yolo": ("all",),
     # Look, don't touch: read files and git, plan with todos, read memories
     # and scheduled tasks. No writes, shell, web or MCP tools.
     "readonly": ("read_only", "utility", "todo", "memory_read", "schedule_read"),
 }
-DEFAULT_MODE = "yolo"
+# Modes that turn the CLI's permission prompts off; every other mode turns
+# them back on.
+AUTO_APPROVE_MODES = frozenset({"yolo"})
+DEFAULT_MODE = "default"
 
 
-def mode_name(toolsets: tuple[str, ...]) -> str:
-    """The mode whose toolsets these are, or the toolsets joined by '+'."""
+def mode_name(toolsets: tuple[str, ...], auto_approve: bool = False) -> str:
+    """The mode these toolsets (and prompt setting) are, or the toolsets
+    joined by '+'."""
+    toolsets = tuple(toolsets)
     for name, sets in AGENT_MODES.items():
-        if tuple(toolsets) == sets:
+        if toolsets == sets and auto_approve == (name in AUTO_APPROVE_MODES):
+            return name
+    for name, sets in AGENT_MODES.items():
+        if toolsets == sets and name not in AUTO_APPROVE_MODES:
             return name
     return "+".join(toolsets)

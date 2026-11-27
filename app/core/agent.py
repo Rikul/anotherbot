@@ -20,7 +20,7 @@ from ..infra.memory_store import MAX_CORE_MEMORIES, MemoryStore, format_memory
 from ..infra.skills import skills_prompt_section
 from ..infra.tracer import Tracer, redact
 from . import runtime
-from .toolsets import AGENT_MODES, DEFAULT_MODE, mode_name
+from .toolsets import AGENT_MODES, AUTO_APPROVE_MODES, DEFAULT_MODE, mode_name
 
 MAX_CONTEXT_MESSAGES = 1000
 
@@ -229,6 +229,8 @@ class Agent(ABC):
     # Agents that store each turn's trajectory (see ``_save_trajectory``)
     # collect per-call stats in ``_llm_calls``; others skip that work.
     saves_trajectories = False
+    # Skip permission prompts (CliAgent: -y or /yolo). Other agents never ask.
+    auto_approve = False
 
     def __init__(self, max_iterations: int = 250) -> None:
         self.client = Client().get_client()
@@ -240,7 +242,7 @@ class Agent(ABC):
         # Set once this turn has read untrusted tool output (see _guard_core_save).
         self._untrusted_output_seen = False
         # The toolsets (toolsets.TOOLSETS) the model is given each turn; the
-        # CLI and bot switch them with /yolo, /readonly and /toolset.
+        # CLI and bot switch them with /default, /yolo, /readonly, /toolset.
         self.toolsets: tuple[str, ...] = AGENT_MODES[DEFAULT_MODE]
         # Names of the tools the model was given this turn; a call to any
         # other tool is refused. None (no turn yet) allows any tool.
@@ -259,6 +261,16 @@ class Agent(ABC):
 
         resolve_toolset(*toolsets)
         self.toolsets = tuple(toolsets)
+
+    def set_mode(self, mode: str) -> None:
+        """Switch to a tool mode (``AGENT_MODES``): its toolsets, and
+        permission prompts off for /yolo, back on for any other mode."""
+        self.set_toolsets(AGENT_MODES[mode])
+        self.auto_approve = mode in AUTO_APPROVE_MODES
+
+    def mode_name(self) -> str:
+        """This agent's mode name, or its toolsets joined by '+'."""
+        return mode_name(self.toolsets, self.auto_approve)
 
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
@@ -428,7 +440,7 @@ class Agent(ABC):
             log.warning("Refused tool outside the current toolsets: %s", tool_name)
             return (
                 f"Tool {tool_name} is not available right now (tools: "
-                f"{mode_name(self.toolsets)}). Use only the tools you were given."
+                f"{self.mode_name()}). Use only the tools you were given."
             )
         try:
             tool_args = json.loads((tool_call.function.arguments or "").strip() or "{}")
