@@ -9,14 +9,24 @@ from .agent import Agent
 class HelperAgent(Agent):
     """A one-off agent with no user, history or conversation.
 
-    It only gets the ``helper_tool_specs`` allowlist (no scheduled-task
-    mutation tools, no MCP tools) to prevent recursion.
+    It gets only the tools of its ``toolsets`` (``toolsets.TOOLSETS``); the
+    default, ``helper``, has no scheduled-task mutation, delegation or MCP
+    tools, to prevent recursion. ``Agent.handle_tool_call`` refuses any
+    other tool the model names.
     """
 
     trace_label = "helper"
 
-    def __init__(self, system_prompt: str = None, max_iterations: int = 50) -> None:
+    def __init__(
+        self,
+        system_prompt: str = None,
+        max_iterations: int = 50,
+        toolsets: tuple[str, ...] = ("helper",),
+    ) -> None:
         super().__init__(max_iterations)
+        self.set_toolsets(toolsets)
+        # Restricted from the start, not only once a turn has begun.
+        self._allowed_tools = {s["function"]["name"] for s in self.tool_specs()}
         if system_prompt:
             self.messages.insert(0, {"role": "system", "content": system_prompt})
 
@@ -25,24 +35,10 @@ class HelperAgent(Agent):
         log.info("Running HelperAgent with prompt: %s", prompt)
         return await self.agent_loop(prompt)
 
-    async def handle_tool_call(self, tool_call) -> str:
-        # The model only sees helper_tool_specs, but refuse anything else it
-        # names anyway (e.g. save_memory, add_scheduled_task).
-        from .tool_calls import helper_tool_specs  # pylint: disable=import-outside-toplevel
-
-        name = tool_call.function.name
-        if name not in {s["function"]["name"] for s in helper_tool_specs}:
-            log.warning("HelperAgent refused off-list tool call: %s", name)
-            return f"Tool {name} is not available to the helper agent."
-        return await super().handle_tool_call(tool_call)
-
     async def agent_loop(self, message: str, metadata: dict = None) -> str:
-        # Lazy: tool_calls -> scheduled_tasks -> helper_agent (circular import).
-        from .tool_calls import helper_tool_specs  # pylint: disable=import-outside-toplevel
-
         self.messages.append(self._build_user_message(message, metadata))
         self.tracer.start_turn(self.messages)
         try:
-            return await self._loop(self.messages, helper_tool_specs)
+            return await self._loop(self.messages, self.tool_specs())
         finally:
             self.tracer.close()

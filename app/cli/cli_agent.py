@@ -9,7 +9,7 @@ from typing import Protocol
 from ..channels.channel import ChannelType
 from ..core import runtime
 from ..core.agent import Agent, MAX_CONTEXT_MESSAGES, get_default_sys_prompt
-from ..core.tool_calls import get_all_tool_specs, is_read_only
+from ..core.tool_calls import is_read_only
 from ..infra.conversations import ConversationStore
 from ..infra.message_history import MessageHistory
 from ..infra.term_display import ANSI
@@ -151,7 +151,7 @@ class CliAgent(Agent):
             runtime.set("last_trace", self.tracer.path.name)
 
         try:
-            final_content = await self._loop(session_messages, get_all_tool_specs())
+            final_content = await self._loop(session_messages, self.tool_specs())
         except asyncio.CancelledError:
             # Ctrl+C in the TUI: keep the stored history and the in-memory
             # context consistent (the user message is already saved).

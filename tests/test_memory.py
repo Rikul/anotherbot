@@ -220,7 +220,7 @@ async def test_helper_agent_refuses_off_list_tools():
         function=SimpleNamespace(name="save_memory", arguments='{"content": "x"}')
     )
     result = await helper.handle_tool_call(call)
-    assert "not available to the helper agent" in result
+    assert "not available" in result
     assert MemoryStore().count() == 0
 
     call.function = SimpleNamespace(name="search_memory", arguments='{"query": "x"}')

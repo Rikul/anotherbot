@@ -20,6 +20,7 @@ from ..infra.memory_store import MAX_CORE_MEMORIES, MemoryStore, format_memory
 from ..infra.skills import skills_prompt_section
 from ..infra.tracer import Tracer, redact
 from . import runtime
+from .toolsets import AGENT_MODES, AUTO_APPROVE_MODES, DEFAULT_MODE, mode_name
 
 MAX_CONTEXT_MESSAGES = 1000
 
@@ -228,6 +229,8 @@ class Agent(ABC):
     # Agents that store each turn's trajectory (see ``_save_trajectory``)
     # collect per-call stats in ``_llm_calls``; others skip that work.
     saves_trajectories = False
+    # Skip permission prompts (CliAgent: -y or /yolo). Other agents never ask.
+    auto_approve = False
 
     def __init__(self, max_iterations: int = 250) -> None:
         self.client = Client().get_client()
@@ -238,6 +241,36 @@ class Agent(ABC):
         self._llm_calls: list[dict] = []
         # Set once this turn has read untrusted tool output (see _guard_core_save).
         self._untrusted_output_seen = False
+        # The toolsets (toolsets.TOOLSETS) the model is given each turn; the
+        # CLI and bot switch them with /default, /yolo, /readonly, /toolset.
+        self.toolsets: tuple[str, ...] = AGENT_MODES[DEFAULT_MODE]
+        # Names of the tools the model was given this turn; a call to any
+        # other tool is refused. None (no turn yet) allows any tool.
+        self._allowed_tools: set[str] | None = None
+
+    def tool_specs(self) -> list[dict]:
+        """Specs of the tools in this agent's toolsets (MCP ones as connected now)."""
+        # Lazy: tool_calls imports scheduled_tasks, which imports Agent (circular import).
+        from .tool_calls import toolset_specs  # pylint: disable=import-outside-toplevel
+
+        return toolset_specs(*self.toolsets)
+
+    def set_toolsets(self, toolsets: tuple[str, ...]) -> None:
+        """Use these toolsets from the next turn on (ValueError if unknown)."""
+        from .tool_calls import resolve_toolset  # pylint: disable=import-outside-toplevel
+
+        resolve_toolset(*toolsets)
+        self.toolsets = tuple(toolsets)
+
+    def set_mode(self, mode: str) -> None:
+        """Switch to a tool mode (``AGENT_MODES``): its toolsets, and
+        permission prompts off for /yolo, back on for any other mode."""
+        self.set_toolsets(AGENT_MODES[mode])
+        self.auto_approve = mode in AUTO_APPROVE_MODES
+
+    def mode_name(self) -> str:
+        """This agent's mode name, or its toolsets joined by '+'."""
+        return mode_name(self.toolsets, self.auto_approve)
 
     def _trim_messages(self) -> None:
         if len(self.messages) > MAX_CONTEXT_MESSAGES:
@@ -401,6 +434,14 @@ class Agent(ABC):
         from .tool_calls import run_tool_async  # pylint: disable=import-outside-toplevel
 
         tool_name = tool_call.function.name
+        if self._allowed_tools is not None and tool_name not in self._allowed_tools:
+            # The model can name a tool it wasn't given (from earlier turns in
+            # another mode, or made up): never run it.
+            log.warning("Refused tool outside the current toolsets: %s", tool_name)
+            return (
+                f"Tool {tool_name} is not available right now (tools: "
+                f"{self.mode_name()}). Use only the tools you were given."
+            )
         try:
             tool_args = json.loads((tool_call.function.arguments or "").strip() or "{}")
             if not await self._check_permission(tool_name, tool_args):
@@ -533,6 +574,7 @@ class Agent(ABC):
 
     async def _loop(self, messages: list, tool_specs: list) -> str:
         self._untrusted_output_seen = False  # a new turn starts clean
+        self._allowed_tools = {spec["function"]["name"] for spec in tool_specs}
         try:
             return await self._run_loop(messages, tool_specs)
         except BaseException as e:

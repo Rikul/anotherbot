@@ -14,6 +14,7 @@ from typing import Any, Callable, Awaitable, Protocol, TYPE_CHECKING
 from .. import config
 from ..core import mcp_manager as mcp
 from ..core import runtime
+from ..core.toolsets import AGENT_MODES, AUTO_APPROVE_MODES, TOOLSETS
 from ..infra import skills, tracer
 from .channel import ChannelType
 
@@ -27,6 +28,20 @@ class ConversationAgent(Protocol):  # pylint: disable=too-few-public-methods
     store: Any  # ConversationStore
     channel_str: str
     conversation_id: int
+    toolsets: tuple[str, ...]
+    auto_approve: bool
+
+    def set_toolsets(self, toolsets: tuple[str, ...]) -> None:
+        """Give the model these toolsets from the next turn on."""
+
+    def set_mode(self, mode: str) -> None:
+        """Switch to a tool mode (toolsets and permission prompts)."""
+
+    def mode_name(self) -> str:
+        """The agent's mode name, or its toolsets joined by '+'."""
+
+    def tool_specs(self) -> list[dict]:
+        """Specs of the tools in the agent's current toolsets."""
 
     def switch_conversation(self, conv: dict) -> None:
         """Make ``conv`` the active conversation and load its messages."""
@@ -128,12 +143,13 @@ async def trace_cmd(args: str = "") -> str:
     return f"Tracing is {'on' if state else 'off'}. Dir: {tracedir}"
 
 
-def make_status_cmd(channel_str: str = "") -> CommandHandler:
-    """Build ``/status``: model, uptime, active conversation and tracing state.
+def make_status_cmd(channel_str: str = "", agent=None) -> CommandHandler:
+    """Build ``/status``: model, uptime, active conversation, tools and tracing.
 
     Args:
         channel_str: channel whose active conversation to show; empty uses the
             CLI's un-namespaced runtime keys.
+        agent: the agent whose tool mode to show (omitted: no Tools line).
     """
 
     async def _status(_args: str = "") -> str:
@@ -154,11 +170,15 @@ def make_status_cmd(channel_str: str = "") -> CommandHandler:
             if (tracing and last_trace)
             else ("on" if tracing else "off")
         )
+        tools_line = (
+            f"  Tools:        {agent.mode_name()}\n" if agent is not None else ""
+        )
         return (
             f"Bot status:\n"
             f"  Model:        {model}\n"
             f"  Uptime:       {hours}h {minutes}m {seconds}s\n"
             f"  Conversation: [{conv_id}] {conv_name}\n"
+            f"{tools_line}"
             f"  Tracing:      {trace_line}"
         )
 
@@ -167,6 +187,53 @@ def make_status_cmd(channel_str: str = "") -> CommandHandler:
 
 # Backward-compatible alias used by existing tests and CLI
 status_cmd = make_status_cmd()
+
+
+# --- Tool modes ---
+
+
+def _tools_reply(agent: ConversationAgent) -> str:
+    count = len(agent.tool_specs())
+    prompts = ", no permission prompts" if agent.auto_approve else ""
+    return (
+        f"Tools: {agent.mode_name()} ({count} tools{prompts}), from the next message."
+    )
+
+
+def tool_mode_cmd(agent: ConversationAgent, mode: str) -> CommandHandler:
+    """Build ``/default``, ``/yolo`` or ``/readonly``: switch to that mode."""
+
+    async def _mode(_args: str = "") -> str:
+        agent.set_mode(mode)
+        return _tools_reply(agent)
+
+    return _mode
+
+
+def toolset_cmd(agent: ConversationAgent) -> CommandHandler:
+    """Build ``/toolset [name …]``: show the toolsets, or use the named ones."""
+
+    async def _toolset(args: str = "") -> str:
+        names = tuple(n for n in args.replace(",", " ").split() if n)
+        if not names:
+            lines = [f"Current: {agent.mode_name()}", "Modes:"]
+            lines += [
+                f"  /{m} — {' + '.join(sets)}"
+                + (", no permission prompts" if m in AUTO_APPROVE_MODES else "")
+                for m, sets in AGENT_MODES.items()
+            ]
+            lines.append("Toolsets (/toolset <name> [name …]):")
+            lines += [
+                f"  {n} — {', '.join(members)}" for n, members in TOOLSETS.items()
+            ]
+            return "\n".join(lines)
+        try:
+            agent.set_toolsets(names)
+        except ValueError as e:
+            return f"{e}. See /toolset for the list."
+        return _tools_reply(agent)
+
+    return _toolset
 
 
 # --- Conversation management commands ---
@@ -384,7 +451,29 @@ def build_command_registry(
     for cmd in (
         BotCommand("model", "Get or set model. Usage: /model [name]", model_cmd),
         BotCommand("trace", "Toggle LLM tracing. Usage: /trace [on|off]", trace_cmd),
-        BotCommand("status", "Show bot status.", make_status_cmd(status_channel)),
+        BotCommand(
+            "status", "Show bot status.", make_status_cmd(status_channel, agent)
+        ),
+        BotCommand(
+            "default",
+            "Every tool, asking before running one (the default).",
+            tool_mode_cmd(agent, "default"),
+        ),
+        BotCommand(
+            "yolo",
+            "Every tool, no permission prompts (like -y).",
+            tool_mode_cmd(agent, "yolo"),
+        ),
+        BotCommand(
+            "readonly",
+            "Read-only tools: files, git, todos; no writes, shell, web or MCP; asks again.",
+            tool_mode_cmd(agent, "readonly"),
+        ),
+        BotCommand(
+            "toolset",
+            "Show or pick toolsets. Usage: /toolset [name …]",
+            toolset_cmd(agent),
+        ),
         *extra,
         BotCommand(
             "list",

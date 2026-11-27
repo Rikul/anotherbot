@@ -65,6 +65,7 @@ from rich.text import Text
 
 from .. import config
 from ..channels.commands import CommandRegistry, build_command_registry
+from ..core.toolsets import DEFAULT_MODE, mode_name
 from ..channels.commands import skill_completions
 from ..core import runtime, tool_calls
 from ..infra import skills
@@ -411,6 +412,10 @@ class Tui:  # pylint: disable=too-many-instance-attributes,too-many-public-metho
             f"#{conv_id} {_h(one_line(conv_name, 40))}",
             approve,
         ]
+        # Prompts are shown by `approve`; this names the tools when not all.
+        tools = mode_name(self.agent.toolsets)
+        if tools != DEFAULT_MODE:
+            parts.append(f"<toolbar.ok>tools: {_h(tools)}</toolbar.ok>")
         if toks:
             parts.append(f"{format_tokens(toks)} tok")
         if not self.render_markdown:

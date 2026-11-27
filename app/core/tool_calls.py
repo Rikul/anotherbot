@@ -41,6 +41,7 @@ from ..tools.helper_agent import HelperAgentTool
 from ..tools.memory import SaveMemoryTool, SearchMemoryTool, DeleteMemoryTool
 from . import mcp_manager as mcp
 from .tool import MAX_TOOL_RESULT_LENGTH
+from .toolsets import TOOLSETS
 
 tool_registry = {
     "read_file": ReadFileTool,
@@ -79,36 +80,62 @@ tool_registry = {
 }
 
 all_tool_specs = [tool.spec() for tool in tool_registry.values()]
-_HELPER_AGENT_TOOLS = {
-    "read_file",
-    "write_file",
-    "bash",
-    "list_dir",
-    "glob",
-    "grep",
-    "git_status",
-    "git_diff",
-    "git_log",
-    "web_fetch",
-    "use_skill",
-    "calculator",
-    "hackernews",
-    "websearch_text",
-    "websearch_images",
-    "websearch_videos",
-    "websearch_news",
-    "websearch_books",
-    "get_city_state",
-    "get_datetime",
-    "list_scheduled_tasks",
-    "get_scheduled_task_output",
-    # Read-only: scheduled tasks can use memories but not change them.
-    "search_memory",
-}
 
-helper_tool_specs = [
-    tool.spec() for k, tool in tool_registry.items() if k in _HELPER_AGENT_TOOLS
-]
+MCP_PREFIX = "mcp:"
+
+
+def resolve_toolset(*names: str) -> tuple[frozenset[str], tuple[str, ...]]:
+    """Expand toolsets into (built-in tool names, MCP server names).
+
+    Each name is a toolset from ``TOOLSETS``. Raises ``ValueError`` for an
+    unknown toolset or tool, or a toolset that includes itself. The MCP
+    server ``"*"`` stands for every connected server.
+    """
+    tools: set[str] = set()
+    servers: list[str] = []
+
+    def expand(name: str, path: tuple[str, ...]) -> None:
+        if name in path:
+            raise ValueError(f"Toolset cycle: {' -> '.join((*path, name))}")
+        if name not in TOOLSETS:
+            raise ValueError(f"Unknown toolset: {name}")
+        for member in TOOLSETS[name]:
+            if member.startswith("@"):
+                expand(member[1:], (*path, name))
+            elif member == "*":
+                tools.update(tool_registry)
+            elif member.startswith(MCP_PREFIX):
+                server = member[len(MCP_PREFIX) :]
+                if server not in servers:
+                    servers.append(server)
+            elif member in tool_registry:
+                tools.add(member)
+            else:
+                raise ValueError(f"Toolset {name}: unknown tool {member}")
+
+    for name in names:
+        expand(name, ())
+    return frozenset(tools), tuple(servers)
+
+
+def toolset_specs(*names: str) -> list[dict]:
+    """Tool specs for the given toolsets: built-ins in registry order, then
+    the tools of any MCP servers they name (those connected right now)."""
+    tools, servers = resolve_toolset(*names)
+    specs = [tool.spec() for k, tool in tool_registry.items() if k in tools]
+    if "*" in servers:
+        return specs + mcp.mcp_manager.get_tool_specs()
+    for server in servers:
+        specs.extend(mcp.mcp_manager.get_tools_for_server(server))
+    return specs
+
+
+# Check every toolset at import, so a typo fails at startup, not mid-turn.
+for _name in TOOLSETS:
+    resolve_toolset(_name)
+
+_HELPER_AGENT_TOOLS = resolve_toolset("helper")[0]
+helper_tool_specs = toolset_specs("helper")
 
 
 def is_read_only(tool_name: str) -> bool:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 
-from .tool_calls import get_all_tool_specs
 from ..infra.app_logging import log
 from ..channels.channel import Channel
 from ..channels.message import IncomingMessage, OutgoingMessage
@@ -253,7 +252,7 @@ class BackgroundAgent(Agent):
         if self.tracer.enabled() and self.tracer.path:
             runtime.set("last_trace", self.tracer.path.name)
 
-        final_content = await self._loop(session_messages, get_all_tool_specs())
+        final_content = await self._loop(session_messages, self.tool_specs())
 
         self.channel.clear_stopped()
 
